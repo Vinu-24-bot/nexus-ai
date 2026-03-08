@@ -1,0 +1,100 @@
+import { EvaluationResult } from "@/types/evaluation";
+
+export const mockResults: EvaluationResult[] = [
+  {
+    id: "eval-001",
+    candidateName: "Alex Chen",
+    position: "Senior Full-Stack Engineer",
+    date: "2026-03-07",
+    candidate_overview: "Alex demonstrates strong full-stack capabilities with deep expertise in React and Node.js ecosystems. Their system design knowledge is solid, though microservices experience could be deeper.",
+    scores: {
+      technical_proficiency: 82,
+      relevance_to_jd: 88,
+      communication: 91,
+      confidence_level: 85,
+      overall_score: 87,
+    },
+    sentiment: { rating: "Positive", explanation: "Alex maintained a confident and enthusiastic tone throughout the interview." },
+    candidate_status: { level: "Strong Confidence", description: "Displays deep understanding of core technologies with clear articulation." },
+    selection_status: "pending",
+    strengths: [
+      "Exceptional React architecture knowledge with hooks and state management",
+      "Clear and structured communication style with good use of examples",
+      "Strong understanding of CI/CD pipelines and DevOps practices",
+    ],
+    red_flags_or_weaknesses: [
+      "Limited experience with distributed systems at scale",
+      "Could not articulate database sharding strategies clearly",
+    ],
+    dynamic_follow_up_questions: [
+      "Describe a scenario where you had to optimize a database query that was causing a bottleneck in production.",
+      "How would you design a real-time notification system for 10M users?",
+    ],
+    hiring_recommendation: "Strong Hire",
+    justification: "Alex shows excellent technical breadth and communication skills that align well with the Senior Full-Stack Engineer role.",
+  },
+  {
+    id: "eval-002",
+    candidateName: "Sarah Miller",
+    position: "Backend Engineer",
+    date: "2026-03-06",
+    candidate_overview: "Sarah has solid backend fundamentals but lacks depth in the specific technologies required.",
+    scores: {
+      technical_proficiency: 61,
+      relevance_to_jd: 54,
+      communication: 72,
+      confidence_level: 55,
+      overall_score: 62,
+    },
+    sentiment: { rating: "Neutral", explanation: "Sarah was measured in her responses, showing caution when uncertain." },
+    candidate_status: { level: "Moderate Confidence", description: "Good fundamentals but needs growth in core areas." },
+    selection_status: "rejected",
+    strengths: [
+      "Good understanding of RESTful API design principles",
+      "Methodical approach to debugging and problem-solving",
+      "Honest about knowledge gaps and willing to learn",
+    ],
+    red_flags_or_weaknesses: [
+      "No production experience with the required cloud platform (AWS)",
+      "Struggled with concurrency and threading questions",
+    ],
+    dynamic_follow_up_questions: [
+      "Walk me through how you would implement rate limiting in a high-traffic API.",
+      "Explain the trade-offs between SQL and NoSQL databases for our use case.",
+    ],
+    hiring_recommendation: "Reject",
+    justification: "While Sarah shows potential, her lack of experience with core technologies indicates she would need significant ramp-up time.",
+  },
+  {
+    id: "eval-003",
+    candidateName: "James Park",
+    position: "ML Engineering Lead",
+    date: "2026-03-05",
+    candidate_overview: "James is a competent ML practitioner with good theoretical knowledge. He shows leadership potential.",
+    scores: {
+      technical_proficiency: 75,
+      relevance_to_jd: 70,
+      communication: 68,
+      confidence_level: 72,
+      overall_score: 71,
+    },
+    sentiment: { rating: "Positive", explanation: "James showed enthusiasm and deep interest in ML topics." },
+    candidate_status: { level: "Moderate Confidence", description: "Technically capable but limited leadership experience." },
+    selection_status: "selected",
+    strengths: [
+      "Strong theoretical foundation in machine learning algorithms",
+      "Experience deploying models to production environments",
+      "Good understanding of MLOps and model monitoring",
+    ],
+    red_flags_or_weaknesses: [
+      "Communication could be more concise - tends to over-explain",
+      "Limited experience leading teams larger than 3 people",
+    ],
+    dynamic_follow_up_questions: [
+      "How would you handle a situation where your model's performance degrades after deployment?",
+      "Describe your approach to mentoring junior ML engineers.",
+    ],
+    hiring_recommendation: "Lean Hire",
+    justification: "James has the technical skills needed for the ML Engineering Lead role, but his limited leadership experience is a concern.",
+  },
+];
