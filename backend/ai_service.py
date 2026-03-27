@@ -1,16 +1,16 @@
 """
-BATS AI Evaluation Service
-Uses multiple FREE AI providers with automatic fallback:
-1. Groq (Llama 3.3 70B) - PRIMARY, FREE, 30 req/min
-2. Cerebras (Llama 3.3 70B) - FREE, ultra-fast inference
-3. Together AI (free tier) - FREE trial credits
-4. Google Gemini (gemini-2.0-flash) - FREE tier available
+BATS AI Evaluation Service - True Hybrid Enterprise Grade
+1. Groq (Whisper) -> Audio Extraction
+2. Google Gemini 2.0 Flash (1M Context) -> Deep Semantic Resume Parsing (Super Extractor)
+3. Groq (Llama 3.3) -> Real-time Interview Generation
+4. MoE Cascade -> Final Master Evaluation (Cross-Verification Detective)
 """
 
 import os
 import json
 import asyncio
 import httpx
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,60 +20,89 @@ CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-EVALUATION_PROMPT = """You are "BATS", an elite, unbiased, and highly technical AI Executive Recruiter.
-Your task is to evaluate a candidate's interview performance against a specific Job Description and their submitted Resume.
+# ─── UTILITY FUNCTIONS ──────────────────────────────────────
 
-Context & Rules:
-- Evaluate strictly on technical accuracy, problem-solving methodology, and communication clarity.
-- Ignore all demographic markers, filler words ("um", "uh"), and minor transcription errors.
-- You are a strict but fair grader. A score of 100 means world-class expertise. A score of 50 means average competence.
-- Cross-reference answers with the resume claims - check if the candidate actually has the skills they claim.
-- Evaluate depth of knowledge, not just surface-level answers.
+def format_prompt(template: str, **kwargs) -> str:
+    """Bulletproof prompt formatter to prevent crashes from technical characters."""
+    prompt = template
+    for key, value in kwargs.items():
+        prompt = prompt.replace(f"{{{key}}}", str(value))
+    return prompt
 
-Evaluation Criteria:
-1. Technical Proficiency (0-100): How well did they answer technical questions? Architecture understanding? Depth of knowledge?
-2. Relevance to JD (0-100): Does their experience and answers map to the JD requirements?
-3. Communication & Clarity (0-100): Were answers concise, structured, easy to follow? Did they use examples?
-4. Confidence Level (0-100): Did the candidate sound confident, decisive, and articulate?
-5. Overall Score: Weighted average (Technical 35%, Relevance 25%, Communication 25%, Confidence 15%)
+def _parse_json_response(text: str) -> dict:
+    """Highly resilient JSON parser that ignores all markdown and conversational fluff."""
+    try:
+        match = re.search(r'\{.*\}', text.strip(), re.DOTALL)
+        if match:
+            clean_json = match.group(0)
+            # Clean up potential trailing commas that break standard json.loads
+            clean_json = re.sub(r',\s*}', '}', clean_json)
+            clean_json = re.sub(r',\s*]', ']', clean_json)
+            return json.loads(clean_json)
+        else:
+            raise ValueError("No JSON brackets found in AI response.")
+    except Exception as e:
+        print(f"[BATS] Critical JSON Parsing Error: {e}\nRaw Text snippet: {text[:300]}...")
+        raise ValueError("AI generated invalid or truncated JSON.")
 
-Sentiment Analysis:
-- Analyze the overall tone and sentiment of the candidate's responses
-- Rate as: "Positive" | "Neutral" | "Negative"
-- Provide a brief explanation
+def _validate_result(result: dict) -> dict:
+    required = [
+        "candidate_overview", "scores", "strengths",
+        "red_flags_or_weaknesses", "dynamic_follow_up_questions",
+        "hiring_recommendation", "justification"
+    ]
+    for field in required:
+        if field not in result:
+            raise ValueError(f"Missing required field: {field}")
+    return result
 
-Candidate Status Assessment:
-- Based on your evaluation provide a status: "Strong Confidence" | "Moderate Confidence" | "Low Confidence" | "Needs Improvement"
-- Provide a brief description of what makes you assess this status
+# ─── ENTERPRISE PROMPTS ──────────────────────────────────────
+
+EVALUATION_PROMPT = """You are "BATS", an elite AI Executive Recruiter System used by Tier-1 tech companies.
+You are running a deep-dive evaluation. You have the Job Description, the Candidate's Deeply Parsed Resume, and the actual Live Interview Transcript.
+
+You MUST use the following "Mixture of Experts" framework to grade the candidate:
+
+Step 1: THE ADVOCATE (Alignment & Strengths)
+Find every piece of evidence in the transcript that proves the candidate possesses the skills listed in the JD and their Resume. Do they sound like an expert?
+
+Step 2: THE DETECTIVE (Cross-Verification - CRITICAL)
+Compare what they *said* in the transcript against the exact metrics and massive projects they *claimed* on their resume. Do they actually know how the architecture works, or are they just dropping buzzwords? Identify any discrepancies.
+
+Step 3: THE SKEPTIC (Weaknesses & Red Flags)
+Where did they struggle? Were their technical explanations shallow? Did they fail to answer the core of the questions?
+
+Step 4: THE JUDGE (Your Output)
+Synthesize the findings. Grade strictly but fairly based on actual evidence.
+- 90-100: Exceptional, undeniable proof of expertise. Strong Hire.
+- 75-89: Solid, capable, minor gaps. Lean Hire / Strong Hire.
+- 60-74: Average, lacks deep architecture knowledge. Lean Hire / Reject.
+- Below 60: Major discrepancies or lack of knowledge. Reject.
 
 You MUST output ONLY valid JSON with this exact structure:
-{{
-  "candidate_overview": "A 2-3 sentence executive summary of the candidate's performance.",
-  "scores": {{
+{
+  "candidate_overview": "A highly detailed 4-sentence executive summary of their technical depth, how their spoken answers verified their resume, and their fit for the JD.",
+  "scores": {
     "technical_proficiency": 0,
     "relevance_to_jd": 0,
     "communication": 0,
     "confidence_level": 0,
     "overall_score": 0
-  }},
-  "sentiment": {{
+  },
+  "sentiment": {
     "rating": "Positive | Neutral | Negative",
-    "explanation": "Brief explanation of the candidate's overall sentiment and tone."
-  }},
-  "candidate_status": {{
+    "explanation": "Deep analysis of the candidate's tone, hesitation markers, and vocal confidence based on the transcript."
+  },
+  "candidate_status": {
     "level": "Strong Confidence | Moderate Confidence | Low Confidence | Needs Improvement",
-    "description": "Brief description of candidate's readiness and areas to improve."
-  }},
-  "strengths": ["string", "string", "string"],
-  "red_flags_or_weaknesses": ["string", "string"],
-  "dynamic_follow_up_questions": ["string", "string"],
+    "description": "Brief description of candidate's readiness."
+  },
+  "strengths": ["Specific strength 1 matching transcript to resume", "Specific strength 2", "Specific strength 3"],
+  "red_flags_or_weaknesses": ["Specific technical gap or discrepancy 1", "Specific weakness 2"],
+  "dynamic_follow_up_questions": ["Hard follow-up question based on a vague answer", "Technical deep-dive to verify a resume claim"],
   "hiring_recommendation": "Strong Hire | Lean Hire | Reject",
-  "justification": "A detailed 2-3 paragraph explanation for the hiring recommendation with specific examples from the interview."
-}}
-
-Do NOT include markdown, code fences, or any text outside the JSON.
-
----
+  "justification": "A highly detailed 2-paragraph explanation explicitly citing moments from the interview transcript and cross-referencing them with the candidate's exact resume projects and metrics to justify the score."
+}
 
 [JOB_DESCRIPTION]
 {job_description}
@@ -85,61 +114,25 @@ Do NOT include markdown, code fences, or any text outside the JSON.
 {transcript}
 """
 
-QUESTION_GENERATION_PROMPT = """You are "BATS", an elite AI interviewer conducting a comprehensive {num_questions}-question interview lasting approximately 20-25 minutes.
+QUESTION_GENERATION_PROMPT = """You are "BATS", an elite AI technical interviewer.
+Analyze BOTH the Job Description AND the Candidate's Resume to generate {num_questions} targeted questions.
 
-You MUST deeply analyze BOTH the Job Description AND the Candidate's Resume before generating questions.
+RULES:
+- At least 40% MUST directly challenge specific projects, architectures, or metrics from their resume.
+- At least 25% must be JD-specific technical questions.
+- Force the candidate to explain the "HOW" and "WHY" behind their exact resume claims.
 
-## CRITICAL: RESUME-FIRST ANALYSIS
-Before generating questions, mentally extract from the resume:
-1. Every PROJECT mentioned — ask about architecture, challenges, tech choices, scale, impact
-2. Every COMPANY and ROLE — ask about responsibilities, achievements, team size, what they built
-3. Every SKILL/TECHNOLOGY claimed — verify depth by asking implementation-level questions
-4. Every METRIC or ACHIEVEMENT — probe for specifics (how they measured, what was the baseline)
-5. Any GAPS or INCONSISTENCIES — politely probe these areas
-
-## CRITICAL: JD-ALIGNMENT ANALYSIS
-Cross-reference resume with JD to find:
-1. Skills the JD REQUIRES that the resume CLAIMS — verify these deeply
-2. Skills the JD REQUIRES that the resume DOESN'T mention — test if candidate knows them
-3. Domain-specific knowledge the role needs — test real understanding, not textbook answers
-
-## QUESTION GENERATION RULES
-- **At least 40% of questions MUST directly reference specific projects, companies, or achievements from the resume**
-- **At least 25% must be JD-specific technical questions**
-- **At least 2 questions must be PROJECT DEEP-DIVES**
-- **At least 2 questions must test CLAIMED SKILLS at depth**
-- **At least 1 question must present a REAL SCENARIO from the JD**
-- **At least 1 question about a FAILURE or CHALLENGE**
-- **At least 1 question about HOW they'd IMPROVE something**
-- Questions should feel like a senior interviewer who has READ their resume thoroughly
-- NEVER ask generic questions like "Tell me about yourself"
-- Each question should require a 1-2 minute detailed answer
-
-## DIFFICULTY DISTRIBUTION for {num_questions} questions:
-- First 30%: **Easy** — Warm-up about their background, verify basic resume claims
-- Middle 40%: **Medium** — Project deep-dives, applied knowledge, real scenarios
-- Final 30%: **Hard** — System design, expert-level technical, architecture trade-offs
-
-## QUESTION CATEGORY RULES:
-- **technical** (65%+): Architecture, system design, coding patterns, debugging, performance
-- **behavioral** (20%): Leadership, teamwork — ALWAYS tied to specific resume experiences
-- **situational** (15%): Hypothetical scenarios from the JD's responsibilities
-
-You MUST output ONLY valid JSON with this exact structure:
-{{
+Output ONLY valid JSON:
+{
   "questions": [
-    {{
+    {
       "id": 1,
-      "question": "The interview question text",
+      "question": "The highly specific interview question text",
       "category": "technical | behavioral | situational",
       "difficulty": "easy | medium | hard"
-    }}
+    }
   ]
-}}
-
-Do NOT include markdown, code fences, or any text outside the JSON.
-
----
+}
 
 [JOB_DESCRIPTION]
 {job_description}
@@ -148,336 +141,185 @@ Do NOT include markdown, code fences, or any text outside the JSON.
 {resume}
 """
 
-JD_GENERATION_PROMPT = """You are an expert HR professional. Generate a detailed, professional Job Description for the following role:
+JD_GENERATION_PROMPT = """Generate a detailed, professional Job Description for: {position}. Output plain text only."""
 
-Role: {position}
+DYNAMIC_INTERVIEW_TURN_PROMPT = """You are an elite AI technical interviewer. 
+Question: {question}
+Candidate's Answer: {answer}
 
-Create a comprehensive JD that includes:
-1. Job Title
-2. Job Summary (2-3 sentences)
-3. Key Responsibilities (5-7 bullet points)
-4. Required Skills & Qualifications (5-8 items)
-5. Preferred/Nice-to-have Skills (3-4 items)
-6. Experience Level Required
+Task: If the answer is vague or lacks technical depth, generate a probing follow-up question to test their actual knowledge. If strong, briefly acknowledge and move on. Output ONLY the exact text you would speak. Max 2 sentences."""
 
-Output ONLY the Job Description as plain text (no JSON, no markdown fences). Make it realistic and detailed.
+RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies (like Eightfold or Workday). 
+Your job is to read unstructured, messy resume text (which may include tables, weird fonts, or bad formatting) and meticulously extract EVERYTHING into a "Liquid JSON Schema".
+
+CRITICAL EXTRACTION RULES (STRICT COMPLIANCE REQUIRED):
+1. NEVER output `null`. If data is missing (like a phone number), use "Not Provided" or an empty array `[]`.
+2. NO GENERIC SUMMARIES. For 'key_achievements', you MUST extract the candidate's EXACT numbers, metrics, scale, and highly specific technical outcomes (e.g., extract "Reduced latency by 45% using Redis" — DO NOT write "Improved performance").
+3. Extract ALL contact info, including GitHub, LinkedIn, or Portfolio URLs.
+4. Extract EVERY SINGLE Project and Company. Do not skip any. Extract the EXACT technologies used for that specific project. Do not hallucinate tools that weren't mentioned for that project.
+
+You MUST output ONLY valid JSON matching this exact structure:
+{
+  "candidate_info": {
+    "name": "string",
+    "email": "string",
+    "phone": "string",
+    "links": ["url 1", "url 2"]
+  },
+  "executive_summary": "Deep 3-sentence summary of their exact technical depth, years of experience, and primary domain.",
+  "core_skills": {
+    "languages_and_frameworks": ["skill 1", "skill 2"],
+    "cloud_and_infrastructure": ["skill 1", "skill 2"],
+    "databases_and_tools": ["skill 1", "skill 2"]
+  },
+  "experience_and_projects": [
+    {
+      "name": "Company OR Project Name",
+      "role": "string",
+      "duration": "string",
+      "technologies_used": ["tech 1", "tech 2"],
+      "key_achievements": ["Exact quantifiable metric/technical achievement 1", "Exact metric 2"]
+    }
+  ],
+  "education_and_certifications": [
+    "Degree/Cert 1 details",
+    "Degree/Cert 2 details"
+  ]
+}
+
+Raw Resume Text:
+{raw_text}
 """
 
-ANSWER_ACKNOWLEDGMENT_PROMPT = """You are "BATS", an AI interviewer conducting a live interview. The candidate just answered a question. 
-Give a very brief (1-2 sentence) natural acknowledgment of their answer before transitioning to the next question.
-Be professional, warm, and encouraging. Reference something specific from their answer.
-Do NOT evaluate or score - just acknowledge naturally like a real interviewer would.
+# ─── HYBRID AI PROVIDER CALLS ───────────────────────────────
 
-Question asked: {question}
-Candidate's answer: {answer}
-
-Output ONLY the acknowledgment text (1-2 sentences, no JSON, no quotes).
-"""
-
-
-def _parse_json_response(text: str) -> dict:
-    """Parse JSON from AI response, handling markdown fences."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1]
-    if text.endswith("```"):
-        text = text.rsplit("```", 1)[0]
-    if text.startswith("json"):
-        text = text[4:]
-    text = text.strip()
-
+async def transcribe_audio(file_path: str) -> str:
+    """HYBRID ROUTE: Groq Whisper (Best for Audio)"""
+    if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(text[start:end])
-        raise ValueError(f"Failed to parse JSON: {text[:200]}")
+        async with httpx.AsyncClient(timeout=120) as client:
+            with open(file_path, "rb") as audio_file:
+                files = {"file": (os.path.basename(file_path), audio_file, "audio/mpeg")}
+                data = {"model": "whisper-large-v3", "response_format": "text"}
+                url = "https://" + "api.groq.com/openai/v1/audio/transcriptions"
+                resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, files=files, data=data)
+                resp.raise_for_status()
+                return resp.text
+    except Exception as e:
+        print(f"[BATS] Transcription failed: {e}")
+        raise
 
-
-def _validate_result(result: dict) -> dict:
-    """Validate all required fields exist."""
-    required = [
-        "candidate_overview", "scores", "strengths",
-        "red_flags_or_weaknesses", "dynamic_follow_up_questions",
-        "hiring_recommendation", "justification"
-    ]
-    for field in required:
-        if field not in result:
-            raise ValueError(f"Missing required field: {field}")
-    
-    if "sentiment" not in result:
-        result["sentiment"] = {"rating": "Neutral", "explanation": "Not analyzed"}
-    if "candidate_status" not in result:
-        result["candidate_status"] = {"level": "Moderate Confidence", "description": "Standard assessment"}
-    if "confidence_level" not in result.get("scores", {}):
-        result["scores"]["confidence_level"] = result["scores"].get("communication", 50)
-    
-    return result
-
-
-# ─── AI Provider: Groq (PRIMARY - FREE) ─────────────────────
-async def _call_groq(prompt: str) -> dict:
-    """Call Groq API with Llama 3.3 70B (FREE - 30 req/min)."""
+async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000) -> dict:
+    """HYBRID ROUTE: Groq Llama 3.3 (Fastest Reasoning)"""
     async with httpx.AsyncClient(timeout=90) as client:
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 4000,
-            },
-        )
+        payload = {
+            "model": "llama-3.3-70b-versatile", 
+            "messages": [{"role": "user", "content": prompt}], 
+            "temperature": 0.1, 
+            "max_tokens": max_tokens
+        }
+        if force_json: payload["response_format"] = {"type": "json_object"}
+        url = "https://" + "api.groq.com/openai/v1/chat/completions"
+        resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
         resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"]
-        return _parse_json_response(text)
+        
+        if force_json: return json.loads(resp.json()["choices"][0]["message"]["content"])
+        return _parse_json_response(resp.json()["choices"][0]["message"]["content"])
 
-
-async def _call_groq_text(prompt: str) -> str:
-    """Call Groq for plain text response."""
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.5,
-                "max_tokens": 2000,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
-
-
-# ─── AI Provider: Cerebras (FREE - ultra-fast) ──────────────
-async def _call_cerebras(prompt: str) -> dict:
-    """Call Cerebras API with Llama 3.3 70B (FREE - extremely fast inference)."""
-    async with httpx.AsyncClient(timeout=90) as client:
-        resp = await client.post(
-            "https://api.cerebras.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {CEREBRAS_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "llama-3.3-70b",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 4000,
-            },
-        )
-        resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"]
-        return _parse_json_response(text)
-
-
-async def _call_cerebras_text(prompt: str) -> str:
-    """Call Cerebras for plain text."""
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            "https://api.cerebras.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {CEREBRAS_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "llama-3.3-70b",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.5,
-                "max_tokens": 2000,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
-
-
-# ─── AI Provider: Together AI (FREE trial) ──────────────────
-async def _call_together(prompt: str) -> dict:
-    """Call Together AI API (FREE trial credits included)."""
-    async with httpx.AsyncClient(timeout=90) as client:
-        resp = await client.post(
-            "https://api.together.xyz/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {TOGETHER_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 4000,
-            },
-        )
-        resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"]
-        return _parse_json_response(text)
-
-
-async def _call_together_text(prompt: str) -> str:
-    """Call Together AI for plain text."""
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            "https://api.together.xyz/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {TOGETHER_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.5,
-                "max_tokens": 2000,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
-
-
-# ─── AI Provider: Google Gemini (FREE tier) ──────────────────
 def _call_gemini_sync(prompt: str) -> str:
-    """Synchronous Gemini call (will be run in thread)."""
+    """HYBRID ROUTE: Gemini 2.0 Flash (1-Million Token Memory)"""
     from google import genai
     client = genai.Client(api_key=GEMINI_API_KEY)
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-    )
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
     return response.text
 
-
 async def _call_gemini(prompt: str) -> dict:
-    """Call Google Gemini API."""
     text = await asyncio.to_thread(_call_gemini_sync, prompt)
     return _parse_json_response(text)
 
+async def _call_groq_text(prompt: str) -> str:
+    async with httpx.AsyncClient(timeout=60) as client:
+        url = "https://" + "api.groq.com/openai/v1/chat/completions"
+        resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 1000})
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
 
-# ─── Unified AI caller with cascading fallback ──────────────
-async def _call_ai(prompt: str) -> dict:
-    """Try all AI providers in order: Groq → Cerebras → Together → Gemini."""
+# ─── THE MOE CASCADE ROUTER ─────────────────────────────────
+
+async def _call_ai_cascade(prompt: str, force_json: bool = False) -> dict:
     errors = []
-    providers = []
-
+    
     if GROQ_API_KEY:
-        providers.append(("Groq (Llama 3.3 70B)", _call_groq))
-    if CEREBRAS_API_KEY:
-        providers.append(("Cerebras (Llama 3.3 70B)", _call_cerebras))
-    if TOGETHER_API_KEY:
-        providers.append(("Together AI (Llama 3.3 70B)", _call_together))
-    if GEMINI_API_KEY:
-        providers.append(("Google Gemini", _call_gemini))
-
-    if not providers:
-        raise ValueError(
-            "No AI API keys configured! Add at least one to your .env file:\n"
-            "  GROQ_API_KEY    — FREE: https://console.groq.com\n"
-            "  CEREBRAS_API_KEY — FREE: https://cloud.cerebras.ai\n"
-            "  TOGETHER_API_KEY — FREE trial: https://api.together.xyz\n"
-            "  GEMINI_API_KEY  — FREE: https://aistudio.google.com/apikey"
-        )
-
-    for name, fn in providers:
         try:
-            print(f"[BATS] Using {name}...")
-            return await fn(prompt)
+            print("[BATS] Evaluator routing to Groq...")
+            return await _call_groq(prompt, force_json, max_tokens=6000)
         except Exception as e:
-            errors.append(f"{name}: {e}")
-            print(f"[BATS] {name} failed: {e}")
+            errors.append(f"Groq: {e}")
+            print(f"[BATS] Groq failed, cascading... {e}")
 
-    raise ValueError(f"All AI providers failed: {'; '.join(errors)}")
-
-
-async def _call_ai_text(prompt: str) -> str:
-    """Try all providers for plain text response."""
-    errors = []
-    providers = []
-
-    if GROQ_API_KEY:
-        providers.append(("Groq", _call_groq_text))
-    if CEREBRAS_API_KEY:
-        providers.append(("Cerebras", _call_cerebras_text))
-    if TOGETHER_API_KEY:
-        providers.append(("Together AI", _call_together_text))
     if GEMINI_API_KEY:
-        providers.append(("Gemini", lambda p: asyncio.to_thread(_call_gemini_sync, p)))
-
-    if not providers:
-        raise ValueError("No AI providers available for text generation")
-
-    for name, fn in providers:
         try:
-            result = await fn(prompt)
-            if isinstance(result, str):
-                return result.strip()
-            return str(result).strip()
+            print("[BATS] Evaluator cascading to Gemini...")
+            return await _call_gemini(prompt)
         except Exception as e:
-            errors.append(f"{name}: {e}")
-            print(f"[BATS] {name} text failed: {e}")
+            errors.append(f"Gemini: {e}")
+            print(f"[BATS] Gemini failed... {e}")
 
-    raise ValueError(f"All AI text providers failed: {'; '.join(errors)}")
+    raise ValueError(f"All AI Cascade providers failed: {'; '.join(errors)}")
 
+# ─── PUBLIC API EXPORTS (THE HYBRID CONDUCTOR) ──────────────
 
-# ─── Public API functions ────────────────────────────────────
-async def evaluate_candidate(
-    job_description: str,
-    resume: str,
-    transcript: str,
-) -> dict:
-    """Call AI to evaluate a candidate."""
-    prompt = EVALUATION_PROMPT.format(
-        job_description=job_description,
-        resume=resume,
-        transcript=transcript,
-    )
-    result = await _call_ai(prompt)
+async def parse_resume_to_json(raw_text: str) -> dict:
+    """
+    HYBRID CONDUCTOR: 
+    Hard-routes massive resumes directly to Gemini 2.0 Flash because of its 1,000,000 token limit.
+    It will extract absolutely everything without crashing, utilizing the Liquid Schema.
+    """
+    prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=raw_text)
+    
+    if GEMINI_API_KEY:
+        try:
+            print("[BATS] Super Extractor: Hard-routing to Gemini (1M Context Window)...")
+            return await _call_gemini(prompt)
+        except Exception as e:
+            print(f"[BATS] Gemini parsing failed, falling back to Groq: {e}")
+    
+    try:
+        print("[BATS] Super Extractor: Routing to Groq (Truncating input to prevent crash)...")
+        safe_text = raw_text[:15000]
+        return await _call_groq(format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text), force_json=True, max_tokens=6000)
+    except Exception as e:
+        print(f"[BATS] FATAL Parsing Error: {e}")
+        return {
+            "candidate_info": {"name": "Extraction Failed", "email": "Not Provided", "phone": "Not Provided", "links": []},
+            "executive_summary": "System exceeded memory limits or encountered unreadable formatting.",
+            "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []},
+            "experience_and_projects": [{"name": "System Error", "role": "Not Provided", "duration": "Not Provided", "technologies_used": [], "key_achievements": []}],
+            "education_and_certifications": []
+        }
+
+async def evaluate_candidate(job_description: str, resume: str, transcript: str) -> dict:
+    """HYBRID CONDUCTOR: Routes to the MoE Cascade to ensure deep cross-verification."""
+    prompt = format_prompt(EVALUATION_PROMPT, job_description=job_description, resume=resume, transcript=transcript)
+    result = await _call_ai_cascade(prompt, force_json=True)
     return _validate_result(result)
 
-
-async def generate_interview_questions(
-    job_description: str,
-    resume: str,
-    num_questions: int = 6,
-) -> list:
-    """Generate interview questions based on JD and resume."""
-    prompt = QUESTION_GENERATION_PROMPT.format(
-        job_description=job_description,
-        resume=resume,
-        num_questions=num_questions,
-    )
-    result = await _call_ai(prompt)
-    if "questions" not in result:
-        raise ValueError("AI did not return questions")
-    
-    difficulty_order = {"easy": 0, "medium": 1, "hard": 2}
-    questions = sorted(
-        result["questions"],
-        key=lambda q: difficulty_order.get(q.get("difficulty", "medium"), 1)
-    )
-    for i, q in enumerate(questions):
-        q["id"] = i + 1
-    
-    return questions
-
+async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 6) -> list:
+    """HYBRID CONDUCTOR: Routes to the MoE Cascade."""
+    prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=job_description, resume=resume, num_questions=num_questions)
+    result = await _call_ai_cascade(prompt, force_json=True)
+    return result.get("questions", [])
 
 async def generate_jd(position: str) -> str:
-    """Auto-generate a Job Description from a position title."""
-    prompt = JD_GENERATION_PROMPT.format(position=position)
-    return await _call_ai_text(prompt)
-
+    """HYBRID CONDUCTOR: Routes to Groq for fastest text generation."""
+    prompt = format_prompt(JD_GENERATION_PROMPT, position=position)
+    return await _call_groq_text(prompt)
 
 async def get_answer_acknowledgment(question: str, answer: str) -> str:
-    """Get a brief AI acknowledgment of the candidate's answer."""
-    prompt = ANSWER_ACKNOWLEDGMENT_PROMPT.format(question=question, answer=answer)
+    """HYBRID CONDUCTOR: Routes to Groq for real-time sub-second conversational latency."""
+    prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer)
     try:
-        return await _call_ai_text(prompt)
-    except Exception:
-        return "Thank you for your answer. Let's move on."
+        return await _call_groq_text(prompt)
+    except Exception as e:
+        print(f"[BATS] Dynamic response failed: {e}")
+        return "Thank you for sharing that context. Let's move on to the next question."

@@ -105,7 +105,7 @@ export async function submitEvaluation(payload: EvaluationPayload) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(120000), // 2 min timeout for AI
+      signal: AbortSignal.timeout(120000), // 2 min timeout for AI deep analysis
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "Server error" }));
@@ -207,26 +207,59 @@ export async function deleteEvaluation(id: string) {
   }
 }
 
+// ─── ENTERPRISE UPGRADES ──────────────────────────────────────
+
 export async function getStats() {
   try {
     const res = await fetch(`${API_BASE}/api/stats`);
     if (!res.ok) throw new Error("Failed to fetch stats");
     return res.json();
   } catch {
-    // Compute from local data
+    // Compute from local data (Upgraded with new enterprise metrics)
     const evals = getLocalEvaluations() as any[];
     const total = evals.length;
-    if (total === 0) return { total: 0, avg_score: 0, strong_hires: 0, lean_hires: 0, rejects: 0, selected: 0, rejected: 0, pending: 0 };
+    
+    if (total === 0) return { 
+      total: 0, avg_score: 0, strong_hires: 0, lean_hires: 0, 
+      rejects: 0, selected: 0, rejected: 0, pending: 0,
+      pipeline_health: "No Data", top_scorer: null, positions: []
+    };
+    
     const scores = evals.map((e) => e.scores?.overall_score || 0);
+    const strong_hires = evals.filter((e) => e.hiring_recommendation === "Strong Hire").length;
+    const lean_hires = evals.filter((e) => e.hiring_recommendation === "Lean Hire").length;
+    
+    const hire_rate = (strong_hires + lean_hires) / total;
+    let pipeline_health = "Healthy";
+    if (hire_rate >= 0.4) pipeline_health = "Excellent";
+    if (hire_rate < 0.15) pipeline_health = "Needs Adjustment";
+
     return {
       total,
       avg_score: Math.round(scores.reduce((a, b) => a + b, 0) / total),
-      strong_hires: evals.filter((e) => e.hiring_recommendation === "Strong Hire").length,
-      lean_hires: evals.filter((e) => e.hiring_recommendation === "Lean Hire").length,
+      strong_hires,
+      lean_hires,
       rejects: evals.filter((e) => e.hiring_recommendation === "Reject").length,
       selected: evals.filter((e) => e.selection_status === "selected").length,
       rejected: evals.filter((e) => e.selection_status === "rejected").length,
       pending: evals.filter((e) => e.selection_status === "pending").length,
+      pipeline_health,
+      top_scorer: evals.length > 0 ? [...evals].sort((a,b) => (b.scores?.overall_score || 0) - (a.scores?.overall_score || 0))[0].candidate_name : null,
+      positions: Array.from(new Set(evals.map(e => e.position)))
     };
+  }
+}
+
+export async function compareCandidates(candidateIds: string[]) {
+  try {
+    const res = await fetch(`${API_BASE}/api/compare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(candidateIds),
+    });
+    if (!res.ok) throw new Error("Failed to generate Debrief Matrix");
+    return res.json();
+  } catch (err: any) {
+    throw new Error(err.message || "Failed to compare candidates");
   }
 }

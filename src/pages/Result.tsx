@@ -3,8 +3,8 @@ import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   ArrowLeft, CheckCircle2, AlertTriangle, MessageSquare,
-  HelpCircle, FileText, Sparkles, Loader2, ThumbsUp, ThumbsDown,
-  Clock, UserCheck, UserX, Play, Smile, Meh, Frown, Shield, Download, Copy,
+  HelpCircle, FileText, Sparkles, Loader2, Play, 
+  Smile, Meh, Frown, Shield, Download, Copy, UserCheck, UserX
 } from "lucide-react";
 import { getEvaluation, updateSelectionStatus } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
@@ -33,15 +33,15 @@ const sentimentIcon = {
 };
 
 const sentimentColor = {
-  Positive: "text-nexus-green bg-nexus-green/10",
-  Neutral: "text-nexus-amber bg-nexus-amber/10",
-  Negative: "text-nexus-red bg-nexus-red/10",
+  Positive: "text-green-500 bg-green-500/10 border-green-500/20",
+  Neutral: "text-blue-500 bg-blue-500/10 border-blue-500/20",
+  Negative: "text-red-500 bg-red-500/10 border-red-500/20",
 };
 
 const statusStyles = {
-  pending: "text-nexus-amber bg-nexus-amber/10 border-nexus-amber/20",
-  selected: "text-nexus-green bg-nexus-green/10 border-nexus-green/20",
-  rejected: "text-nexus-red bg-nexus-red/10 border-nexus-red/20",
+  pending: "text-yellow-500 bg-yellow-500/10 border-yellow-500/20",
+  selected: "text-green-500 bg-green-500/10 border-green-500/20",
+  rejected: "text-red-500 bg-red-500/10 border-red-500/20",
 };
 
 export default function ResultPage() {
@@ -70,6 +70,19 @@ export default function ResultPage() {
     }
   };
 
+  const handleExport = () => {
+    if (!result) return;
+    const data = JSON.stringify(result, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${result.id}_${result.candidateName.replace(/\s+/g, "_")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Evaluation exported successfully!");
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -82,224 +95,189 @@ export default function ResultPage() {
 
   const SentimentIconComp = sentimentIcon[result.sentiment?.rating as keyof typeof sentimentIcon] || Meh;
   const sentClr = sentimentColor[result.sentiment?.rating as keyof typeof sentimentColor] || sentimentColor.Neutral;
-  // Parse video filenames and build correct URLs  
-  const rawVideoFiles = result.video_filename?.split(", ").filter(Boolean) || [];
-  const videoFiles = rawVideoFiles.map((f) => {
-    // Strip all bracket prefixes: [FULL], [UPLOADED], etc.
-    const cleanName = f.replace(/^\[.*?\]\s*/, "");
-    const isFullSession = f.startsWith("[FULL]");
-    return { name: cleanName, isFullSession, url: `${API_BASE}/uploads/recordings/${encodeURIComponent(cleanName)}` };
-  });
+  
+  // Clean single video URL if it exists
+  const videoUrl = result.video_filename ? `${API_BASE}/uploads/recordings/${encodeURIComponent(result.video_filename)}` : null;
 
   return (
-    <div className="min-h-screen bg-background nexus-grid">
+    <div className="min-h-screen bg-background nexus-grid pb-20">
       <Navbar />
-      <div className="container mx-auto px-6 pt-24 pb-16 max-w-5xl">
+      <div className="container mx-auto px-6 pt-24 max-w-5xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
-          {/* Back + Header */}
+          
+          {/* Header & Back Link */}
           <motion.div variants={fadeUp} custom={0} className="space-y-4">
-            <Link
-              to="/dashboard"
-              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
-            >
+            <Link to="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
               <ArrowLeft className="w-4 h-4" />
               Back to Dashboard
             </Link>
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
               <div>
-                <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground">
+                <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
                   {result.candidateName}
                 </h1>
-                <p className="text-muted-foreground mt-1">
-                  {result.position} · Evaluated {result.date}
+                <p className="text-muted-foreground mt-1 text-lg">
+                  {result.position}
                 </p>
-                <p className="text-xs text-muted-foreground/60 font-mono mt-0.5">
-                  ID: {result.id}
-                </p>
+                <div className="flex items-center gap-3 mt-2">
+                  <p className="text-xs px-2 py-1 bg-muted rounded-md text-muted-foreground font-mono">
+                    ID: {result.id}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Evaluated on {result.date}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-3">
                 <RecommendationBadge recommendation={result.hiring_recommendation} />
-                <span className={`px-3 py-1 rounded-full text-xs font-medium border ${statusStyles[result.selection_status || "pending"]}`}>
-                  {(result.selection_status || "pending").toUpperCase()}
+                <span className={`px-4 py-1.5 rounded-full text-xs font-bold border uppercase tracking-wider ${statusStyles[result.selection_status || "pending"]}`}>
+                  {result.selection_status || "pending"}
                 </span>
               </div>
             </div>
           </motion.div>
 
-          {/* Selection Actions */}
-          <motion.div variants={fadeUp} custom={0.5} className="flex flex-wrap gap-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleStatusChange("selected")}
-              className={`border-nexus-green/30 hover:bg-nexus-green/10 ${result.selection_status === "selected" ? "bg-nexus-green/10 text-nexus-green" : "text-muted-foreground"}`}
-            >
-              <UserCheck className="w-4 h-4 mr-1.5" />
-              Select Candidate
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleStatusChange("rejected")}
-              className={`border-nexus-red/30 hover:bg-nexus-red/10 ${result.selection_status === "rejected" ? "bg-nexus-red/10 text-nexus-red" : "text-muted-foreground"}`}
-            >
-              <UserX className="w-4 h-4 mr-1.5" />
-              Reject Candidate
-            </Button>
-            {result.selection_status !== "pending" && (
+          {/* Action Buttons Toolbar */}
+          <motion.div variants={fadeUp} custom={0.5} className="flex flex-wrap items-center justify-between gap-4 p-4 glass rounded-xl border border-primary/10">
+            <div className="flex gap-2">
               <Button
-                variant="ghost"
+                variant={result.selection_status === "selected" ? "default" : "outline"}
                 size="sm"
-                onClick={() => handleStatusChange("pending")}
-                className="text-muted-foreground"
+                onClick={() => handleStatusChange("selected")}
+                className={result.selection_status === "selected" ? "bg-green-600 hover:bg-green-700 text-white" : "hover:text-green-500 hover:border-green-500"}
               >
-                Reset to Pending
-              </Button>
-            )}
-            <div className="ml-auto flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const data = JSON.stringify(result, null, 2);
-                  const blob = new Blob([data], { type: "application/json" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = `${result.id}_${result.candidateName.replace(/\s+/g, "_")}.json`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                  toast.success("Evaluation exported!");
-                }}
-                className="text-muted-foreground"
-              >
-                <Download className="w-4 h-4 mr-1.5" />
-                Export
+                <UserCheck className="w-4 h-4 mr-2" /> Select
               </Button>
               <Button
-                variant="outline"
+                variant={result.selection_status === "rejected" ? "destructive" : "outline"}
                 size="sm"
-                onClick={() => {
-                  navigator.clipboard.writeText(result.id);
-                  toast.success("Candidate ID copied!");
-                }}
-                className="text-muted-foreground"
+                onClick={() => handleStatusChange("rejected")}
+                className={result.selection_status === "rejected" ? "" : "hover:text-red-500 hover:border-red-500"}
               >
-                <Copy className="w-4 h-4 mr-1.5" />
-                Copy ID
+                <UserX className="w-4 h-4 mr-2" /> Reject
+              </Button>
+              {result.selection_status !== "pending" && (
+                <Button variant="ghost" size="sm" onClick={() => handleStatusChange("pending")} className="text-muted-foreground">
+                  Reset
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={handleExport} className="text-muted-foreground">
+                <Download className="w-4 h-4 mr-2" /> Export JSON
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(result.id); toast.success("ID copied!"); }} className="text-muted-foreground">
+                <Copy className="w-4 h-4 mr-2" /> Copy ID
               </Button>
             </div>
           </motion.div>
 
-          {/* Overview */}
-          <motion.div variants={fadeUp} custom={1} className="glass rounded-xl p-6">
+          {/* Executive Overview */}
+          <motion.div variants={fadeUp} custom={1} className="glass rounded-xl p-6 border-l-4 border-l-primary">
             <div className="flex items-center gap-2 mb-3">
-              <Sparkles className="w-4 h-4 text-primary" />
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Executive Summary</h2>
+              <Sparkles className="w-5 h-5 text-primary" />
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Executive Summary</h2>
             </div>
-            <p className="text-muted-foreground leading-relaxed">{result.candidate_overview}</p>
+            <p className="text-muted-foreground leading-relaxed text-base">{result.candidate_overview}</p>
           </motion.div>
 
-          {/* Sentiment + Candidate Status */}
+          {/* ENTERPRISE METRICS: Sentiment + Candidate Status */}
           <motion.div variants={fadeUp} custom={1.5} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="glass rounded-xl p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <SentimentIconComp className={`w-4 h-4 ${sentClr.split(" ")[0]}`} />
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Candidate Sentiment</h2>
+            <div className="glass rounded-xl p-6 border border-border/50">
+              <div className="flex justify-between items-start mb-4">
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <Smile className="w-4 h-4 text-muted-foreground" /> Vocal Sentiment
+                </h2>
+                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${sentClr}`}>
+                  <SentimentIconComp className="w-3.5 h-3.5" />
+                  {result.sentiment?.rating || "Neutral"}
+                </div>
               </div>
-              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${sentClr} mb-3`}>
-                <SentimentIconComp className="w-4 h-4" />
-                {result.sentiment?.rating || "Neutral"}
-              </div>
-              <p className="text-sm text-muted-foreground">{result.sentiment?.explanation || "No analysis available"}</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {result.sentiment?.explanation || "Vocal sentiment analysis was not able to extract definitive confidence markers from this transcript."}
+              </p>
             </div>
-            <div className="glass rounded-xl p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Shield className="w-4 h-4 text-nexus-purple" />
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Candidate Status</h2>
+
+            <div className="glass rounded-xl p-6 border border-border/50">
+              <div className="flex justify-between items-start mb-4">
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-muted-foreground" /> Readiness Level
+                </h2>
+                <div className="px-3 py-1 rounded-full text-xs font-bold border bg-accent/10 text-accent border-accent/20">
+                  {result.candidate_status?.level || "Pending"}
+                </div>
               </div>
-              <p className="text-sm font-semibold text-foreground mb-2">{result.candidate_status?.level || "Not assessed"}</p>
-              <p className="text-sm text-muted-foreground">{result.candidate_status?.description || ""}</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {result.candidate_status?.description || "No detailed readiness description provided by the evaluator."}
+              </p>
             </div>
           </motion.div>
 
           {/* Scores Grid */}
           <motion.div variants={fadeUp} custom={2} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="glass rounded-xl p-6 flex flex-col items-center">
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-6 self-start">
+            <div className="glass rounded-xl p-6 flex flex-col items-center border border-border/50">
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider mb-6 self-start">
                 Performance Radar
               </h2>
-              <RadarChart scores={result.scores} size={260} />
+              <RadarChart scores={result.scores} size={280} />
             </div>
-            <div className="glass rounded-xl p-6">
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-6">
+            <div className="glass rounded-xl p-6 border border-border/50">
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider mb-6">
                 Score Breakdown
               </h2>
               <div className="grid grid-cols-2 gap-6 place-items-center">
-                <ScoreRing score={result.scores.technical_proficiency} label="Technical" color="hsl(173 80% 50%)" size={100} />
-                <ScoreRing score={result.scores.relevance_to_jd} label="Relevance" color="hsl(260 70% 60%)" size={100} />
-                <ScoreRing score={result.scores.communication} label="Communication" color="hsl(220 80% 55%)" size={100} />
-                <ScoreRing score={result.scores.confidence_level || 0} label="Confidence" color="hsl(38 92% 55%)" size={100} />
-                <div className="col-span-2">
-                  <ScoreRing score={result.scores.overall_score} label="Overall" color="hsl(150 70% 50%)" size={120} />
-                </div>
+                <ScoreRing score={result.scores.technical_proficiency} label="Technical" color="hsl(173 80% 50%)" size={110} />
+                <ScoreRing score={result.scores.relevance_to_jd} label="Relevance" color="hsl(260 70% 60%)" size={110} />
+                <ScoreRing score={result.scores.communication} label="Communication" color="hsl(220 80% 55%)" size={110} />
+                <ScoreRing score={result.scores.confidence_level || 0} label="Confidence" color="hsl(38 92% 55%)" size={110} />
               </div>
             </div>
           </motion.div>
 
-          {/* Interview Recordings */}
-          {videoFiles.length > 0 && (
-            <motion.div variants={fadeUp} custom={2.5} className="glass rounded-xl p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Play className="w-4 h-4 text-primary" />
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Interview Recordings</h2>
+          {/* Interview Recording (Single Video Player) */}
+          {videoUrl && (
+            <motion.div variants={fadeUp} custom={2.5} className="glass rounded-xl p-6 border border-border/50">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <Play className="w-4 h-4 text-primary" /> Session Recording
+                </h2>
+                <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded">Analyzed via Deep Audio Extraction</span>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {videoFiles.map((vf, i) => (
-                  <div key={i} className="rounded-lg overflow-hidden bg-muted">
-                    <video
-                      controls
-                      className="w-full aspect-video"
-                      src={vf.url}
-                    >
-                      Your browser does not support video playback.
-                    </video>
-                    <div className="p-2 text-center">
-                      <span className="text-xs text-muted-foreground">
-                        {vf.isFullSession ? "📹 Full Session Recording" : `Question ${i + 1}`}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+              <div className="rounded-lg overflow-hidden bg-black/50 border border-border/50 max-w-3xl mx-auto">
+                <video controls className="w-full aspect-video" src={videoUrl}>
+                  Your browser does not support video playback.
+                </video>
               </div>
             </motion.div>
           )}
 
           {/* Strengths & Weaknesses */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <CheckCircle2 className="w-4 h-4 text-nexus-green" />
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Strengths</h2>
+            <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6 border border-green-500/20 bg-gradient-to-b from-green-500/5 to-transparent">
+              <div className="flex items-center gap-2 mb-6">
+                <CheckCircle2 className="w-5 h-5 text-green-500" />
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Identified Strengths</h2>
               </div>
-              <ul className="space-y-3">
+              <ul className="space-y-4">
                 {result.strengths.map((s, i) => (
-                  <li key={i} className="flex gap-3 text-sm text-muted-foreground">
-                    <span className="w-1.5 h-1.5 rounded-full bg-nexus-green mt-1.5 shrink-0" />
+                  <li key={i} className="flex gap-3 text-sm text-foreground/90">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 mt-2 shrink-0" />
                     {s}
                   </li>
                 ))}
               </ul>
             </motion.div>
-            <motion.div variants={fadeUp} custom={4} className="glass rounded-xl p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <AlertTriangle className="w-4 h-4 text-nexus-amber" />
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Red Flags</h2>
+            
+            <motion.div variants={fadeUp} custom={4} className="glass rounded-xl p-6 border border-red-500/20 bg-gradient-to-b from-red-500/5 to-transparent">
+              <div className="flex items-center gap-2 mb-6">
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Red Flags & Gaps</h2>
               </div>
-              <ul className="space-y-3">
+              <ul className="space-y-4">
                 {result.red_flags_or_weaknesses.map((w, i) => (
-                  <li key={i} className="flex gap-3 text-sm text-muted-foreground">
-                    <span className="w-1.5 h-1.5 rounded-full bg-nexus-amber mt-1.5 shrink-0" />
+                  <li key={i} className="flex gap-3 text-sm text-foreground/90">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-2 shrink-0" />
                     {w}
                   </li>
                 ))}
@@ -307,30 +285,34 @@ export default function ResultPage() {
             </motion.div>
           </div>
 
-          {/* Follow-up Questions */}
-          <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6">
+          {/* Dynamic Follow-up Questions */}
+          <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6 border-l-4 border-l-accent">
             <div className="flex items-center gap-2 mb-4">
-              <HelpCircle className="w-4 h-4 text-nexus-purple" />
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Follow-Up Questions</h2>
+              <HelpCircle className="w-5 h-5 text-accent" />
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Suggested Follow-Up Questions</h2>
             </div>
+            <p className="text-xs text-muted-foreground mb-4">Auto-generated by the AI Skeptic agent based on vague answers in the transcript.</p>
             <div className="space-y-3">
               {result.dynamic_follow_up_questions.map((q, i) => (
-                <div key={i} className="flex gap-3 p-3 rounded-lg bg-muted/50">
-                  <MessageSquare className="w-4 h-4 text-nexus-purple mt-0.5 shrink-0" />
-                  <span className="text-sm text-muted-foreground">{q}</span>
+                <div key={i} className="flex gap-3 p-4 rounded-lg bg-muted/30 border border-border/50">
+                  <MessageSquare className="w-4 h-4 text-accent mt-0.5 shrink-0" />
+                  <span className="text-sm font-medium text-foreground/90">{q}</span>
                 </div>
               ))}
             </div>
           </motion.div>
 
-          {/* Justification */}
-          <motion.div variants={fadeUp} custom={6} className="glass rounded-xl p-6">
-            <div className="flex items-center gap-2 mb-3">
-              <FileText className="w-4 h-4 text-primary" />
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Justification</h2>
+          {/* Final Justification */}
+          <motion.div variants={fadeUp} custom={6} className="glass rounded-xl p-6 border border-border/50">
+            <div className="flex items-center gap-2 mb-4">
+              <FileText className="w-5 h-5 text-primary" />
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Hiring Manager Justification</h2>
             </div>
-            <p className="text-muted-foreground leading-relaxed">{result.justification}</p>
+            <div className="p-4 rounded-lg bg-muted/20 text-foreground/90 leading-relaxed text-sm md:text-base whitespace-pre-wrap">
+              {result.justification}
+            </div>
           </motion.div>
+
         </motion.div>
       </div>
     </div>

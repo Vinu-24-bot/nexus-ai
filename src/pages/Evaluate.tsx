@@ -160,25 +160,36 @@ export default function EvaluatePage() {
     }
 
     setIsExtractingResume(true);
+    
+    // ─── ENTERPRISE UPGRADE: Route through AI Semantic Parser first ───
+    try {
+      const result = await uploadResume(file);
+      if (result.extracted_text) {
+        setResume(result.extracted_text); // Populates the text area with clean JSON!
+        setResumeFileName(file.name);
+        toast.success(`Resume structured perfectly by AI Parser!`);
+        setIsExtractingResume(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+    } catch (backendErr) {
+      console.log("Backend semantic parser offline, falling back to raw local extraction...");
+    }
+
+    // Fallback: Local Raw Extraction
     try {
       const text = await extractTextFromFile(file);
       if (text.trim()) {
         setResume(text);
         setResumeFileName(file.name);
-        toast.success(`Resume "${file.name}" text extracted successfully!`);
+        toast.success(`Raw text extracted locally.`);
       } else if (ext === ".doc" || ext === ".docx") {
-        toast.error("DOC/DOCX requires the backend for extraction. Please paste content manually or convert to PDF.");
+        toast.error("DOC/DOCX requires the backend for extraction. Please paste content manually.");
       } else {
         toast.error("Could not extract text. Please paste content manually.");
       }
-
-      uploadResume(file).then(() => {
-        console.log(`Resume "${file.name}" saved to backend/uploads/resumes`);
-      }).catch(() => {
-        console.log("Backend resume save skipped (backend may be offline)");
-      });
     } catch {
-      toast.error("Failed to parse resume. Please paste content manually.");
+      toast.error("Failed to parse resume locally. Please paste content manually.");
     } finally {
       setIsExtractingResume(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -200,7 +211,6 @@ export default function EvaluatePage() {
         state: { candidateName, position, jobDescription, resume, questions, voiceGender, durationMinutes: selectedDuration.value },
       });
     } catch {
-      // Fallback: generate questions locally
       const localQuestions = generateLocalQuestions(jobDescription, resume, selectedDuration.questions);
       toast.success(`${localQuestions.length} questions generated locally for ~${selectedDuration.value} min interview!`);
       navigate("/interview", {
@@ -247,7 +257,7 @@ export default function EvaluatePage() {
               <div className="rounded-xl p-3 bg-primary/5 border border-primary/20 flex items-center gap-3">
                 <Wifi className="w-4 h-4 text-primary shrink-0" />
                 <p className="text-xs text-primary">
-                  <strong>Backend connected</strong> — AI question generation & evaluation active.
+                  <strong>Backend connected</strong> — AI question generation & semantic resume parsing active.
                 </p>
               </div>
             )}
@@ -363,10 +373,10 @@ export default function EvaluatePage() {
                 </div>
               )}
               <Textarea
-                placeholder="Paste resume content here, or upload a file above..."
+                placeholder="Paste resume content here, or upload a file above to auto-structure it..."
                 value={resume}
                 onChange={(e) => setResume(e.target.value)}
-                className="bg-card border-border min-h-[120px] resize-none"
+                className="bg-card border-border min-h-[120px] resize-none font-mono text-xs"
               />
             </motion.div>
 

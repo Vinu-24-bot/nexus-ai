@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
-
 class EvaluationRequest(BaseModel):
     candidate_name: str = Field(..., min_length=1, max_length=200)
     position: str = Field(..., min_length=1, max_length=200)
@@ -10,25 +9,20 @@ class EvaluationRequest(BaseModel):
     transcript: str = Field(..., min_length=10)
     video_filename: Optional[str] = None
 
-
 class QuestionGenerationRequest(BaseModel):
     job_description: str = Field(..., min_length=10)
     resume: str = Field(..., min_length=10)
     num_questions: int = Field(default=12, ge=3, le=20)
 
-
 class JDGenerationRequest(BaseModel):
     position: str = Field(..., min_length=2, max_length=200)
-
 
 class AcknowledgmentRequest(BaseModel):
     question: str = Field(..., min_length=5)
     answer: str = Field(..., min_length=3)
 
-
 class SelectionStatusRequest(BaseModel):
     status: str = Field(..., pattern="^(pending|selected|rejected)$")
-
 
 class ResumeUploadResponse(BaseModel):
     filename: str
@@ -36,17 +30,14 @@ class ResumeUploadResponse(BaseModel):
     extracted_text: str
     size: int
 
-
 class InterviewQuestion(BaseModel):
     id: int
     question: str
     category: str
     difficulty: str
 
-
 class QuestionGenerationResponse(BaseModel):
     questions: List[InterviewQuestion]
-
 
 class ScoresResponse(BaseModel):
     technical_proficiency: int
@@ -55,16 +46,13 @@ class ScoresResponse(BaseModel):
     confidence_level: int = 0
     overall_score: int
 
-
 class SentimentResponse(BaseModel):
     rating: str
     explanation: str
 
-
 class CandidateStatusResponse(BaseModel):
     level: str
     description: str
-
 
 class EvaluationResponse(BaseModel):
     id: str

@@ -4,7 +4,6 @@ from sqlalchemy import Column, String, Integer, Text, DateTime, JSON
 
 from database import Base
 
-
 class Evaluation(Base):
     __tablename__ = "evaluations"
 

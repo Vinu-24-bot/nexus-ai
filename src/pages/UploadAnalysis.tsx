@@ -30,33 +30,7 @@ const JD_TEMPLATES: Record<string, string> = {
 };
 
 function generateLocalJD(position: string): string {
-  return `Job Title: ${position}
-
-Job Summary:
-We are looking for an experienced ${position} to join our team. The ideal candidate will have strong technical skills and a proven track record.
-
-Key Responsibilities:
-- Design, develop, and maintain solutions relevant to the ${position} role
-- Collaborate with cross-functional teams
-- Write clean, maintainable, and well-documented work
-- Participate in reviews and provide constructive feedback
-- Troubleshoot and resolve complex issues
-- Stay updated with industry trends and best practices
-- Mentor junior team members
-
-Required Skills & Qualifications:
-- 2+ years of relevant experience in the ${position} domain
-- Strong problem-solving and analytical skills
-- Excellent communication and teamwork abilities
-- Proficiency in industry-standard tools and technologies
-- Bachelor's degree in a related field or equivalent experience
-
-Preferred Skills:
-- Experience with agile methodologies
-- Leadership or mentoring experience
-- Industry certifications
-
-Experience Level: Mid to Senior (2-5+ years)`;
+  return `Job Title: ${position}\n\nJob Summary:\nWe are looking for an experienced ${position} to join our team.\n\nKey Responsibilities:\n- Design, develop, and maintain solutions\n- Collaborate with cross-functional teams\n- Write clean, maintainable, and well-documented work\n- Participate in reviews and provide constructive feedback\n\nRequired Skills & Qualifications:\n- 2+ years of relevant experience\n- Strong problem-solving and analytical skills\n- Excellent communication and teamwork abilities\n- Proficiency in industry-standard tools`;
 }
 
 export default function UploadAnalysisPage() {
@@ -76,7 +50,6 @@ export default function UploadAnalysisPage() {
   const [transcript, setTranscript] = useState("");
   const [backendStatus, setBackendStatus] = useState<boolean | null>(null);
 
-  // Check backend on mount
   useState(() => {
     checkBackendHealth().then(setBackendStatus);
   });
@@ -121,6 +94,22 @@ export default function UploadAnalysisPage() {
     }
 
     setIsExtractingResume(true);
+    
+    // ─── ENTERPRISE UPGRADE: Route through AI Semantic Parser first ───
+    try {
+      const result = await uploadResume(file);
+      if (result.extracted_text) {
+        setResume(result.extracted_text);
+        setResumeFileName(file.name);
+        toast.success(`Resume structured perfectly by AI Parser!`);
+        setIsExtractingResume(false);
+        if (resumeInputRef.current) resumeInputRef.current.value = "";
+        return;
+      }
+    } catch (backendErr) {
+      console.log("Backend semantic parser offline, falling back to local...");
+    }
+
     try {
       const text = await extractTextFromFile(file);
       if (text.trim()) {
@@ -128,16 +117,10 @@ export default function UploadAnalysisPage() {
         setResumeFileName(file.name);
         toast.success(`Resume "${file.name}" text extracted!`);
       } else if (ext === ".doc" || ext === ".docx") {
-        toast.error("DOC/DOCX requires the backend. Please paste content manually or use PDF/TXT.");
+        toast.error("DOC/DOCX requires the backend. Please paste content manually.");
       } else {
         toast.error("Could not extract text. Please paste content manually.");
       }
-
-      uploadResume(file).then(() => {
-        console.log(`Resume "${file.name}" saved to backend/uploads/resumes`);
-      }).catch(() => {
-        console.log("Backend resume save skipped (backend may be offline)");
-      });
     } catch {
       toast.error("Failed to parse resume. Please paste content manually.");
     } finally {
@@ -172,7 +155,7 @@ export default function UploadAnalysisPage() {
     try {
       let videoFilename: string | undefined;
 
-      // Upload video if provided (non-blocking — skip if backend offline)
+      // Upload video if provided (non-blocking)
       if (videoFile) {
         const timestamp = Date.now();
         const safeName = candidateName.replace(/\s+/g, "_");
@@ -180,7 +163,9 @@ export default function UploadAnalysisPage() {
         try {
           const blob = new Blob([await videoFile.arrayBuffer()], { type: videoFile.type });
           const result = await uploadVideo(blob, filename);
-          videoFilename = `[UPLOADED] ${result.filename}`;
+          
+          // ─── ENTERPRISE UPGRADE: Exact filename match for backend FFmpeg ───
+          videoFilename = result.filename; 
           toast.success("Video uploaded to backend!");
         } catch {
           toast.warning("Video upload skipped (backend offline). Evaluation will still proceed.");
@@ -190,7 +175,6 @@ export default function UploadAnalysisPage() {
       const finalTranscript = transcript ||
         "(Pre-recorded interview video uploaded. Analyze based on resume and JD match assessment.)";
 
-      // submitEvaluation now auto-fallbacks to local evaluation
       const evalResult = await submitEvaluation({
         candidate_name: candidateName,
         position,
@@ -216,7 +200,6 @@ export default function UploadAnalysisPage() {
       <Navbar />
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-4xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
-          {/* Header */}
           <motion.div variants={fadeUp} custom={0} className="text-center space-y-3">
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 border border-accent/20 text-accent text-xs font-medium mb-4">
               <Upload className="w-3.5 h-3.5" />
@@ -226,17 +209,16 @@ export default function UploadAnalysisPage() {
               Analyze Pre-Recorded Interviews
             </h1>
             <p className="text-muted-foreground max-w-xl mx-auto">
-              Upload pre-recorded interview videos or paste transcripts. BATS AI will analyze them against the JD and resume.
+              Upload pre-recorded interview videos or paste transcripts. BATS AI will extract the audio automatically.
             </p>
           </motion.div>
 
-          {/* Backend Status Banner */}
           <motion.div variants={fadeUp} custom={0.3}>
             {backendStatus === false && (
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
                 <WifiOff className="w-4 h-4 text-destructive shrink-0" />
                 <p className="text-xs text-destructive">
-                  <strong>Backend offline</strong> — BATS will evaluate locally using smart keyword analysis. Start backend for AI-powered deep analysis.
+                  <strong>Backend offline</strong> — BATS will evaluate locally. Start backend for deep FFmpeg audio extraction.
                 </p>
               </div>
             )}
@@ -244,187 +226,77 @@ export default function UploadAnalysisPage() {
               <div className="rounded-xl p-3 bg-primary/5 border border-primary/20 flex items-center gap-3">
                 <Wifi className="w-4 h-4 text-primary shrink-0" />
                 <p className="text-xs text-primary">
-                  <strong>Backend connected</strong> — AI-powered evaluation is active.
+                  <strong>Backend connected</strong> — FFmpeg Deep Audio Extraction is active.
                 </p>
               </div>
             )}
           </motion.div>
 
-          {/* Info Banner */}
-          <motion.div variants={fadeUp} custom={0.5} className="glass rounded-xl p-4 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-            <div className="text-sm text-muted-foreground">
-              <strong className="text-foreground">How it works:</strong> Upload a recorded interview video (MP4, WebM, AVI, MOV) along with the candidate's resume and job description. BATS evaluates performance based on transcript and documents. <strong>Works offline too!</strong>
-            </div>
-          </motion.div>
-
-          {/* Form */}
           <div className="space-y-6">
-            {/* Candidate Info */}
             <motion.div variants={fadeUp} custom={1} className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <User className="w-4 h-4 text-primary" /> Candidate Name
                 </label>
-                <Input
-                  placeholder="e.g., Alex Chen"
-                  value={candidateName}
-                  onChange={(e) => setCandidateName(e.target.value)}
-                  className="bg-card border-border"
-                />
+                <Input placeholder="e.g., Alex Chen" value={candidateName} onChange={(e) => setCandidateName(e.target.value)} className="bg-card border-border" />
               </div>
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <Briefcase className="w-4 h-4 text-accent" /> Position / Role
                 </label>
-                <Input
-                  placeholder="e.g., React Developer, Data Scientist"
-                  value={position}
-                  onChange={(e) => setPosition(e.target.value)}
-                  className="bg-card border-border"
-                />
+                <Input placeholder="e.g., React Developer" value={position} onChange={(e) => setPosition(e.target.value)} className="bg-card border-border" />
               </div>
             </motion.div>
 
-            {/* JD */}
             <motion.div variants={fadeUp} custom={2} className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <FileText className="w-4 h-4 text-primary" /> Job Description
                 </label>
-                <Button
-                  type="button" variant="outline" size="sm"
-                  onClick={handleGenerateJD}
-                  disabled={isGeneratingJD || !position}
-                  className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
-                >
-                  {isGeneratingJD ? (
-                    <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Generating...</span>
-                  ) : (
-                    <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Auto-Generate JD</span>
-                  )}
+                <Button type="button" variant="outline" size="sm" onClick={handleGenerateJD} disabled={isGeneratingJD || !position} className="text-xs h-8 border-primary/30 text-primary">
+                  {isGeneratingJD ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Sparkles className="w-3 h-3 mr-2" />} Auto-Generate JD
                 </Button>
               </div>
-              <Textarea
-                placeholder="Paste the job description here, or click 'Auto-Generate JD' above..."
-                value={jobDescription}
-                onChange={(e) => setJobDescription(e.target.value)}
-                className="bg-card border-border min-h-[140px] resize-none"
-              />
+              <Textarea value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} className="bg-card min-h-[140px] resize-none" />
             </motion.div>
 
-            {/* Resume */}
             <motion.div variants={fadeUp} custom={3} className="space-y-3">
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <FileText className="w-4 h-4 text-primary" /> Candidate Resume
                 </label>
                 <input ref={resumeInputRef} type="file" accept=".pdf,.txt,.doc,.docx,.md" onChange={handleResumeUpload} className="hidden" />
-                <Button
-                  type="button" variant="outline" size="sm"
-                  onClick={() => resumeInputRef.current?.click()}
-                  disabled={isExtractingResume}
-                  className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
-                >
-                  {isExtractingResume ? (
-                    <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Extracting...</span>
-                  ) : (
-                    <span className="flex items-center gap-1.5"><Upload className="w-3 h-3" /> Upload Resume (PDF/TXT)</span>
-                  )}
+                <Button type="button" variant="outline" size="sm" onClick={() => resumeInputRef.current?.click()} disabled={isExtractingResume} className="text-xs h-8 border-primary/30 text-primary">
+                  {isExtractingResume ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Upload className="w-3 h-3 mr-2" />} Upload Resume
                 </Button>
               </div>
-              {resumeFileName && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20">
-                  <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
-                  <span className="text-xs text-primary font-medium truncate">{resumeFileName}</span>
-                  <button onClick={() => { setResumeFileName(""); setResume(""); }} className="ml-auto shrink-0">
-                    <X className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
-                  </button>
-                </div>
-              )}
-              <Textarea
-                placeholder="Paste resume content here, or upload a PDF/TXT file above..."
-                value={resume}
-                onChange={(e) => setResume(e.target.value)}
-                className="bg-card border-border min-h-[120px] resize-none"
-              />
+              <Textarea value={resume} onChange={(e) => setResume(e.target.value)} className="bg-card min-h-[120px] resize-none font-mono text-xs" />
             </motion.div>
 
-            {/* Video Upload */}
             <motion.div variants={fadeUp} custom={4} className="space-y-3">
               <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                 <Video className="w-4 h-4 text-accent" /> Pre-Recorded Interview Video
               </label>
-              <input
-                ref={videoInputRef}
-                type="file"
-                accept="video/*,.mp4,.webm,.avi,.mov,.mkv,.flv,.wmv"
-                onChange={handleVideoUpload}
-                className="hidden"
-              />
-              <div
-                onClick={() => videoInputRef.current?.click()}
-                className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-primary/40 transition-colors"
-              >
+              <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoUpload} className="hidden" />
+              <div onClick={() => videoInputRef.current?.click()} className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-primary/40">
                 {videoFile ? (
-                  <div className="space-y-2">
-                    <CheckCircle2 className="w-10 h-10 text-primary mx-auto" />
-                    <p className="text-sm font-medium text-foreground">{videoFile.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {(videoFile.size / 1024 / 1024).toFixed(1)} MB · Click to change
-                    </p>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setVideoFile(null); }}
-                      className="text-xs text-destructive hover:underline"
-                    >
-                      Remove video
-                    </button>
-                  </div>
+                  <div className="space-y-2"><CheckCircle2 className="w-10 h-10 text-primary mx-auto" /><p className="text-sm font-medium text-foreground">{videoFile.name}</p></div>
                 ) : (
-                  <div className="space-y-2">
-                    <Upload className="w-10 h-10 text-muted-foreground mx-auto" />
-                    <p className="text-sm text-muted-foreground">Click to upload interview video</p>
-                    <p className="text-xs text-muted-foreground/70">
-                      Supports MP4, WebM, AVI, MOV, MKV (max 500MB)
-                    </p>
-                  </div>
+                  <div className="space-y-2"><Upload className="w-10 h-10 text-muted-foreground mx-auto" /><p className="text-sm text-muted-foreground">Click to upload interview video (Max 500MB)</p></div>
                 )}
               </div>
             </motion.div>
 
-            {/* Transcript */}
             <motion.div variants={fadeUp} custom={5} className="space-y-2">
               <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <FileText className="w-4 h-4 text-primary" />
-                Interview Transcript
-                <span className="text-xs text-muted-foreground">(paste if available, or describe candidate responses)</span>
+                <FileText className="w-4 h-4 text-primary" /> Interview Transcript <span className="text-xs text-muted-foreground">(Optional if Video uploaded)</span>
               </label>
-              <Textarea
-                placeholder={`Paste the interview transcript here...\n\nFormat:\nQ1: What is your experience with React?\nA1: I have 3 years of experience building...\n\nQ2: Describe a challenging project.\nA2: At my previous company, I led...`}
-                value={transcript}
-                onChange={(e) => setTranscript(e.target.value)}
-                className="bg-card border-border min-h-[160px] resize-none"
-              />
+              <Textarea value={transcript} onChange={(e) => setTranscript(e.target.value)} className="bg-card min-h-[160px] resize-none" />
             </motion.div>
 
-            {/* Submit */}
             <motion.div variants={fadeUp} custom={6}>
-              <Button
-                onClick={handleSubmit}
-                disabled={!isValid || isSubmitting}
-                className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40"
-              >
-                {isSubmitting ? (
-                  <span className="flex items-center gap-3">
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Uploading & Evaluating...
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-3">
-                    <Brain className="w-5 h-5" />
-                    Run AI Evaluation
-                  </span>
-                )}
+              <Button onClick={handleSubmit} disabled={!isValid || isSubmitting} className="w-full h-14 bg-primary text-primary-foreground hover:bg-primary/90">
+                {isSubmitting ? <span className="flex items-center gap-3"><Loader2 className="w-5 h-5 animate-spin" /> Uploading & Evaluating...</span> : <span className="flex items-center gap-3"><Brain className="w-5 h-5" /> Run AI Evaluation</span>}
               </Button>
             </motion.div>
           </div>

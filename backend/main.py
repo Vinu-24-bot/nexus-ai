@@ -1,5 +1,5 @@
 """
-BATS AI Interview Evaluator - FastAPI Backend
+BATS AI Interview Evaluator - Enterprise FastAPI Backend
 """
 
 import os
@@ -7,6 +7,7 @@ import re
 import json
 import shutil
 import hashlib
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -26,7 +27,7 @@ from schemas import (
 )
 from ai_service import (
     evaluate_candidate, generate_interview_questions,
-    generate_jd, get_answer_acknowledgment,
+    generate_jd, get_answer_acknowledgment, transcribe_audio, parse_resume_to_json
 )
 
 load_dotenv()
@@ -49,11 +50,10 @@ RESUMES_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(
     title="BATS AI Interview Evaluator",
-    description="AI-powered candidate evaluation backend",
-    version="2.0.0",
+    description="Enterprise AI-powered candidate evaluation backend",
+    version="3.0.0",
 )
 
-# CORS - allow frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:8080", "http://localhost:5173", "http://localhost:3000", "*"],
@@ -62,12 +62,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve uploaded files
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 
 def generate_candidate_id(name: str, position: str) -> str:
-    """Generate unique candidate ID: BATS-FirstName_Role-hash."""
     first_name = re.sub(r'[^a-zA-Z]', '', name.split()[0] if name.strip() else "Unknown")
     role_short = re.sub(r'[^a-zA-Z]', '', position.replace(" ", ""))[:20]
     unique_hash = hashlib.md5(f"{name}{position}{datetime.now().isoformat()}".encode()).hexdigest()[:6]
@@ -75,7 +73,6 @@ def generate_candidate_id(name: str, position: str) -> str:
 
 
 def db_to_response(ev: Evaluation) -> dict:
-    """Convert DB model to frontend-compatible response."""
     return {
         "id": ev.id,
         "candidateName": ev.candidate_name,
@@ -96,24 +93,42 @@ def db_to_response(ev: Evaluation) -> dict:
 
 
 def save_result_file(eval_id: str, candidate_name: str, result_data: dict):
-    """Save evaluation result as a JSON file in the results folder."""
     safe_name = candidate_name.replace(" ", "_").replace("/", "_")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{eval_id}_{safe_name}_{timestamp}.json"
     filepath = RESULTS_DIR / filename
+    
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(result_data, f, indent=2, ensure_ascii=False)
+    
     return str(filepath)
+
+
+def extract_audio(video_path: str, audio_path: str) -> bool:
+    """Extracts audio from video using FFmpeg for highly accurate transcription."""
+    try:
+        command = [
+            "ffmpeg", "-i", video_path, 
+            "-q:a", "0", "-map", "a", 
+            audio_path, "-y"
+        ]
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"[BATS] FFmpeg error: {e}")
+        return False
+    except FileNotFoundError:
+        print("[BATS] FFmpeg not found. Please ensure FFmpeg is installed and added to PATH.")
+        return False
 
 
 @app.get("/")
 async def root():
-    return {"message": "BATS AI Backend v2.0 is running", "docs": "/docs"}
+    return {"message": "BATS AI Enterprise Backend v3.0 is running", "docs": "/docs"}
 
 
 @app.post("/api/upload-video")
 async def upload_video(video: UploadFile = File(...)):
-    """Upload an interview recording video with unique ID and timestamp."""
     if not video.filename:
         raise HTTPException(400, "No filename provided")
 
@@ -124,25 +139,23 @@ async def upload_video(video: UploadFile = File(...)):
     with open(file_path, "wb") as f:
         shutil.copyfileobj(video.file, f)
 
-    size = file_path.stat().st_size
     return {
         "filename": safe_name,
         "path": f"recordings/{safe_name}",
-        "size": size,
+        "size": file_path.stat().st_size,
         "timestamp": timestamp,
     }
 
 
 @app.post("/api/upload-resume", response_model=ResumeUploadResponse)
 async def upload_resume(file: UploadFile = File(...)):
-    """Upload a resume file (PDF/TXT/DOC) and extract text content."""
     if not file.filename:
         raise HTTPException(400, "No filename provided")
 
     allowed_extensions = {".pdf", ".txt", ".doc", ".docx", ".md"}
     ext = Path(file.filename).suffix.lower()
     if ext not in allowed_extensions:
-        raise HTTPException(400, f"Unsupported file type: {ext}. Allowed: {', '.join(allowed_extensions)}")
+        raise HTTPException(400, f"Unsupported file type: {ext}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = f"{timestamp}_{file.filename}"
@@ -152,94 +165,97 @@ async def upload_resume(file: UploadFile = File(...)):
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # Extract text based on file type
     extracted_text = ""
-    if ext == ".txt" or ext == ".md":
+    # 1. Standard Raw Extraction
+    if ext in [".txt", ".md"]:
         extracted_text = content.decode("utf-8", errors="ignore")
     elif ext == ".pdf":
         try:
-            import fitz  # PyMuPDF
+            import fitz
             doc = fitz.open(stream=content, filetype="pdf")
-            for page in doc:
-                extracted_text += page.get_text() + "\n"
+            extracted_text = "\n".join([page.get_text() for page in doc])
             doc.close()
         except ImportError:
-            # Fallback: basic PDF text extraction
-            try:
-                text_parts = []
-                text = content.decode("latin-1", errors="ignore")
-                # Very basic extraction - recommend installing PyMuPDF
-                import re
-                # Extract text between BT and ET markers
-                streams = re.findall(r'\((.*?)\)', text)
-                extracted_text = " ".join(streams[:500]) if streams else ""
-                if not extracted_text:
-                    extracted_text = "[PDF uploaded but text extraction requires PyMuPDF. Install: pip install PyMuPDF]"
-            except:
-                extracted_text = "[PDF uploaded but could not extract text. Install PyMuPDF: pip install PyMuPDF]"
-    elif ext in (".doc", ".docx"):
+            extracted_text = "[PDF text extraction requires PyMuPDF. Install: pip install PyMuPDF]"
+    elif ext in [".doc", ".docx"]:
         try:
             import docx
             import io
             doc = docx.Document(io.BytesIO(content))
-            extracted_text = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+            extracted_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
         except ImportError:
-            extracted_text = "[DOCX uploaded but text extraction requires python-docx. Install: pip install python-docx]"
+            extracted_text = "[DOCX extraction requires python-docx. Install: pip install python-docx]"
+
+    # 2. ENTERPRISE FEATURE: Semantic Parsing
+    print(f"[BATS] Running AI Semantic Parsing on {file.filename}...")
+    structured_resume = await parse_resume_to_json(extracted_text)
+    print(f"[BATS] Resume perfectly structured!")
 
     return ResumeUploadResponse(
         filename=safe_name,
         path=str(file_path),
-        extracted_text=extracted_text.strip(),
+        extracted_text=json.dumps(structured_resume, indent=2), # Send clean JSON to frontend
         size=len(content),
     )
 
 
 @app.post("/api/generate-questions")
 async def generate_questions(req: QuestionGenerationRequest):
-    """Generate AI interview questions based on JD and resume."""
     try:
-        questions = await generate_interview_questions(
-            job_description=req.job_description,
-            resume=req.resume,
-            num_questions=req.num_questions,
-        )
+        questions = await generate_interview_questions(req.job_description, req.resume, req.num_questions)
         return {"questions": questions}
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
     except Exception as e:
         raise HTTPException(500, detail=f"Question generation failed: {str(e)}")
 
 
 @app.post("/api/generate-jd")
 async def generate_job_description(req: JDGenerationRequest):
-    """Auto-generate a Job Description from position title using AI."""
     try:
         jd = await generate_jd(req.position)
         return {"job_description": jd}
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e))
     except Exception as e:
         raise HTTPException(500, detail=f"JD generation failed: {str(e)}")
 
 
 @app.post("/api/acknowledge-answer")
 async def acknowledge_answer(req: AcknowledgmentRequest):
-    """Get AI acknowledgment of a candidate's answer for conversational flow."""
     try:
         ack = await get_answer_acknowledgment(req.question, req.answer)
         return {"acknowledgment": ack}
     except Exception as e:
-        return {"acknowledgment": "Thank you for your answer. Let's move on."}
+        return {"acknowledgment": "Thank you for that context. Let's move on."}
 
 
 @app.post("/api/evaluate")
 async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db)):
-    """Run AI evaluation on candidate data."""
     try:
+        final_transcript = req.transcript
+        
+        # ENTERPRISE FEATURE: Auto-extract and transcribe if video is provided
+        if req.video_filename:
+            video_path = RECORDINGS_DIR / req.video_filename
+            if video_path.exists():
+                audio_path = RECORDINGS_DIR / f"{req.video_filename}.mp3"
+                print(f"[BATS] Extracting audio from {req.video_filename}...")
+                
+                if extract_audio(str(video_path), str(audio_path)):
+                    print(f"[BATS] Transcribing actual audio using Whisper...")
+                    try:
+                        final_transcript = await transcribe_audio(str(audio_path))
+                        print("[BATS] Real audio transcribed successfully!")
+                    except Exception as e:
+                        print(f"[BATS] Whisper transcription failed, falling back to frontend text: {e}")
+                else:
+                    print("[BATS] Audio extraction failed, using frontend text.")
+
+        if len(final_transcript.strip()) < 10:
+            raise ValueError("Transcript is too short or audio extraction failed to find speech.")
+
+        print("[BATS] Running Multi-Agent AI Evaluation...")
         ai_result = await evaluate_candidate(
             job_description=req.job_description,
             resume=req.resume,
-            transcript=req.transcript,
+            transcript=final_transcript,
         )
 
         candidate_id = generate_candidate_id(req.candidate_name, req.position)
@@ -250,7 +266,7 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
             position=req.position,
             job_description=req.job_description,
             resume=req.resume,
-            transcript=req.transcript,
+            transcript=final_transcript, # Save the REAL transcript to the DB
             video_filename=req.video_filename,
             candidate_overview=ai_result.get("candidate_overview", ""),
             scores=ai_result.get("scores", {}),
@@ -262,38 +278,30 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
             hiring_recommendation=ai_result.get("hiring_recommendation", ""),
             justification=ai_result.get("justification", ""),
         )
+        
         db.add(evaluation)
         db.commit()
         db.refresh(evaluation)
 
-        # Save result JSON file to results folder
         response_data = db_to_response(evaluation)
         save_result_file(evaluation.id, evaluation.candidate_name, response_data)
 
         return response_data
 
     except ValueError as e:
-        error_msg = str(e)
-        print(f"[BATS] Evaluation ValueError: {error_msg}")
-        # If no API keys, return 503 so frontend knows to use local fallback
-        if "No AI API keys" in error_msg or "All AI providers failed" in error_msg:
-            raise HTTPException(503, detail=f"AI service unavailable: {error_msg}")
-        raise HTTPException(400, detail=error_msg)
+        raise HTTPException(400, detail=str(e))
     except Exception as e:
-        print(f"[BATS] Evaluation error: {str(e)}")
         raise HTTPException(500, detail=f"AI evaluation failed: {str(e)}")
 
 
 @app.get("/api/evaluations")
 async def list_evaluations(db: Session = Depends(get_db)):
-    """Get all evaluations, newest first."""
     evaluations = db.query(Evaluation).order_by(Evaluation.created_at.desc()).all()
     return [db_to_response(ev) for ev in evaluations]
 
 
 @app.get("/api/evaluations/{eval_id}")
 async def get_evaluation(eval_id: str, db: Session = Depends(get_db)):
-    """Get a single evaluation by ID."""
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
     if not ev:
         raise HTTPException(404, "Evaluation not found")
@@ -302,10 +310,10 @@ async def get_evaluation(eval_id: str, db: Session = Depends(get_db)):
 
 @app.patch("/api/evaluations/{eval_id}/status")
 async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db: Session = Depends(get_db)):
-    """Update candidate selection status (selected/rejected/pending)."""
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
     if not ev:
         raise HTTPException(404, "Evaluation not found")
+    
     ev.selection_status = req.status
     db.commit()
     db.refresh(ev)
@@ -314,10 +322,10 @@ async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db:
 
 @app.delete("/api/evaluations/{eval_id}")
 async def delete_evaluation(eval_id: str, db: Session = Depends(get_db)):
-    """Delete an evaluation."""
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
     if not ev:
         raise HTTPException(404, "Evaluation not found")
+    
     db.delete(ev)
     db.commit()
     return {"message": "Deleted successfully"}
@@ -325,38 +333,83 @@ async def delete_evaluation(eval_id: str, db: Session = Depends(get_db)):
 
 @app.get("/api/stats")
 async def get_stats(db: Session = Depends(get_db)):
-    """Get overall statistics summary."""
+    """Enterprise Dashboard Stats - Hiring Funnel & Analytics"""
     evaluations = db.query(Evaluation).all()
     total = len(evaluations)
+    
     if total == 0:
-        return {"total": 0, "avg_score": 0, "strong_hires": 0, "lean_hires": 0, "rejects": 0, "selected": 0, "rejected": 0, "pending": 0}
+        return {
+            "total": 0, "avg_score": 0, "strong_hires": 0, "lean_hires": 0, 
+            "rejects": 0, "selected": 0, "rejected": 0, "pending": 0,
+            "pipeline_health": "No Data", "top_scorer": None, "positions": []
+        }
 
     scores = [ev.scores.get("overall_score", 0) if ev.scores else 0 for ev in evaluations]
+    avg_score = round(sum(scores) / total, 1)
+    
+    strong_hires = sum(1 for ev in evaluations if ev.hiring_recommendation == "Strong Hire")
+    lean_hires = sum(1 for ev in evaluations if ev.hiring_recommendation == "Lean Hire")
+    rejects = sum(1 for ev in evaluations if ev.hiring_recommendation == "Reject")
+    
+    # Enterprise Metric: Pipeline Health
+    if total > 0:
+        hire_rate = (strong_hires + lean_hires) / total
+        pipeline_health = "Excellent" if hire_rate >= 0.4 else "Needs Adjustment" if hire_rate < 0.15 else "Healthy"
+    else:
+        pipeline_health = "No Data"
+
+    top_eval = max(evaluations, key=lambda e: (e.scores or {}).get("overall_score", 0))
+
     return {
         "total": total,
-        "avg_score": round(sum(scores) / total, 1),
-        "strong_hires": sum(1 for ev in evaluations if ev.hiring_recommendation == "Strong Hire"),
-        "lean_hires": sum(1 for ev in evaluations if ev.hiring_recommendation == "Lean Hire"),
-        "rejects": sum(1 for ev in evaluations if ev.hiring_recommendation == "Reject"),
+        "avg_score": avg_score,
+        "strong_hires": strong_hires,
+        "lean_hires": lean_hires,
+        "rejects": rejects,
         "selected": sum(1 for ev in evaluations if ev.selection_status == "selected"),
         "rejected": sum(1 for ev in evaluations if ev.selection_status == "rejected"),
         "pending": sum(1 for ev in evaluations if ev.selection_status == "pending"),
-        "top_scorer": max(evaluations, key=lambda e: (e.scores or {}).get("overall_score", 0)).candidate_name if evaluations else None,
+        "pipeline_health": pipeline_health,
+        "top_scorer": top_eval.candidate_name,
         "positions": list(set(ev.position for ev in evaluations)),
     }
 
 
 @app.post("/api/compare")
 async def compare_candidates(candidate_ids: List[str], db: Session = Depends(get_db)):
-    """Compare multiple candidates side-by-side."""
+    """Enterprise Hiring Matrix (Side-by-Side Debrief)"""
     evaluations = db.query(Evaluation).filter(Evaluation.id.in_(candidate_ids)).all()
     if len(evaluations) < 2:
         raise HTTPException(400, "Need at least 2 valid candidate IDs to compare")
 
     results = [db_to_response(ev) for ev in evaluations]
+    
     # Rank by overall score
     ranked = sorted(results, key=lambda r: r["scores"].get("overall_score", 0), reverse=True)
+    
+    # Generate the Enterprise Debrief Matrix
+    debrief_matrix = []
     for i, r in enumerate(ranked):
         r["rank"] = i + 1
+        matrix_entry = {
+            "rank": i + 1,
+            "candidate": r["candidateName"],
+            "verdict": r["hiring_recommendation"],
+            "technical_score": r["scores"].get("technical_proficiency", 0),
+            "communication_score": r["scores"].get("communication", 0),
+            "top_strength": r["strengths"][0] if r["strengths"] else "N/A",
+            "biggest_red_flag": r["red_flags_or_weaknesses"][0] if r["red_flags_or_weaknesses"] else "None",
+            "risk_level": "Low" if r["hiring_recommendation"] == "Strong Hire" else "High" if r["hiring_recommendation"] == "Reject" else "Medium"
+        }
+        debrief_matrix.append(matrix_entry)
 
-    return {"candidates": ranked, "total_compared": len(ranked)}
+    recommended_action = "No Strong Hires found in this cohort."
+    if debrief_matrix and debrief_matrix[0]["verdict"] == "Strong Hire":
+        recommended_action = f"Make an offer to {ranked[0]['candidateName']} based on superior technical alignment."
+
+    return {
+        "candidates": ranked, 
+        "total_compared": len(ranked),
+        "enterprise_debrief_matrix": debrief_matrix,
+        "recommended_action": recommended_action
+    }
