@@ -3,48 +3,45 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Video, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, AlertCircle, Volume2, Clock, ShieldAlert, Star, Send, ShieldX
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { submitEvaluation, uploadVideo } from "@/lib/api";
 import { toast } from "sonner";
-import Navbar from "@/components/Navbar";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api";
 
-interface InterviewQuestion {
-  id: number;
-  question: string;
-  category: string;
-  difficulty: string;
-}
+interface InterviewQuestion { id: number; question: string; category: string; difficulty: string; }
+interface LocationState { candidateName: string; position: string; jobDescription: string; resume: string; questions: InterviewQuestion[]; voiceGender: "female" | "male"; durationMinutes: number; }
+interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob | null; }
 
-interface LocationState {
-  candidateName: string;
-  position: string;
-  jobDescription: string;
-  resume: string;
-  questions: InterviewQuestion[];
-  voiceGender: "female" | "male";
-  durationMinutes: number;
-}
+const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-interface AnswerRecord {
-  questionId: number;
-  transcript: string;
-  videoBlob: Blob | null;
-}
-
-const fadeUp = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
-};
+// UPGRADE: Secure Candidate Header (No links to Recruiter Dashboard)
+const CandidateHeader = ({ isLive }: { isLive: boolean }) => (
+  <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-border/50">
+    <div className="container mx-auto px-6 h-16 flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <Brain className="w-6 h-6 text-primary" />
+        <span className="font-display text-lg font-bold tracking-wider text-foreground">BATS GeniusHub</span>
+      </div>
+      {isLive ? (
+        <div className="flex items-center gap-2 text-xs font-bold text-destructive animate-pulse tracking-widest">
+          <span className="w-2 h-2 rounded-full bg-destructive" /> LIVE SESSION
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
+          <ShieldCheck className="w-3.5 h-3.5" /> Secure Environment
+        </div>
+      )}
+    </div>
+  </header>
+);
 
 function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
   if (voices.length === 0) return null;
-  
   const premiumKeywords = ["neural", "premium", "google", "microsoft"];
   const femaleKeywords = ["female", "woman", "jenny", "samantha", "karen", "zira", "victoria"];
   const maleKeywords = ["male", "man", "guy", "david", "mark", "daniel", "james"];
@@ -59,15 +56,10 @@ function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
     if (!v.lang.startsWith("en")) continue;
     const name = v.name.toLowerCase();
     if (antiKws.some(k => name.includes(k))) continue;
-
     let score = 0;
     if (targetKws.some(k => name.includes(k))) score += 2;
     if (premiumKeywords.some(k => name.includes(k))) score += 5; 
-
-    if (score > highestScore) {
-      highestScore = score;
-      bestMatch = v;
-    }
+    if (score > highestScore) { highestScore = score; bestMatch = v; }
   }
   return bestMatch || voices.find(v => v.lang.startsWith("en")) || voices[0];
 }
@@ -79,10 +71,8 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
     const utterance = new SpeechSynthesisUtterance(text);
     const voice = getVoice(gender);
     if (voice) utterance.voice = voice;
-    
     utterance.rate = 0.95; 
     utterance.pitch = gender === "female" ? 1.05 : 0.95;
-    
     utterance.volume = 1;
     utterance.lang = "en-US";
     utterance.onend = () => resolve();
@@ -123,10 +113,8 @@ export default function InterviewPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const totalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
-  
   const recognitionRef = useRef<any>(null);
   const fullTranscriptRef = useRef("");
   const fullRecordingChunksRef = useRef<Blob[]>([]);
@@ -151,36 +139,18 @@ export default function InterviewPage() {
       const fetchSessionDetails = async () => {
         try {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
-          if (!res.ok) throw new Error("Link expired or invalid");
+          if (!res.ok) throw new Error("Link expired");
           const session = await res.json();
-          
           const qRes = await fetch(`${API_URL}/generate-questions`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ 
-              job_description: session.job_description, 
-              resume: session.resume_text, 
-              num_questions: 8,
-              interview_level: session.interview_level || "L2 (Mid-Level)"
-            })
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: 8, interview_level: session.interview_level || "L2 (Mid-Level)" })
           });
           const qData = await qRes.json();
-          
-          setFetchedData({
-            candidateName: session.candidate_name,
-            position: session.position,
-            jobDescription: session.job_description,
-            resume: session.resume_text,
-            questions: qData.questions,
-            voiceGender: "female",
-            durationMinutes: 20
-          });
+          setFetchedData({ candidateName: session.candidate_name, position: session.position, jobDescription: session.job_description, resume: session.resume_text, questions: qData.questions, voiceGender: "female", durationMinutes: 20 });
         } catch (err) {
           toast.error("Invalid or expired session link.");
           navigate("/");
-        } finally {
-          setIsInitializing(false);
-        }
+        } finally { setIsInitializing(false); }
       };
       fetchSessionDetails();
     }
@@ -206,51 +176,37 @@ export default function InterviewPage() {
     }
   }, [timeRemaining, interviewStep, totalElapsed]);
 
-  // BUGFIX: Ensure the video player gets the stream when it actually renders!
   useEffect(() => {
     if (interviewStep === "interview" && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => console.log("Video autoplay blocked."));
+      videoRef.current.play().catch(() => {});
     }
   }, [interviewStep, cameraReady]);
 
-  // Anti-Cheat listener
   useEffect(() => {
     if (interviewStep !== "interview") return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") return; 
       e.preventDefault(); 
       setCheatStrikes(prev => {
         const newStrikes = prev + 1;
         if (newStrikes >= 3) {
-          toast.error("SECURITY BREACH: Interview Terminated (Excessive Keyboard Usage).");
           handleForceEndInterview(true, "SECURITY BREACH: Candidate exceeded 3 keyboard warnings. Probable use of external AI typing tool.");
         } else {
-          toast.warning(`Security Warning (${newStrikes}/3): Keyboard disabled. Use ONLY your mouse and voice. 3 strikes will terminate the interview.`);
+          toast.warning(`Security Warning (${newStrikes}/3): Keyboard disabled. Use ONLY your mouse and voice.`);
         }
         return newStrikes;
       });
     };
-
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
-        toast.error("SECURITY BREACH: You exited Full Screen mode.");
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode to access other applications.");
-      }
+      if (!document.fullscreenElement) handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode to access other applications.");
     };
-
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        toast.error("SECURITY BREACH: Tab lost focus.");
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched tabs.");
-      }
+      if (document.hidden) handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched tabs.");
     };
-
     window.addEventListener("keydown", handleKeyDown);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("visibilitychange", handleVisibilityChange);
-
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
@@ -258,41 +214,23 @@ export default function InterviewPage() {
     };
   }, [interviewStep]);
 
-
   const requestPermissions = async () => {
     try {
-      const avStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 1280, height: 720, facingMode: "user" },
-        audio: true,
-      });
-
-      // BUGFIX: Force "Entire Screen" Verification
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { displaySurface: "monitor" }, // Requests full screen natively
-        audio: false
-      });
-      
+      const avStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: "user" }, audio: true });
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "monitor" }, audio: false });
       const videoTrack = screenStream.getVideoTracks()[0];
       const settings = videoTrack.getSettings();
-      
-      // If they bypassed the native request and clicked Tab/Window, REJECT it.
       if (settings.displaySurface && settings.displaySurface !== "monitor") {
         avStream.getTracks().forEach(t => t.stop());
         screenStream.getTracks().forEach(t => t.stop());
         toast.error("Security Requirement: You MUST select 'Entire Screen'. Tabs or Windows are not allowed.");
-        return; // Abort
+        return; 
       }
-
       streamRef.current = avStream;
       screenStreamRef.current = screenStream;
-
       screenStream.getVideoTracks()[0].onended = () => {
-        if (interviewStep === "interview") {
-          toast.error("SECURITY BREACH: Screen sharing stopped.");
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing their screen mid-interview.");
-        }
+        if (interviewStep === "interview") handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing their screen mid-interview.");
       };
-
       setCameraReady(true);
       setInterviewStep("ready");
     } catch (err) {
@@ -302,31 +240,18 @@ export default function InterviewPage() {
 
   const lockAndStart = async () => {
     try {
-      if (document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen();
-      }
-
+      if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
       setInterviewStep("interview");
-
       if (sessionId) {
-        fetch(`${API_URL}/sessions/${sessionId}/status`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "started" }),
-          keepalive: true
-        }).catch(err => console.log("Status update failed:", err));
+        fetch(`${API_URL}/sessions/${sessionId}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "started" }), keepalive: true }).catch(()=>{});
       }
-
       startFullRecording(streamRef.current!);
       totalTimerRef.current = setInterval(() => setTotalElapsed((t) => t + 1), 1000);
-
       setTimeout(async () => {
         const introText = `Hello ${candidateName}, welcome to your interview for the ${position} role. I'm your GeniusHub interviewer. Your screen and camera are now securely shared. Could you please introduce yourself?`;
         await speakAndRecord(introText);
       }, 800);
-    } catch (err) {
-      toast.error("Failed to enter Full Screen. Please click again.");
-    }
+    } catch (err) { toast.error("Failed to enter Full Screen. Please click again."); }
   };
 
   const startFullRecording = useCallback((stream: MediaStream) => {
@@ -343,9 +268,7 @@ export default function InterviewPage() {
       if (recorder && recorder.state === "recording") {
         recorder.onstop = () => resolve(new Blob(fullRecordingChunksRef.current, { type: "video/webm" }));
         recorder.stop();
-      } else {
-        resolve(new Blob());
-      }
+      } else { resolve(new Blob()); }
     });
   }, []);
 
@@ -367,10 +290,8 @@ export default function InterviewPage() {
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
-    
     recognition.onresult = (event: any) => {
-      let interim = "";
-      let allFinal = "";
+      let interim = ""; let allFinal = "";
       for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) allFinal += transcript + " ";
@@ -378,20 +299,14 @@ export default function InterviewPage() {
       }
       fullTranscriptRef.current = allFinal.trim();
       setLiveTranscript((allFinal + interim).trim());
-
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = setTimeout(() => {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) btn.click();
       }, 4500); 
     };
-    
     recognition.onerror = () => {};
-    recognition.onend = () => {
-      if (mediaRecorderRef.current?.state === "recording") {
-        try { recognition.start(); } catch {}
-      }
-    };
+    recognition.onend = () => { if (mediaRecorderRef.current?.state === "recording") { try { recognition.start(); } catch {} } };
     recognition.start();
     recognitionRef.current = recognition;
   }, []);
@@ -399,19 +314,12 @@ export default function InterviewPage() {
   const stopRecording = useCallback(() => {
     return new Promise<{ blob: Blob; transcript: string }>((resolve) => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch {}
-        recognitionRef.current = null;
-      }
+      if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state === "recording") {
-        recorder.onstop = () => {
-          resolve({ blob: new Blob(chunksRef.current, { type: "video/webm" }), transcript: fullTranscriptRef.current.trim() || liveTranscript.trim() });
-        };
+        recorder.onstop = () => { resolve({ blob: new Blob(chunksRef.current, { type: "video/webm" }), transcript: fullTranscriptRef.current.trim() || liveTranscript.trim() }); };
         recorder.stop();
-      } else {
-        resolve({ blob: new Blob(), transcript: fullTranscriptRef.current.trim() });
-      }
+      } else { resolve({ blob: new Blob(), transcript: fullTranscriptRef.current.trim() }); }
       setIsRecording(false);
     });
   }, [liveTranscript]);
@@ -425,13 +333,9 @@ export default function InterviewPage() {
     if (streamRef.current) {
       startMediaRecorder(streamRef.current);
       startSpeechRecognition();
-      silenceTimerRef.current = setTimeout(() => {
-        const btn = document.getElementById("auto-submit-btn");
-        if (btn) btn.click();
-      }, 15000); 
+      silenceTimerRef.current = setTimeout(() => { const btn = document.getElementById("auto-submit-btn"); if (btn) btn.click(); }, 15000); 
     }
   }, [voiceGender, startMediaRecorder, startSpeechRecognition]);
-
 
   const handleNextQuestion = useCallback(async () => {
     if (!isRecording) return;
@@ -440,7 +344,6 @@ export default function InterviewPage() {
     
     const hasAnswered = transcript.trim().length > 5;
     const tLower = transcript.toLowerCase();
-
     const wantsRepeat = tLower.includes("repeat") || tLower.includes("pardon") || (tLower.length < 25 && tLower.includes("sorry"));
 
     if (wantsRepeat && !introPhase && currentQuestion) {
@@ -469,7 +372,13 @@ export default function InterviewPage() {
       setIsSpeaking(false);
       setAiMessage("");
 
-      setTimeout(() => { if (questions[0]) speakAndRecord(questions[0].question); }, 300);
+      // FIX 4: Guarantee Q1 is fetched directly from the array memory to prevent the silence hang
+      const nextQData = questions[0];
+      if (nextQData) {
+        setTimeout(() => { speakAndRecord(nextQData.question); }, 300);
+      } else {
+        finalizeInterviewAndUpload("Error: Questions array failed to load.");
+      }
       return;
     }
 
@@ -477,8 +386,8 @@ export default function InterviewPage() {
     setAnswers((prev) => [...prev, { questionId: currentQuestion.id, transcript: transcript || "(No speech detected)", videoBlob: null }]);
 
     if (currentQ < totalQuestions - 1) {
-      const nextQ = currentQ + 1;
-      setCurrentQ(nextQ);
+      const nextIndex = currentQ + 1;
+      setCurrentQ(nextIndex);
 
       setIsSpeaking(true);
       let ackText = hasAnswered 
@@ -490,7 +399,7 @@ export default function InterviewPage() {
       setIsSpeaking(false);
       setAiMessage("");
 
-      setTimeout(() => { speakAndRecord(questions[nextQ].question); }, 300);
+      setTimeout(() => { speakAndRecord(questions[nextIndex].question); }, 300);
     } else {
       finalizeInterviewAndUpload();
     }
@@ -508,10 +417,17 @@ export default function InterviewPage() {
 
     setTerminationReason(forcedTerminationReason); 
 
+    // FIX 3: Explicitly separate cheating from just leaving early
+    const isCheat = forcedTerminationReason.includes("SECURITY BREACH");
+    const isLeave = forcedTerminationReason.includes("Candidate left early");
+
     setIsSpeaking(true);
-    const closingMsg = forcedTerminationReason 
+    const closingMsg = isCheat 
       ? `This interview has been terminated due to a security violation.` 
-      : `Thank you so much ${candidateName}. That concludes your interview. You may now leave feedback on the next screen.`;
+      : isLeave 
+        ? `You have chosen to leave the interview early. Thank you for your time.`
+        : `Thank you so much ${candidateName}. That concludes your interview. You may now leave feedback on the next screen.`;
+    
     setAiMessage(closingMsg);
     await speakText(closingMsg, voiceGender);
     setIsSpeaking(false);
@@ -519,11 +435,9 @@ export default function InterviewPage() {
 
     if (sessionId) {
       fetch(`${API_URL}/sessions/${sessionId}/status`, { 
-        method: "PATCH", 
-        headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ status: "completed" }),
-        keepalive: true
-      }).catch(err => console.log("Status update failed:", err));
+        method: "PATCH", headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ status: "completed" }), keepalive: true
+      }).catch(()=>{});
     }
 
     setInterviewStep("submitting");
@@ -558,12 +472,8 @@ export default function InterviewPage() {
       }
 
       await submitEvaluation({
-        candidate_name: candidateName,
-        position,
-        job_description: jobDescription,
-        resume,
-        transcript: fullTranscript || "(No transcript)",
-        video_filename: primaryVideoFilename,
+        candidate_name: candidateName, position, job_description: jobDescription,
+        resume, transcript: fullTranscript || "(No transcript)", video_filename: primaryVideoFilename,
         remarks: forcedTerminationReason || "Completed normally without interruptions.",
       } as any); 
 
@@ -590,8 +500,7 @@ export default function InterviewPage() {
     }
     try {
       await fetch(`${API_URL}/feedback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, candidate_name: candidateName, rating, comments: feedbackText })
       });
       toast.success("Feedback submitted to Recruiter!");
@@ -609,7 +518,8 @@ export default function InterviewPage() {
   if (interviewStep === "submitting") {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center space-y-6">
-        <Loader2 className="w-16 h-16 text-primary animate-spin" />
+        <CandidateHeader isLive={false} />
+        <Loader2 className="w-16 h-16 text-primary animate-spin mt-16" />
         <h2 className="text-2xl font-bold">Securely Uploading Session</h2>
         <p className="text-muted-foreground">Please do not close this tab. The system is transmitting your encrypted session.</p>
       </div>
@@ -617,29 +527,32 @@ export default function InterviewPage() {
   }
 
   if (interviewStep === "feedback") {
+    const isCheat = terminationReason && terminationReason.includes("SECURITY BREACH");
+    const isLeave = terminationReason && terminationReason.includes("Candidate left early");
+
     return (
       <div className="min-h-screen bg-background nexus-grid">
-        <Navbar />
-        <div className="container mx-auto px-6 pt-24 pb-16 max-w-2xl text-center">
+        <CandidateHeader isLive={false} />
+        <div className="container mx-auto px-6 pt-32 pb-16 max-w-2xl text-center">
           <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-8">
             
-            {terminationReason ? (
+            {isCheat ? (
               <ShieldX className="w-20 h-20 text-destructive mx-auto" />
             ) : (
               <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto" />
             )}
             
             <h1 className="text-4xl font-display font-bold text-foreground">
-              {terminationReason ? "Interview Terminated" : "Interview Complete!"}
+              {isCheat ? "Interview Terminated" : isLeave ? "Interview Ended Early" : "Interview Complete!"}
             </h1>
             
             <p className="text-lg text-muted-foreground">
-              {terminationReason 
+              {isCheat 
                 ? "This session was automatically terminated due to a security violation. A full incident report has been sent to the recruiter."
                 : `Thank you for your time, ${candidateName}. Your encrypted interview has been securely sent directly to the Recruiter's Dashboard.`}
             </p>
             
-            {!feedbackSubmitted && !terminationReason ? (
+            {!feedbackSubmitted && !isCheat ? (
               <div className="glass rounded-xl p-8 text-left space-y-6 mt-8">
                 <h3 className="text-xl font-semibold text-center">How was your GeniusHub interview experience?</h3>
                 <div className="flex justify-center gap-2">
@@ -652,7 +565,7 @@ export default function InterviewPage() {
               </div>
             ) : (
               <div className="glass p-6 text-foreground font-medium mt-8">
-                {terminationReason ? "You may now safely close this tab." : "Thank you for your feedback! You may now close this tab."}
+                {isCheat ? "You may now safely close this tab." : "Thank you for your feedback! You may now close this tab."}
               </div>
             )}
           </motion.div>
@@ -664,8 +577,8 @@ export default function InterviewPage() {
   if (interviewStep === "ready") {
     return (
       <div className="min-h-screen bg-background nexus-grid">
-        <Navbar />
-        <div className="container mx-auto px-6 pt-24 pb-16 max-w-2xl">
+        <CandidateHeader isLive={false} />
+        <div className="container mx-auto px-6 pt-32 pb-16 max-w-2xl">
           <motion.div initial="hidden" animate="visible" className="space-y-8 text-center">
             <motion.div variants={fadeUp} className="space-y-4">
               <div className="w-20 h-20 rounded-full bg-green-500/10 flex items-center justify-center mx-auto"><CheckCircle2 className="w-10 h-10 text-green-500" /></div>
@@ -691,8 +604,8 @@ export default function InterviewPage() {
   if (interviewStep === "welcome") {
     return (
       <div className="min-h-screen bg-background nexus-grid">
-        <Navbar />
-        <div className="container mx-auto px-6 pt-24 pb-16 max-w-2xl">
+        <CandidateHeader isLive={false} />
+        <div className="container mx-auto px-6 pt-32 pb-16 max-w-2xl">
           <motion.div initial="hidden" animate="visible" className="space-y-8 text-center">
             <motion.div variants={fadeUp} className="space-y-4">
               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mx-auto"><ShieldAlert className="w-10 h-10 text-primary" /></div>
@@ -721,10 +634,10 @@ export default function InterviewPage() {
 
   return (
     <div className="min-h-screen bg-background nexus-grid">
-      <Navbar />
+      <CandidateHeader isLive={true} />
       <button id="auto-submit-btn" className="hidden" onClick={handleNextQuestion}></button>
 
-      <div className="container mx-auto px-6 pt-24 pb-16 max-w-4xl">
+      <div className="container mx-auto px-6 pt-32 pb-16 max-w-4xl">
         <motion.div initial="hidden" animate="visible" className="space-y-6">
           <motion.div variants={fadeUp} className="space-y-3">
             <div className="flex items-center justify-between">
@@ -766,7 +679,7 @@ export default function InterviewPage() {
             )}
             <div className="flex items-center justify-between">
               {isRecording ? <Button onClick={handleNextQuestion} className="bg-primary text-primary-foreground"><Square className="w-4 h-4 mr-2 fill-current" /> Manual Submit <ChevronRight className="w-4 h-4 ml-1" /></Button> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</div>}
-              <Button variant="outline" size="sm" onClick={() => handleForceEndInterview(true)} className="text-xs border-destructive/30 text-destructive">Leave Interview</Button>
+              <Button variant="outline" size="sm" onClick={() => handleForceEndInterview(true, "Candidate left early manually.")} className="text-xs border-destructive/30 text-destructive">Leave Interview</Button>
             </div>
           </div>
         </motion.div>

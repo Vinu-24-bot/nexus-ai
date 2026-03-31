@@ -23,14 +23,12 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # ─── UTILITY FUNCTIONS ──────────────────────────────────────
 
 def format_prompt(template: str, **kwargs) -> str:
-    """Bulletproof prompt formatter to prevent crashes from technical characters."""
     prompt = template
     for key, value in kwargs.items():
         prompt = prompt.replace(f"{{{key}}}", str(value))
     return prompt
 
 def _parse_json_response(text: str) -> dict:
-    """Highly resilient JSON parser that ignores all markdown and conversational fluff."""
     try:
         match = re.search(r'\{.*\}', text.strip(), re.DOTALL)
         if match:
@@ -55,24 +53,17 @@ def _validate_result(result: dict) -> dict:
             raise ValueError(f"Missing required field: {field}")
     return result
 
-# ─── ENTERPRISE PROMPTS (UPGRADED STRICTNESS) ──────────────────────────────────────
+# ─── ENTERPRISE PROMPTS ──────────────────────────────────────
 
 EVALUATION_PROMPT = """You are "BATS", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Job Description, the Candidate's Deeply Parsed Resume, and the actual Live Interview Transcript.
-
-*** ZERO-TOLERANCE KILL SWITCH (CRITICAL) ***
-If the [INTERVIEW_TRANSCRIPT] contains the phrase "[SYSTEM LOG]" (indicating a security breach/cheat) OR if the candidate spoke less than 15 words total:
-1. You MUST set ALL scores (technical_proficiency, relevance_to_jd, communication, confidence_level, overall_score) to EXACTLY 0.
-2. You MUST set hiring_recommendation to "Reject".
-3. You MUST state the security breach or failure to complete the interview in the justification. 
-DO NOT evaluate the candidate's resume if this kill switch is triggered.
 
 CRITICAL ENTERPRISE RULES:
 1. FAIRNESS DOCTRINE: You MUST NOT penalize the candidate's "Technical Proficiency" or "Overall Score" for broken English, grammatical errors, or fumbling. Judge them PURELY on the technical accuracy and logic of their answers. 
 2. CONFIDENCE SCORE (0-100): Analyze the transcript for filler words ("um", "uh", "like"), sudden pauses, or incomplete sentences. Generate a separate Confidence Score based purely on these speech patterns.
 3. RUTHLESS TECHNICAL STANDARD: If the candidate provides generic, high-level, or superficial answers without specific technical implementation details, you MUST assign a Technical Score below 50. Do not inflate scores out of politeness.
 
-You MUST use the following "Mixture of Experts" framework to grade the candidate (UNLESS the Kill Switch is activated):
+You MUST use the following "Mixture of Experts" framework to grade the candidate:
 
 Step 1: THE ADVOCATE (Alignment & Strengths)
 Find every piece of evidence in the transcript that proves the candidate possesses the skills listed in the JD.
@@ -165,14 +156,14 @@ Candidate's Answer: {answer}
 
 Task: If the answer is vague or lacks technical depth, generate a probing follow-up question to test their actual knowledge. If strong, briefly acknowledge and move on. Output ONLY the exact text you would speak. Max 2 sentences."""
 
-RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies (like Eightfold or Workday). 
-Your job is to read unstructured, messy resume text (which may include tables, weird fonts, or bad formatting) and meticulously extract EVERYTHING into a "Liquid JSON Schema".
+RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies. 
+Your job is to read unstructured, messy resume text and meticulously extract EVERYTHING into a "Liquid JSON Schema".
 
 CRITICAL EXTRACTION RULES (STRICT COMPLIANCE REQUIRED):
-1. NEVER output `null`. If data is missing (like a phone number), use "Not Provided" or an empty array `[]`.
-2. NO GENERIC SUMMARIES. For 'key_achievements', you MUST extract the candidate's EXACT numbers, metrics, scale, and highly specific technical outcomes (e.g., extract "Reduced latency by 45% using Redis" — DO NOT write "Improved performance").
+1. NEVER output `null`. If data is missing, use "Not Provided" or an empty array `[]`.
+2. NO GENERIC SUMMARIES. For 'key_achievements', you MUST extract the candidate's EXACT numbers, metrics, scale, and highly specific technical outcomes.
 3. Extract ALL contact info, including GitHub, LinkedIn, or Portfolio URLs.
-4. Extract EVERY SINGLE Project and Company. Do not skip any. Extract the EXACT technologies used for that specific project. Do not hallucinate tools that weren't mentioned for that project.
+4. Extract EVERY SINGLE Project and Company. Extract the EXACT technologies used.
 
 You MUST output ONLY valid JSON matching this exact structure:
 {
@@ -210,7 +201,6 @@ Raw Resume Text:
 # ─── HYBRID AI PROVIDER CALLS ───────────────────────────────
 
 async def transcribe_audio(file_path: str) -> str:
-    """HYBRID ROUTE: Groq Whisper (Best for Audio)"""
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
     try:
         async with httpx.AsyncClient(timeout=120) as client:
@@ -226,7 +216,6 @@ async def transcribe_audio(file_path: str) -> str:
         raise
 
 async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000) -> dict:
-    """HYBRID ROUTE: Groq Llama 3.3 (Fastest Reasoning)"""
     async with httpx.AsyncClient(timeout=90) as client:
         payload = {
             "model": "llama-3.3-70b-versatile", 
@@ -238,12 +227,10 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
         url = "https://" + "api.groq.com/openai/v1/chat/completions"
         resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
         resp.raise_for_status()
-        
         if force_json: return json.loads(resp.json()["choices"][0]["message"]["content"])
         return _parse_json_response(resp.json()["choices"][0]["message"]["content"])
 
 def _call_gemini_sync(prompt: str) -> str:
-    """HYBRID ROUTE: Gemini 2.0 Flash (1-Million Token Memory)"""
     from google import genai
     client = genai.Client(api_key=GEMINI_API_KEY)
     response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
@@ -260,56 +247,62 @@ async def _call_groq_text(prompt: str) -> str:
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
 
-# ─── THE MOE CASCADE ROUTER ─────────────────────────────────
-
 async def _call_ai_cascade(prompt: str, force_json: bool = False) -> dict:
     errors = []
-    
     if GROQ_API_KEY:
         try:
-            print("[BATS] Evaluator routing to Groq...")
             return await _call_groq(prompt, force_json, max_tokens=6000)
         except Exception as e:
             errors.append(f"Groq: {e}")
-            print(f"[BATS] Groq failed, cascading... {e}")
-
     if GEMINI_API_KEY:
         try:
-            print("[BATS] Evaluator cascading to Gemini...")
             return await _call_gemini(prompt)
         except Exception as e:
             errors.append(f"Gemini: {e}")
-            print(f"[BATS] Gemini failed... {e}")
-
     raise ValueError(f"All AI Cascade providers failed: {'; '.join(errors)}")
 
-# ─── PUBLIC API EXPORTS (THE HYBRID CONDUCTOR) ──────────────
+# ─── PUBLIC API EXPORTS ───────────────────────────────
 
 async def parse_resume_to_json(raw_text: str) -> dict:
     prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=raw_text)
-    
     if GEMINI_API_KEY:
         try:
-            print("[BATS] Super Extractor: Hard-routing to Gemini (1M Context Window)...")
             return await _call_gemini(prompt)
-        except Exception as e:
-            print(f"[BATS] Gemini parsing failed, falling back to Groq: {e}")
-    
+        except Exception: pass
     try:
-        print("[BATS] Super Extractor: Routing to Groq (Truncating input to prevent crash)...")
         safe_text = raw_text[:15000]
         return await _call_groq(format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text), force_json=True, max_tokens=6000)
-    except Exception as e:
-        print(f"[BATS] FATAL Parsing Error: {e}")
-        return {
-            "candidate_info": {"name": "Extraction Failed", "email": "Not Provided", "phone": "Not Provided", "links": []},
-            "executive_summary": "System exceeded memory limits or encountered unreadable formatting.",
-            "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []},
-            "experience_and_projects": [{"name": "System Error", "role": "Not Provided", "duration": "Not Provided", "technologies_used": [], "key_achievements": []}],
-            "education_and_certifications": []
-        }
+    except Exception:
+        return {"candidate_info": {"name": "Extraction Failed", "email": "Not Provided", "phone": "Not Provided", "links": []}, "executive_summary": "System exceeded memory limits.", "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []}, "experience_and_projects": [], "education_and_certifications": []}
 
 async def evaluate_candidate(job_description: str, resume: str, transcript: str) -> dict:
+    # 100% RELIABLE PYTHON-LEVEL KILL SWITCH (Industry Standard)
+    # Bypasses the AI entirely if they cheated or remained silent.
+    word_count = len(transcript.split())
+    is_breach = "[SYSTEM LOG]: SECURITY BREACH" in transcript
+
+    if is_breach or word_count < 15:
+        print(f"[BATS] Kill Switch Activated! Breach: {is_breach}, Words: {word_count}")
+        reason = "Candidate triggered the Anti-Cheat Security Vault." if is_breach else "Candidate remained silent or failed to provide substantial answers."
+        return {
+            "candidate_overview": f"Session automatically rejected. {reason}",
+            "scores": {
+                "technical_proficiency": 0,
+                "relevance_to_jd": 0,
+                "communication": 0,
+                "confidence_level": 0,
+                "overall_score": 0
+            },
+            "sentiment": {"rating": "Negative", "explanation": "Session failed or terminated prematurely."},
+            "candidate_status": {"level": "Needs Improvement", "description": "Terminated/Incomplete"},
+            "strengths": ["None identified due to early termination."],
+            "red_flags_or_weaknesses": [f"CRITICAL: {reason}"],
+            "dynamic_follow_up_questions": [],
+            "hiring_recommendation": "Reject",
+            "justification": f"The platform's automatic kill switch was triggered. {reason} No technical evaluation was performed."
+        }
+
+    # If valid, proceed with normal LLM Evaluation
     prompt = format_prompt(EVALUATION_PROMPT, job_description=job_description, resume=resume, transcript=transcript)
     result = await _call_ai_cascade(prompt, force_json=True)
     return _validate_result(result)
@@ -328,5 +321,4 @@ async def get_answer_acknowledgment(question: str, answer: str) -> str:
     try:
         return await _call_groq_text(prompt)
     except Exception as e:
-        print(f"[BATS] Dynamic response failed: {e}")
         return "Thank you for sharing that context. Let's move on to the next question."
