@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
+# --- EXISTING SCHEMAS ---
+
 class EvaluationRequest(BaseModel):
     candidate_name: str = Field(..., min_length=1, max_length=200)
     position: str = Field(..., min_length=1, max_length=200)
@@ -73,3 +75,15 @@ class EvaluationResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# --- NEW ENTERPRISE SESSION SCHEMAS ---
+
+class SessionCreateRequest(BaseModel):
+    candidate_name: str
+    candidate_email: str
+    position: str
+    job_description: str
+    resume_text: str
+
+class SessionStatusUpdateRequest(BaseModel):
+    status: str # "started", "completed", or "terminated"

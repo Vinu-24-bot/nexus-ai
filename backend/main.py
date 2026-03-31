@@ -19,11 +19,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from database import Base, engine, get_db
-from models import Evaluation
+from models import Evaluation, InterviewSession
 from schemas import (
     EvaluationRequest, EvaluationResponse, QuestionGenerationRequest,
     JDGenerationRequest, AcknowledgmentRequest, SelectionStatusRequest,
-    ResumeUploadResponse,
+    ResumeUploadResponse, SessionCreateRequest, SessionStatusUpdateRequest
 )
 from ai_service import (
     evaluate_candidate, generate_interview_questions,
@@ -126,6 +126,53 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
 async def root():
     return {"message": "BATS AI Enterprise Backend v3.0 is running", "docs": "/docs"}
 
+# ─── ENTERPRISE ROUTES: INTERVIEW LINK GENERATION ───
+
+@app.post("/api/sessions/create")
+async def create_interview_session(req: SessionCreateRequest, db: Session = Depends(get_db)):
+    """Recruiter uses this to generate a unique interview link for a candidate."""
+    new_session = InterviewSession(
+        candidate_name=req.candidate_name,
+        candidate_email=req.candidate_email,
+        position=req.position,
+        job_description=req.job_description,
+        resume_text=req.resume_text,
+        status="pending"
+    )
+    db.add(new_session)
+    db.commit()
+    db.refresh(new_session)
+    
+    return {"message": "Session created", "session_id": new_session.id}
+
+@app.get("/api/sessions/{session_id}")
+async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
+    """Candidate clicks the link; this fetches their specific interview details."""
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Interview link not found or expired.")
+    
+    return {
+        "id": session.id,
+        "candidate_name": session.candidate_name,
+        "position": session.position,
+        "job_description": session.job_description,
+        "resume_text": session.resume_text,
+        "status": session.status
+    }
+
+@app.patch("/api/sessions/{session_id}/status")
+async def update_session_status(session_id: str, req: SessionStatusUpdateRequest, db: Session = Depends(get_db)):
+    """Real-time tracking: Updates if the candidate started, finished, or was terminated."""
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session.status = req.status
+    db.commit()
+    return {"message": f"Status updated to {req.status}", "candidate": session.candidate_name}
+
+# ─── CORE EVALUATION ROUTES ───
 
 @app.post("/api/upload-video")
 async def upload_video(video: UploadFile = File(...)):
@@ -146,7 +193,6 @@ async def upload_video(video: UploadFile = File(...)):
         "timestamp": timestamp,
     }
 
-
 @app.post("/api/upload-resume", response_model=ResumeUploadResponse)
 async def upload_resume(file: UploadFile = File(...)):
     if not file.filename:
@@ -166,7 +212,6 @@ async def upload_resume(file: UploadFile = File(...)):
         f.write(content)
 
     extracted_text = ""
-    # 1. Standard Raw Extraction
     if ext in [".txt", ".md"]:
         extracted_text = content.decode("utf-8", errors="ignore")
     elif ext == ".pdf":
@@ -186,18 +231,15 @@ async def upload_resume(file: UploadFile = File(...)):
         except ImportError:
             extracted_text = "[DOCX extraction requires python-docx. Install: pip install python-docx]"
 
-    # 2. ENTERPRISE FEATURE: Semantic Parsing
     print(f"[BATS] Running AI Semantic Parsing on {file.filename}...")
     structured_resume = await parse_resume_to_json(extracted_text)
-    print(f"[BATS] Resume perfectly structured!")
 
     return ResumeUploadResponse(
         filename=safe_name,
         path=str(file_path),
-        extracted_text=json.dumps(structured_resume, indent=2), # Send clean JSON to frontend
+        extracted_text=json.dumps(structured_resume, indent=2),
         size=len(content),
     )
-
 
 @app.post("/api/generate-questions")
 async def generate_questions(req: QuestionGenerationRequest):
@@ -207,7 +249,6 @@ async def generate_questions(req: QuestionGenerationRequest):
     except Exception as e:
         raise HTTPException(500, detail=f"Question generation failed: {str(e)}")
 
-
 @app.post("/api/generate-jd")
 async def generate_job_description(req: JDGenerationRequest):
     try:
@@ -215,7 +256,6 @@ async def generate_job_description(req: JDGenerationRequest):
         return {"job_description": jd}
     except Exception as e:
         raise HTTPException(500, detail=f"JD generation failed: {str(e)}")
-
 
 @app.post("/api/acknowledge-answer")
 async def acknowledge_answer(req: AcknowledgmentRequest):
@@ -225,33 +265,24 @@ async def acknowledge_answer(req: AcknowledgmentRequest):
     except Exception as e:
         return {"acknowledgment": "Thank you for that context. Let's move on."}
 
-
 @app.post("/api/evaluate")
 async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db)):
     try:
         final_transcript = req.transcript
         
-        # ENTERPRISE FEATURE: Auto-extract and transcribe if video is provided
         if req.video_filename:
             video_path = RECORDINGS_DIR / req.video_filename
             if video_path.exists():
                 audio_path = RECORDINGS_DIR / f"{req.video_filename}.mp3"
-                print(f"[BATS] Extracting audio from {req.video_filename}...")
-                
                 if extract_audio(str(video_path), str(audio_path)):
-                    print(f"[BATS] Transcribing actual audio using Whisper...")
                     try:
                         final_transcript = await transcribe_audio(str(audio_path))
-                        print("[BATS] Real audio transcribed successfully!")
                     except Exception as e:
                         print(f"[BATS] Whisper transcription failed, falling back to frontend text: {e}")
-                else:
-                    print("[BATS] Audio extraction failed, using frontend text.")
 
         if len(final_transcript.strip()) < 10:
             raise ValueError("Transcript is too short or audio extraction failed to find speech.")
 
-        print("[BATS] Running Multi-Agent AI Evaluation...")
         ai_result = await evaluate_candidate(
             job_description=req.job_description,
             resume=req.resume,
@@ -266,7 +297,7 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
             position=req.position,
             job_description=req.job_description,
             resume=req.resume,
-            transcript=final_transcript, # Save the REAL transcript to the DB
+            transcript=final_transcript,
             video_filename=req.video_filename,
             candidate_overview=ai_result.get("candidate_overview", ""),
             scores=ai_result.get("scores", {}),
@@ -293,12 +324,10 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
     except Exception as e:
         raise HTTPException(500, detail=f"AI evaluation failed: {str(e)}")
 
-
 @app.get("/api/evaluations")
 async def list_evaluations(db: Session = Depends(get_db)):
     evaluations = db.query(Evaluation).order_by(Evaluation.created_at.desc()).all()
     return [db_to_response(ev) for ev in evaluations]
-
 
 @app.get("/api/evaluations/{eval_id}")
 async def get_evaluation(eval_id: str, db: Session = Depends(get_db)):
@@ -306,7 +335,6 @@ async def get_evaluation(eval_id: str, db: Session = Depends(get_db)):
     if not ev:
         raise HTTPException(404, "Evaluation not found")
     return db_to_response(ev)
-
 
 @app.patch("/api/evaluations/{eval_id}/status")
 async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db: Session = Depends(get_db)):
@@ -319,7 +347,6 @@ async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db:
     db.refresh(ev)
     return db_to_response(ev)
 
-
 @app.delete("/api/evaluations/{eval_id}")
 async def delete_evaluation(eval_id: str, db: Session = Depends(get_db)):
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
@@ -330,10 +357,8 @@ async def delete_evaluation(eval_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Deleted successfully"}
 
-
 @app.get("/api/stats")
 async def get_stats(db: Session = Depends(get_db)):
-    """Enterprise Dashboard Stats - Hiring Funnel & Analytics"""
     evaluations = db.query(Evaluation).all()
     total = len(evaluations)
     
@@ -351,7 +376,6 @@ async def get_stats(db: Session = Depends(get_db)):
     lean_hires = sum(1 for ev in evaluations if ev.hiring_recommendation == "Lean Hire")
     rejects = sum(1 for ev in evaluations if ev.hiring_recommendation == "Reject")
     
-    # Enterprise Metric: Pipeline Health
     if total > 0:
         hire_rate = (strong_hires + lean_hires) / total
         pipeline_health = "Excellent" if hire_rate >= 0.4 else "Needs Adjustment" if hire_rate < 0.15 else "Healthy"
@@ -374,20 +398,15 @@ async def get_stats(db: Session = Depends(get_db)):
         "positions": list(set(ev.position for ev in evaluations)),
     }
 
-
 @app.post("/api/compare")
 async def compare_candidates(candidate_ids: List[str], db: Session = Depends(get_db)):
-    """Enterprise Hiring Matrix (Side-by-Side Debrief)"""
     evaluations = db.query(Evaluation).filter(Evaluation.id.in_(candidate_ids)).all()
     if len(evaluations) < 2:
         raise HTTPException(400, "Need at least 2 valid candidate IDs to compare")
 
     results = [db_to_response(ev) for ev in evaluations]
-    
-    # Rank by overall score
     ranked = sorted(results, key=lambda r: r["scores"].get("overall_score", 0), reverse=True)
     
-    # Generate the Enterprise Debrief Matrix
     debrief_matrix = []
     for i, r in enumerate(ranked):
         r["rank"] = i + 1

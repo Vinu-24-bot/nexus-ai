@@ -32,3 +32,18 @@ class Evaluation(Base):
     sentiment = Column(JSON, default=lambda: {"rating": "Neutral", "explanation": ""})
     candidate_status = Column(JSON, default=lambda: {"level": "Moderate Confidence", "description": ""})
     selection_status = Column(String(50), default="pending")  # pending | selected | rejected
+
+class InterviewSession(Base):
+    __tablename__ = "interview_sessions"
+    
+    # This ID will be the unique link the candidate clicks (e.g., bats-ai.com/interview/abc-123)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    candidate_name = Column(String, index=True)
+    candidate_email = Column(String)
+    position = Column(String)
+    job_description = Column(Text)
+    resume_text = Column(Text)
+    
+    # Status tracks if they are pending, live, or finished
+    status = Column(String, default="pending") # pending, started, completed, terminated
+    created_at = Column(DateTime, default=datetime.utcnow)
