@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   Brain, FileText, Briefcase, User, Loader2, Mic, Volume2, Sparkles, Clock, Upload, X, CheckCircle2,
-  Wifi, WifiOff, Link as LinkIcon, Copy
+  Wifi, WifiOff, Link as LinkIcon, Copy, Mail, ShieldCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +31,14 @@ const DURATION_OPTIONS = [
   { label: "25 min", value: 25, questions: 15 },
 ];
 
+// --- NEW ENTERPRISE FEATURE: INTERVIEW LEVELS ---
+const INTERVIEW_LEVELS = [
+  { value: "L1 (Junior)", label: "L1 - Junior (0-2 YOE)" },
+  { value: "L2 (Mid-Level)", label: "L2 - Mid-Level (2-5 YOE)" },
+  { value: "L3 (Senior)", label: "L3 - Senior (5-8 YOE)" },
+  { value: "L4 (Lead/Architect)", label: "L4 - Lead/Architect (8+ YOE)" },
+];
+
 const JD_TEMPLATES: Record<string, string> = {
   "react developer": `Job Title: React Developer\n\nJob Summary:\nWe are looking for a skilled React Developer to build and maintain high-performance web applications using React.js and modern JavaScript ecosystem.\n\nKey Responsibilities:\n- Build responsive, reusable UI components using React.js\n- Implement state management solutions (Redux, Context API, Zustand)\n- Write clean, maintainable, and well-tested code with Jest/RTL\n- Collaborate with backend engineers on RESTful APIs and GraphQL\n- Optimize applications for maximum speed and scalability\n- Participate in code reviews and mentor junior developers\n- Translate UI/UX designs into high-quality code\n\nRequired Skills & Qualifications:\n- 2+ years of hands-on React.js development experience\n- Strong proficiency in JavaScript/TypeScript, HTML5, CSS3\n- Deep understanding of React hooks, component lifecycle, virtual DOM\n- Experience with build tools (Webpack, Vite, Babel)\n- Familiarity with RESTful APIs and async programming\n- Git version control proficiency\n- Understanding of responsive design and cross-browser compatibility\n\nPreferred Skills:\n- Next.js or Remix framework experience\n- Testing experience (Jest, React Testing Library, Cypress)\n- CI/CD pipeline experience\n- Tailwind CSS or CSS-in-JS solutions\n\nExperience Level: Mid-Level (2-4 years)`,
   "full stack developer": `Job Title: Full Stack Developer\n\nJob Summary:\nSeeking a versatile Full Stack Developer proficient in both frontend and backend technologies to build end-to-end web applications.\n\nKey Responsibilities:\n- Design and develop full-stack web applications\n- Build scalable RESTful APIs and microservices\n- Develop responsive frontend interfaces with modern frameworks\n- Manage relational and NoSQL databases\n- Deploy and maintain cloud infrastructure\n- Write unit/integration tests\n- Ensure application security and performance\n\nRequired Skills:\n- 3+ years full-stack development experience\n- Frontend: React/Vue/Angular, HTML5, CSS3, JavaScript/TypeScript\n- Backend: Node.js/Python/Java with Express/FastAPI/Spring\n- Database: PostgreSQL, MongoDB, Redis\n- RESTful API design and implementation\n- Git, Docker basics, Linux command line\n\nPreferred Skills:\n- Cloud platforms (AWS/GCP/Azure)\n- Kubernetes, CI/CD pipelines\n- GraphQL\n- System design fundamentals\n\nExperience Level: Mid to Senior (3-6 years)`,
@@ -55,6 +63,8 @@ export default function EvaluatePage() {
   // States
   const [candidateName, setCandidateName] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
+  const [recruiterEmail, setRecruiterEmail] = useState(""); // NEW
+  const [interviewLevel, setInterviewLevel] = useState(INTERVIEW_LEVELS[1].value); // NEW
   const [position, setPosition] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [resume, setResume] = useState("");
@@ -155,7 +165,7 @@ export default function EvaluatePage() {
   };
 
   const handleGenerateLink = async () => {
-    if (!candidateName || !candidateEmail || !position || !jobDescription || !resume) return;
+    if (!isValid) return;
     setIsGenerating(true);
     
     try {
@@ -165,6 +175,8 @@ export default function EvaluatePage() {
         body: JSON.stringify({
           candidate_name: candidateName,
           candidate_email: candidateEmail,
+          recruiter_email: recruiterEmail,
+          interview_level: interviewLevel,
           position: position,
           job_description: jobDescription,
           resume_text: resume
@@ -176,7 +188,7 @@ export default function EvaluatePage() {
       const data = await response.json();
       const uniqueLink = `${window.location.origin}/interview/${data.session_id}`;
       setGeneratedLink(uniqueLink);
-      toast.success("Interview Link Generated Successfully!");
+      toast.success("Interview Link Generated & Emails Sent!");
       
     } catch (error) {
       console.error(error);
@@ -191,7 +203,7 @@ export default function EvaluatePage() {
     toast.success("Link copied to clipboard!");
   };
 
-  const isValid = candidateName && candidateEmail && position && jobDescription && resume;
+  const isValid = candidateName && candidateEmail && recruiterEmail && position && jobDescription && resume;
 
   return (
     <div className="min-h-screen bg-background nexus-grid">
@@ -208,7 +220,7 @@ export default function EvaluatePage() {
               Create Interview <span className="text-primary">Session</span>
             </h1>
             <p className="text-muted-foreground max-w-xl mx-auto">
-              Generate a unique, secure link for your candidate. BATS AI will conduct the interview asynchronously and evaluate them automatically.
+              Generate a unique, secure link for your candidate. BATS AI will conduct the interview asynchronously and email you the results.
             </p>
           </motion.div>
 
@@ -235,8 +247,8 @@ export default function EvaluatePage() {
           {generatedLink ? (
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="glass rounded-xl p-10 text-center space-y-6 border-primary/50 bg-primary/5">
               <CheckCircle2 className="w-16 h-16 text-primary mx-auto" />
-              <h2 className="text-2xl font-bold">Session Created!</h2>
-              <p className="text-muted-foreground">Send this unique link to the candidate. They will enter the interview directly without needing to log in or upload anything.</p>
+              <h2 className="text-2xl font-bold">Session Created & Invitations Sent!</h2>
+              <p className="text-muted-foreground">The candidate has been emailed this link. You will receive an alert at <strong>{recruiterEmail}</strong> when they begin and when the results are ready.</p>
               <div className="flex items-center gap-4 bg-background p-4 rounded-lg border border-border">
                 <LinkIcon className="w-5 h-5 text-muted-foreground shrink-0" />
                 <code className="flex-1 text-sm text-left truncate">{generatedLink}</code>
@@ -246,6 +258,7 @@ export default function EvaluatePage() {
             </motion.div>
           ) : (
             <div className="space-y-6">
+              
               <motion.div variants={fadeUp} custom={1} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -260,11 +273,11 @@ export default function EvaluatePage() {
                 </div>
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <User className="w-4 h-4 text-primary" /> Candidate Email *
+                    <Mail className="w-4 h-4 text-primary" /> Candidate Email *
                   </label>
                   <Input
                     type="email"
-                    placeholder="e.g., alex@email.com"
+                    placeholder="Where to send the interview link"
                     value={candidateEmail}
                     onChange={(e) => setCandidateEmail(e.target.value)}
                     className="bg-card border-border"
@@ -272,9 +285,38 @@ export default function EvaluatePage() {
                 </div>
               </motion.div>
 
+              <motion.div variants={fadeUp} custom={1.2} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Mail className="w-4 h-4 text-accent" /> Your Email (Recruiter) *
+                  </label>
+                  <Input
+                    type="email"
+                    placeholder="For tracking & alerts"
+                    value={recruiterEmail}
+                    onChange={(e) => setRecruiterEmail(e.target.value)}
+                    className="bg-card border-border"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <ShieldCheck className="w-4 h-4 text-accent" /> Interview Level *
+                  </label>
+                  <select
+                    value={interviewLevel}
+                    onChange={(e) => setInterviewLevel(e.target.value)}
+                    className="flex h-10 w-full rounded-md border border-input bg-card px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    {INTERVIEW_LEVELS.map(lvl => (
+                      <option key={lvl.value} value={lvl.value} className="bg-background">{lvl.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </motion.div>
+
               <motion.div variants={fadeUp} custom={1.5} className="space-y-2">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <Briefcase className="w-4 h-4 text-accent" /> Position / Role *
+                  <Briefcase className="w-4 h-4 text-primary" /> Position / Role *
                 </label>
                 <Input
                   placeholder="e.g., React Developer, Data Scientist"
