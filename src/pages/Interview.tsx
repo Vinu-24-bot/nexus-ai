@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Video, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, AlertCircle, Volume2, Clock, ShieldAlert, Star, Send
+  Brain, CheckCircle2, AlertCircle, Volume2, Clock, ShieldAlert, Star, Send, ShieldX
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -95,9 +95,12 @@ export default function InterviewPage() {
   const [liveTranscript, setLiveTranscript] = useState("");
   const [totalElapsed, setTotalElapsed] = useState(0);
   
-  // Enterprise Steps: loading -> welcome -> interview -> submitting -> feedback
   const [interviewStep, setInterviewStep] = useState<"welcome" | "interview" | "submitting" | "feedback">("welcome");
   const [cameraReady, setCameraReady] = useState(false);
+  
+  // Anti-Cheat States
+  const [cheatStrikes, setCheatStrikes] = useState(0);
+  const [terminationReason, setTerminationReason] = useState("");
   
   // Feedback States
   const [rating, setRating] = useState(0);
@@ -109,7 +112,6 @@ export default function InterviewPage() {
   const chunksRef = useRef<Blob[]>([]);
   const totalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
-  // Enterprise Anti-Cheat Refs
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   
@@ -186,32 +188,94 @@ export default function InterviewPage() {
   // Time expiry auto-submit
   useEffect(() => {
     if (timeRemaining <= 0 && interviewStep === "interview" && totalElapsed > 0) {
-      handleForceEndInterview(false);
+      handleForceEndInterview(false, "Time Expired.");
     }
   }, [timeRemaining, interviewStep, totalElapsed]);
 
-  // ─── ENTERPRISE ANTI-CHEAT: REQUIRE CAMERA + SCREEN SHARE ───
+  // ─── ENTERPRISE ANTI-CHEAT ENGINE (KEYBOARD, FOCUS, FULLSCREEN) ───
+  useEffect(() => {
+    if (interviewStep !== "interview") return;
+
+    // 1. Keyboard 3-Strike Rule
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return; // Allow Esc (which triggers fullscreenchange termination below)
+      
+      e.preventDefault(); // Block typing to AI tools
+      
+      setCheatStrikes(prev => {
+        const newStrikes = prev + 1;
+        if (newStrikes >= 3) {
+          toast.error("SECURITY BREACH: Interview Terminated (Excessive Keyboard Usage).");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate exceeded 3 keyboard warnings. Probable use of external AI typing tool.");
+        } else {
+          toast.warning(`Security Warning (${newStrikes}/3): Keyboard disabled. Use ONLY your mouse and voice. 3 strikes will terminate the interview.`);
+        }
+        return newStrikes;
+      });
+    };
+
+    // 2. Fullscreen Exit Detection
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        toast.error("SECURITY BREACH: You exited Full Screen mode.");
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode to access other applications.");
+      }
+    };
+
+    // 3. Tab/Window Focus Detection (Dual Monitor cheating)
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        toast.error("SECURITY BREACH: Tab lost focus.");
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched tabs.");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [interviewStep]);
+
+
   const openSecurityVault = useCallback(async () => {
     try {
-      // 1. Get Camera and Mic
+      // 1. Force Full Screen
+      if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+
+      // 2. Scan for Virtual Cameras (Parkeet AI, OBS)
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(d => d.kind === 'videoinput');
+      const hasVirtual = videoDevices.some(d => d.label.toLowerCase().includes('virtual') || d.label.toLowerCase().includes('obs'));
+      if (hasVirtual) {
+        toast.warning("Virtual Camera detected. This will be flagged in your final report.");
+      }
+
+      // 3. Get Camera and Mic
       const avStream = await navigator.mediaDevices.getUserMedia({
         video: { width: 1280, height: 720, facingMode: "user" },
         audio: true,
       });
       streamRef.current = avStream;
 
-      // 2. Get Screen Share (Anti-Cheat)
+      // 4. Get Screen Share
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: false
       });
       screenStreamRef.current = screenStream;
 
-      // 3. Listen for Screen Share Termination (If they stop sharing, kill interview)
+      // 5. Screen Share Termination Check
       screenStream.getVideoTracks()[0].onended = () => {
         if (interviewStep === "interview") {
-          toast.error("Screen sharing stopped! Security breach detected. Terminating interview.");
-          handleForceEndInterview(true, "Candidate stopped sharing screen (Security Breach).");
+          toast.error("SECURITY BREACH: Screen sharing stopped.");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing their screen mid-interview.");
         }
       };
 
@@ -225,7 +289,7 @@ export default function InterviewPage() {
 
       return avStream;
     } catch (err) {
-      toast.error("Security Requirement: You MUST allow Camera, Mic, and Screen Sharing to proceed.");
+      toast.error("Security Requirement: You MUST allow Full-Screen, Camera, Mic, and Screen Sharing to proceed.");
       throw err;
     }
   }, [interviewStep]);
@@ -362,7 +426,7 @@ export default function InterviewPage() {
     const { transcript } = await stopRecording(); 
     setLiveTranscript("");
     
-    // ─── ENTERPRISE STRICT LISTENING FIX ───
+    // Strict Listening Fix
     const hasAnswered = transcript.trim().length > 5;
 
     if (introPhase) {
@@ -411,22 +475,24 @@ export default function InterviewPage() {
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
     const fullBlob = await stopFullRecording();
 
-    // Turn off cameras and screen share
+    // Kill cameras and exit fullscreen
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
     if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraReady(false);
 
+    setTerminationReason(forcedTerminationReason); // Save for UI
+
     setIsSpeaking(true);
     const closingMsg = forcedTerminationReason 
-      ? `This interview has been terminated early. Thank you for your time.` 
+      ? `This interview has been terminated due to a security violation.` 
       : `Thank you so much ${candidateName}. That concludes your interview. You may now leave feedback on the next screen.`;
     setAiMessage(closingMsg);
     await speakText(closingMsg, voiceGender);
     setIsSpeaking(false);
     setAiMessage("");
 
-    // Hide results from candidate!
     setInterviewStep("submitting");
 
     try {
@@ -442,7 +508,10 @@ export default function InterviewPage() {
         return `Q${i} [${q?.difficulty}]: ${q?.question || "Unknown"}\nA${i}: ${a.transcript}`;
       }).join("\n\n");
 
-      if (forcedTerminationReason) fullTranscript += `\n\n[SYSTEM LOG]: ${forcedTerminationReason}`;
+      // Inject Cheating Log directly to AI Evaluator!
+      if (forcedTerminationReason) {
+        fullTranscript += `\n\n[SYSTEM LOG]: ${forcedTerminationReason}`;
+      }
 
       const timestamp = Date.now();
       const safeName = candidateName.replace(/\s+/g, "_");
@@ -469,7 +538,7 @@ export default function InterviewPage() {
         fetch(`${API_URL}/sessions/${sessionId}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "completed" }) });
       }
 
-      setInterviewStep("feedback"); // Show Feedback UI, NOT Results
+      setInterviewStep("feedback");
     } catch (err: any) {
       toast.error("An error occurred during background processing, but your interview is complete.");
       setInterviewStep("feedback");
@@ -513,8 +582,8 @@ export default function InterviewPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center space-y-6">
         <Loader2 className="w-16 h-16 text-primary animate-spin" />
-        <h2 className="text-2xl font-bold">Securely Uploading Interview</h2>
-        <p className="text-muted-foreground">Please do not close this tab. The system is transmitting your encrypted session to the recruiter.</p>
+        <h2 className="text-2xl font-bold">Securely Uploading Session</h2>
+        <p className="text-muted-foreground">Please do not close this tab. The system is transmitting your encrypted session.</p>
       </div>
     );
   }
@@ -526,11 +595,24 @@ export default function InterviewPage() {
         <Navbar />
         <div className="container mx-auto px-6 pt-24 pb-16 max-w-2xl text-center">
           <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-8">
-            <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto" />
-            <h1 className="text-4xl font-display font-bold text-foreground">Interview Complete!</h1>
-            <p className="text-lg text-muted-foreground">Thank you for your time, {candidateName}. Your encrypted interview and evaluation have been securely sent directly to the Recruiter's Dashboard.</p>
             
-            {!feedbackSubmitted ? (
+            {terminationReason ? (
+              <ShieldX className="w-20 h-20 text-destructive mx-auto" />
+            ) : (
+              <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto" />
+            )}
+            
+            <h1 className="text-4xl font-display font-bold text-foreground">
+              {terminationReason ? "Interview Terminated" : "Interview Complete!"}
+            </h1>
+            
+            <p className="text-lg text-muted-foreground">
+              {terminationReason 
+                ? "This session was automatically terminated due to a security violation. A full incident report has been sent to the recruiter."
+                : `Thank you for your time, ${candidateName}. Your encrypted interview has been securely sent directly to the Recruiter's Dashboard.`}
+            </p>
+            
+            {!feedbackSubmitted && !terminationReason ? (
               <div className="glass rounded-xl p-8 text-left space-y-6 mt-8">
                 <h3 className="text-xl font-semibold text-center">How was your AI interview experience?</h3>
                 <div className="flex justify-center gap-2">
@@ -542,7 +624,9 @@ export default function InterviewPage() {
                 <Button onClick={submitFeedback} disabled={rating === 0} className="w-full h-12 bg-primary text-primary-foreground glow-cyan"><Send className="w-4 h-4 mr-2" /> Submit Feedback</Button>
               </div>
             ) : (
-              <div className="glass p-6 text-green-400 font-medium">Thank you for your feedback! You may now close this tab.</div>
+              <div className="glass p-6 text-foreground font-medium mt-8">
+                {terminationReason ? "You may now safely close this tab." : "Thank you for your feedback! You may now close this tab."}
+              </div>
             )}
           </motion.div>
         </div>
@@ -563,16 +647,17 @@ export default function InterviewPage() {
               <p className="text-muted-foreground max-w-md mx-auto"><strong className="text-foreground">{candidateName}</strong> — {position}</p>
             </motion.div>
             <motion.div variants={fadeUp} className="glass rounded-xl p-6 text-left border border-primary/20">
-              <h3 className="text-sm font-semibold text-primary uppercase tracking-wider mb-4">Enterprise Security Requirements</h3>
+              <h3 className="text-sm font-semibold text-primary uppercase tracking-wider mb-4">Enterprise Security Rules</h3>
               <ul className="space-y-3 text-sm text-muted-foreground">
-                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Camera & Mic Required:</strong> Please allow browser permissions when prompted.</li>
-                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Screen Sharing Enforced:</strong> You will be prompted to share your "Entire Screen" or "Window". If you stop sharing, the interview terminates immediately.</li>
+                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Full Screen Lock:</strong> You will be forced into Full Screen. Exiting full screen (via mouse or Esc) terminates the interview instantly.</li>
+                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Screen & Camera Enforced:</strong> You must share your entire screen. If you switch tabs, the interview terminates.</li>
+                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Keyboard Disabled (3-Strikes):</strong> Do not touch your keyboard to access AI tools. 3 strikes and you are terminated. Use only your mouse and voice.</li>
                 <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Strict Hands-Free AI:</strong> Just talk naturally. If you stay silent for 10+ seconds, the AI assumes you don't know the answer and moves on.</li>
               </ul>
             </motion.div>
             <motion.div variants={fadeUp}>
               <Button onClick={handleBeginInterview} className="h-14 px-10 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan">
-                Accept & Begin Security Check
+                Accept Rules & Enter Security Vault
               </Button>
             </motion.div>
           </motion.div>
