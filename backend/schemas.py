@@ -76,14 +76,22 @@ class EvaluationResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# --- NEW ENTERPRISE SESSION SCHEMAS ---
+# --- ENTERPRISE SESSION & FEEDBACK SCHEMAS ---
 
 class SessionCreateRequest(BaseModel):
     candidate_name: str
     candidate_email: str
+    recruiter_email: str
+    interview_level: str
     position: str
     job_description: str
     resume_text: str
 
 class SessionStatusUpdateRequest(BaseModel):
     status: str # "started", "completed", or "terminated"
+
+class FeedbackRequest(BaseModel):
+    session_id: str
+    candidate_name: str
+    rating: int
+    comments: str

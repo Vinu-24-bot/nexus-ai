@@ -36,14 +36,27 @@ class Evaluation(Base):
 class InterviewSession(Base):
     __tablename__ = "interview_sessions"
     
-    # This ID will be the unique link the candidate clicks (e.g., bats-ai.com/interview/abc-123)
+    # This ID will be the unique link the candidate clicks
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     candidate_name = Column(String, index=True)
     candidate_email = Column(String)
+    
+    # NEW ENTERPRISE FIELDS
+    recruiter_email = Column(String, nullable=True) 
+    interview_level = Column(String, default="L2 (Mid-Level)") 
+    
     position = Column(String)
     job_description = Column(Text)
     resume_text = Column(Text)
     
-    # Status tracks if they are pending, live, or finished
     status = Column(String, default="pending") # pending, started, completed, terminated
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CandidateFeedback(Base):
+    __tablename__ = "candidate_feedback"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String, index=True)
+    candidate_name = Column(String)
+    rating = Column(Integer)
+    comments = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)

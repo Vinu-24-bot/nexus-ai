@@ -8,22 +8,25 @@ import json
 import shutil
 import hashlib
 import subprocess
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from pathlib import Path
 from typing import List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from database import Base, engine, get_db
-from models import Evaluation, InterviewSession
+from models import Evaluation, InterviewSession, CandidateFeedback
 from schemas import (
     EvaluationRequest, EvaluationResponse, QuestionGenerationRequest,
     JDGenerationRequest, AcknowledgmentRequest, SelectionStatusRequest,
-    ResumeUploadResponse, SessionCreateRequest, SessionStatusUpdateRequest
+    ResumeUploadResponse, SessionCreateRequest, SessionStatusUpdateRequest, FeedbackRequest
 )
 from ai_service import (
     evaluate_candidate, generate_interview_questions,
@@ -122,18 +125,45 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
         return False
 
 
+# --- ENTERPRISE EMAIL ENGINE ---
+def send_system_email(to_email: str, subject: str, body: str):
+    sender_email = os.getenv("SENDER_EMAIL")
+    sender_password = os.getenv("SENDER_PASSWORD")
+    if not sender_email or not sender_password:
+        print(f"[BATS] Email credentials missing. Cannot send email to {to_email}.")
+        return
+    
+    msg = MIMEMultipart()
+    msg['From'] = f"BATS AI Recruitment <{sender_email}>"
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, to_email, msg.as_string())
+        server.quit()
+        print(f"[BATS] Email successfully sent to {to_email}")
+    except Exception as e:
+        print(f"[BATS] FATAL EMAIL ERROR: {e}")
+
+
 @app.get("/")
 async def root():
     return {"message": "BATS AI Enterprise Backend v3.0 is running", "docs": "/docs"}
 
-# ─── ENTERPRISE ROUTES: INTERVIEW LINK GENERATION ───
+# ─── ENTERPRISE ROUTES: SESSION LINK & EMAIL GENERATION ───
 
 @app.post("/api/sessions/create")
-async def create_interview_session(req: SessionCreateRequest, db: Session = Depends(get_db)):
-    """Recruiter uses this to generate a unique interview link for a candidate."""
+async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Creates the session and emails both Candidate and Recruiter."""
     new_session = InterviewSession(
         candidate_name=req.candidate_name,
         candidate_email=req.candidate_email,
+        recruiter_email=req.recruiter_email,
+        interview_level=req.interview_level,
         position=req.position,
         job_description=req.job_description,
         resume_text=req.resume_text,
@@ -143,7 +173,21 @@ async def create_interview_session(req: SessionCreateRequest, db: Session = Depe
     db.commit()
     db.refresh(new_session)
     
-    return {"message": "Session created", "session_id": new_session.id}
+    frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app")
+    # For local development testing, you can uncomment this:
+    # frontend_url = "http://localhost:8080"
+    interview_link = f"{frontend_url}/interview/{new_session.id}"
+
+    # 1. Email Candidate
+    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to an AI Video Interview for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
+    background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
+
+    # 2. Email Recruiter
+    if req.recruiter_email:
+        recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\n\nYou will receive another alert the moment they begin, and when results are ready."
+        background_tasks.add_task(send_system_email, req.recruiter_email, f"BATS Tracking: Session Created for {req.candidate_name}", recruiter_body)
+    
+    return {"message": "Session created and emails queued", "session_id": new_session.id}
 
 @app.get("/api/sessions/{session_id}")
 async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
@@ -158,19 +202,43 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
         "position": session.position,
         "job_description": session.job_description,
         "resume_text": session.resume_text,
+        "interview_level": session.interview_level,
         "status": session.status
     }
 
 @app.patch("/api/sessions/{session_id}/status")
-async def update_session_status(session_id: str, req: SessionStatusUpdateRequest, db: Session = Depends(get_db)):
-    """Real-time tracking: Updates if the candidate started, finished, or was terminated."""
+async def update_session_status(session_id: str, req: SessionStatusUpdateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Updates status and alerts Recruiter when candidate starts/finishes."""
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
     session.status = req.status
     db.commit()
+
+    # Recruiter Alerts
+    if session.recruiter_email:
+        if req.status == "started":
+            body = f"Alert: {session.candidate_name} has just joined the interview room and started their camera/screen-share."
+            background_tasks.add_task(send_system_email, session.recruiter_email, f"🟢 Started: {session.candidate_name}", body)
+        elif req.status == "completed":
+            body = f"Success: {session.candidate_name} has finished the interview.\n\nThe AI is currently processing the video, anti-cheat logs, and technical evaluation. You can view the results on your dashboard shortly."
+            background_tasks.add_task(send_system_email, session.recruiter_email, f"✅ Completed: {session.candidate_name}", body)
+
     return {"message": f"Status updated to {req.status}", "candidate": session.candidate_name}
+
+@app.post("/api/feedback")
+async def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
+    """Stores candidate feedback after the interview."""
+    feedback = CandidateFeedback(
+        session_id=req.session_id,
+        candidate_name=req.candidate_name,
+        rating=req.rating,
+        comments=req.comments
+    )
+    db.add(feedback)
+    db.commit()
+    return {"message": "Feedback saved successfully"}
 
 # ─── CORE EVALUATION ROUTES ───
 
