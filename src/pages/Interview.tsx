@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Video, Square, ChevronRight, Loader2,
   Brain, CheckCircle2, AlertCircle, Volume2, Clock, AlertTriangle,
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { submitEvaluation, uploadVideo, getAcknowledgment } from "@/lib/api";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
+
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api";
 
 interface InterviewQuestion {
   id: number;
@@ -36,18 +38,6 @@ interface AnswerRecord {
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
-};
-
-const difficultyColor: Record<string, string> = {
-  easy: "text-green-400 bg-green-400/10 border-green-400/20",
-  medium: "text-yellow-400 bg-yellow-400/10 border-yellow-400/20",
-  hard: "text-red-400 bg-red-400/10 border-red-400/20",
-};
-
-const categoryColor: Record<string, string> = {
-  technical: "text-primary bg-primary/10",
-  behavioral: "text-nexus-purple bg-nexus-purple/10",
-  situational: "text-nexus-amber bg-nexus-amber/10",
 };
 
 function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
@@ -94,9 +84,14 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
 }
 
 export default function InterviewPage() {
+  const { sessionId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
   const state = location.state as LocationState | undefined;
+
+  // New Link Session State
+  const [fetchedData, setFetchedData] = useState<LocationState | null>(null);
+  const [isInitializing, setIsInitializing] = useState(!!sessionId && !state);
 
   const [currentQ, setCurrentQ] = useState(-1);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
@@ -125,14 +120,19 @@ export default function InterviewPage() {
   const fullTranscriptRef = useRef("");
   const fullRecordingChunksRef = useRef<Blob[]>([]);
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
+  
+  // Hands-Free AI Silence Detection Ref
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const questions = state?.questions || [];
-  const candidateName = state?.candidateName || "";
-  const position = state?.position || "";
-  const jobDescription = state?.jobDescription || "";
-  const resume = state?.resume || "";
-  const voiceGender = state?.voiceGender || "female";
-  const durationMinutes = state?.durationMinutes || 20;
+  // Active Variables
+  const candidateName = state?.candidateName || fetchedData?.candidateName || "";
+  const position = state?.position || fetchedData?.position || "";
+  const jobDescription = state?.jobDescription || fetchedData?.jobDescription || "";
+  const resume = state?.resume || fetchedData?.resume || "";
+  const questions = state?.questions || fetchedData?.questions || [];
+  const voiceGender = state?.voiceGender || fetchedData?.voiceGender || "female";
+  const durationMinutes = state?.durationMinutes || fetchedData?.durationMinutes || 20;
+  
   const totalQuestions = questions.length;
   const currentQuestion = introPhase ? null : (questions[currentQ] || null);
   const progress = totalQuestions > 0 ? ((Math.max(0, currentQ) + (interviewComplete ? 1 : 0)) / totalQuestions) * 100 : 0;
@@ -141,9 +141,45 @@ export default function InterviewPage() {
   const timeRemaining = totalSeconds - totalElapsed;
   const timeWarningThreshold = 120;
 
+  // FETCH SESSION IF ACCESSED VIA LINK
   useEffect(() => {
-    if (!state) navigate("/evaluate");
-  }, [state, navigate]);
+    if (sessionId && !state) {
+      const fetchSessionDetails = async () => {
+        try {
+          const res = await fetch(`${API_URL}/sessions/${sessionId}`);
+          if (!res.ok) throw new Error("Link expired or invalid");
+          const session = await res.json();
+          
+          const qRes = await fetch(`${API_URL}/generate-questions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: 8 })
+          });
+          const qData = await qRes.json();
+          
+          setFetchedData({
+            candidateName: session.candidate_name,
+            position: session.position,
+            jobDescription: session.job_description,
+            resume: session.resume_text,
+            questions: qData.questions,
+            voiceGender: "female",
+            durationMinutes: 20
+          });
+        } catch (err) {
+          toast.error("Invalid or expired session link.");
+          navigate("/");
+        } finally {
+          setIsInitializing(false);
+        }
+      };
+      fetchSessionDetails();
+    }
+  }, [sessionId, state, navigate]);
+
+  useEffect(() => {
+    if (!state && !sessionId) navigate("/evaluate");
+  }, [state, sessionId, navigate]);
 
   useEffect(() => {
     const loadVoices = () => { window.speechSynthesis.getVoices(); };
@@ -158,6 +194,7 @@ export default function InterviewPage() {
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       if (timerRef.current) clearInterval(timerRef.current);
       if (totalTimerRef.current) clearInterval(totalTimerRef.current);
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (recognitionRef.current) recognitionRef.current.stop();
     };
   }, []);
@@ -247,6 +284,7 @@ export default function InterviewPage() {
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
+    
     recognition.onresult = (event: any) => {
       let interim = "";
       let allFinal = "";
@@ -261,7 +299,19 @@ export default function InterviewPage() {
       fullTranscriptRef.current = allFinal.trim();
       setLiveTranscript((allFinal + interim).trim());
       setIsTranscribing(true);
+
+      // ─── ENTERPRISE UPGRADE: HANDS-FREE SILENCE DETECTION ───
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = setTimeout(() => {
+        const recorder = mediaRecorderRef.current;
+        if (recorder && recorder.state === "recording") {
+           // Calls the state-independent submit function using an invisible button or directly calling the function if wrapped carefully.
+           const btn = document.getElementById("auto-submit-btn");
+           if (btn) btn.click();
+        }
+      }, 4500); // Wait 4.5 seconds after speaking stops
     };
+    
     recognition.onerror = () => {};
     recognition.onend = () => {
       if (mediaRecorderRef.current?.state === "recording") {
@@ -274,6 +324,7 @@ export default function InterviewPage() {
 
   const stopRecording = useCallback(() => {
     return new Promise<{ blob: Blob; transcript: string }>((resolve) => {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (recognitionRef.current) {
         try { recognitionRef.current.stop(); } catch {}
         recognitionRef.current = null;
@@ -310,6 +361,16 @@ export default function InterviewPage() {
     try {
       const stream = await openCamera();
       setInterviewStarted(true);
+      
+      // Notify Recruiter via Database
+      if (sessionId) {
+        fetch(`${API_URL}/sessions/${sessionId}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "started" })
+        });
+      }
+
       startFullRecording(stream);
       totalTimerRef.current = setInterval(() => setTotalElapsed((t) => t + 1), 1000);
 
@@ -318,86 +379,11 @@ export default function InterviewPage() {
         await speakAndRecord(introText);
       }, 800);
     } catch {}
-  }, [openCamera, candidateName, position, totalQuestions, speakAndRecord, startFullRecording]);
-
-  const handleForceEndInterview = useCallback(async (isEarlyLeave = false) => {
-    let partialAnswers = [...answers];
-
-    if (isRecording) {
-      const { transcript } = await stopRecording();
-      const newAnswer: AnswerRecord = {
-        questionId: introPhase ? 0 : (currentQuestion?.id || 0),
-        transcript: transcript || (isEarlyLeave ? "(Candidate left early)" : "(Time expired)"),
-        videoBlob: null,
-      };
-      partialAnswers = [...partialAnswers, newAnswer];
-      setAnswers(partialAnswers);
-    }
-
-    if (totalTimerRef.current) clearInterval(totalTimerRef.current);
-    const fullBlob = await stopFullRecording();
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      if (videoRef.current) videoRef.current.srcObject = null;
-      setCameraReady(false);
-    }
-
-    setIsSpeaking(true);
-    const endMsg = isEarlyLeave
-      ? `${candidateName}, it seems you need to leave early. We'll evaluate your responses up to this point. Thank you!`
-      : `${candidateName}, our interview time has come to an end. Thank you for your time. Have a great day!`;
-    setAiMessage(endMsg);
-    await speakText(endMsg, voiceGender);
-    setIsSpeaking(false);
-    setAiMessage("");
-
-    setIsSubmitting(true);
-    try {
-      const questionAnswers = partialAnswers.filter((a) => a.questionId !== -1);
-      const fullTranscript = questionAnswers
-        .map((a, i) => {
-          if (a.questionId === 0) return `Introduction:\nCandidate: ${a.transcript}`;
-          const q = questions.find((q) => q.id === a.questionId);
-          return `Q${i} [${q?.difficulty}/${q?.category}]: ${q?.question || "Unknown"}\nA${i}: ${a.transcript}`;
-        })
-        .join("\n\n");
-
-      const timestamp = Date.now();
-      const safeName = candidateName.replace(/\s+/g, "_");
-      
-      // ─── ENTERPRISE UPGRADE: Pass single exact filename for backend FFmpeg ───
-      let primaryVideoFilename: string | undefined;
-
-      if (fullBlob.size > 0) {
-        const fullFilename = `FULL_SESSION_${safeName}_${timestamp}.webm`;
-        try {
-          const result = await uploadVideo(fullBlob, fullFilename);
-          primaryVideoFilename = result.filename; // Use EXACT filename returned
-        } catch {}
-      }
-
-      const evalResult = await submitEvaluation({
-        candidate_name: candidateName,
-        position,
-        job_description: jobDescription,
-        resume,
-        transcript: fullTranscript || "(Interview ended early)",
-        video_filename: primaryVideoFilename, // Strict format for backend
-      });
-
-      toast.success("Partial interview evaluated & recording saved!");
-      navigate(`/result/${evalResult.id}`);
-    } catch (err: any) {
-      toast.error(err.message || "Auto-evaluation failed");
-      setInterviewComplete(true);
-      setIsSubmitting(false);
-    }
-  }, [answers, isRecording, stopRecording, introPhase, currentQuestion, candidateName, voiceGender, stopFullRecording, questions, position, jobDescription, resume, navigate]);
+  }, [openCamera, candidateName, position, totalQuestions, speakAndRecord, startFullRecording, sessionId]);
 
   const handleNextQuestion = useCallback(async () => {
     if (!isRecording) return;
-    const { transcript } = await stopRecording(); // Ignore per-question blobs to save bandwidth
+    const { transcript } = await stopRecording(); 
     setLiveTranscript("");
     setDuration(0);
 
@@ -490,6 +476,84 @@ export default function InterviewPage() {
     }
   }, [isRecording, stopRecording, introPhase, currentQuestion, currentQ, totalQuestions, questions, speakAndRecord, candidateName, position, voiceGender, isWindingUp, timeRemaining, stopFullRecording]);
 
+  const handleForceEndInterview = useCallback(async (isEarlyLeave = false) => {
+    let partialAnswers = [...answers];
+
+    if (isRecording) {
+      const { transcript } = await stopRecording();
+      const newAnswer: AnswerRecord = {
+        questionId: introPhase ? 0 : (currentQuestion?.id || 0),
+        transcript: transcript || (isEarlyLeave ? "(Candidate left early)" : "(Time expired)"),
+        videoBlob: null,
+      };
+      partialAnswers = [...partialAnswers, newAnswer];
+      setAnswers(partialAnswers);
+    }
+
+    if (totalTimerRef.current) clearInterval(totalTimerRef.current);
+    const fullBlob = await stopFullRecording();
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setCameraReady(false);
+    }
+
+    setIsSpeaking(true);
+    const endMsg = isEarlyLeave
+      ? `${candidateName}, it seems you need to leave early. We'll evaluate your responses up to this point. Thank you!`
+      : `${candidateName}, our interview time has come to an end. Thank you for your time. Have a great day!`;
+    setAiMessage(endMsg);
+    await speakText(endMsg, voiceGender);
+    setIsSpeaking(false);
+    setAiMessage("");
+
+    setIsSubmitting(true);
+    try {
+      const questionAnswers = partialAnswers.filter((a) => a.questionId !== -1);
+      const fullTranscript = questionAnswers
+        .map((a, i) => {
+          if (a.questionId === 0) return `Introduction:\nCandidate: ${a.transcript}`;
+          const q = questions.find((q) => q.id === a.questionId);
+          return `Q${i} [${q?.difficulty}/${q?.category}]: ${q?.question || "Unknown"}\nA${i}: ${a.transcript}`;
+        })
+        .join("\n\n");
+
+      const timestamp = Date.now();
+      const safeName = candidateName.replace(/\s+/g, "_");
+      
+      let primaryVideoFilename: string | undefined;
+
+      if (fullBlob.size > 0) {
+        const fullFilename = `FULL_SESSION_${safeName}_${timestamp}.webm`;
+        try {
+          const result = await uploadVideo(fullBlob, fullFilename);
+          primaryVideoFilename = result.filename; 
+        } catch {}
+      }
+
+      const evalResult = await submitEvaluation({
+        candidate_name: candidateName,
+        position,
+        job_description: jobDescription,
+        resume,
+        transcript: fullTranscript || "(Interview ended early)",
+        video_filename: primaryVideoFilename, 
+      });
+
+      if (sessionId) {
+        fetch(`${API_URL}/sessions/${sessionId}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "completed" }) });
+      }
+
+      toast.success("Partial interview evaluated & recording saved!");
+      navigate(`/result/${evalResult.id}`);
+    } catch (err: any) {
+      toast.error(err.message || "Auto-evaluation failed");
+      setInterviewComplete(true);
+      setIsSubmitting(false);
+    }
+  }, [answers, isRecording, stopRecording, introPhase, currentQuestion, candidateName, voiceGender, stopFullRecording, questions, position, jobDescription, resume, navigate, sessionId]);
+
   const handleSubmitInterview = useCallback(async () => {
     setIsSubmitting(true);
     try {
@@ -507,14 +571,13 @@ export default function InterviewPage() {
       const timestamp = Date.now();
       const safeName = candidateName.replace(/\s+/g, "_");
       
-      // ─── ENTERPRISE UPGRADE: Pass single exact filename for backend FFmpeg ───
       let primaryVideoFilename: string | undefined;
 
       if (fullRecordingAnswer?.videoBlob) {
         const fullFilename = `FULL_SESSION_${safeName}_${timestamp}.webm`;
         try {
           const result = await uploadVideo(fullRecordingAnswer.videoBlob, fullFilename);
-          primaryVideoFilename = result.filename; // Use EXACT filename returned
+          primaryVideoFilename = result.filename; 
           toast.success("Full session recording saved!");
         } catch {
           console.log("Full recording upload failed.");
@@ -527,8 +590,12 @@ export default function InterviewPage() {
         job_description: jobDescription,
         resume,
         transcript: fullTranscript,
-        video_filename: primaryVideoFilename, // Strict format for backend extraction
+        video_filename: primaryVideoFilename,
       });
+
+      if (sessionId) {
+        fetch(`${API_URL}/sessions/${sessionId}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "completed" }) });
+      }
 
       toast.success("Interview evaluated successfully!");
       navigate(`/result/${result.id}`);
@@ -537,14 +604,22 @@ export default function InterviewPage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [answers, questions, candidateName, position, jobDescription, resume, navigate]);
+  }, [answers, questions, candidateName, position, jobDescription, resume, navigate, sessionId]);
 
   const formatTime = (s: number) =>
     `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
-  if (!state) return null;
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center space-y-4">
+        <Loader2 className="w-12 h-12 text-primary animate-spin" />
+        <p className="text-muted-foreground animate-pulse">Establishing Secure Session...</p>
+      </div>
+    );
+  }
 
-  // Render Logic matches your existing flawless UI exactly
+  if (!state && !fetchedData) return null;
+
   if (interviewComplete) {
     const questionAnswers = answers.filter((a) => a.questionId !== -1);
     return (
@@ -602,16 +677,17 @@ export default function InterviewPage() {
                 <span>{totalQuestions} questions</span>
               </div>
             </motion.div>
-            <motion.div variants={fadeUp} className="glass rounded-xl p-5 text-left">
-              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">Before You Start</h3>
+            <motion.div variants={fadeUp} className="glass rounded-xl p-5 text-left bg-primary/5 border-primary/20">
+              <h3 className="text-sm font-semibold text-primary uppercase tracking-wider mb-3">🎙️ Hands-Free Mode Active</h3>
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-nexus-green mt-0.5 shrink-0" /> Ensure your camera & microphone are working</li>
-                <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-nexus-green mt-0.5 shrink-0" /> Turn on speakers — AI will speak aloud</li>
+                <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" /> Ensure your camera & microphone are working</li>
+                <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" /> Turn on speakers — AI will speak aloud</li>
+                <li className="flex items-start gap-2"><CheckCircle2 className="w-4 h-4 text-primary mt-0.5 shrink-0" /> <strong className="text-foreground">Just talk naturally.</strong> When you stop speaking for 4 seconds, the AI will auto-submit your answer.</li>
               </ul>
             </motion.div>
             <motion.div variants={fadeUp}>
               <Button onClick={handleBeginInterview} className="h-14 px-10 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan">
-                <Video className="w-5 h-5 mr-2" /> Begin {durationMinutes}-Min Interview
+                <Video className="w-5 h-5 mr-2" /> Begin Interview
               </Button>
             </motion.div>
           </motion.div>
@@ -623,6 +699,9 @@ export default function InterviewPage() {
   return (
     <div className="min-h-screen bg-background nexus-grid">
       <Navbar />
+      {/* Invisible button to let the setTimeout trigger the callback safely */}
+      <button id="auto-submit-btn" className="hidden" onClick={handleNextQuestion}></button>
+
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-4xl">
         <motion.div initial="hidden" animate="visible" className="space-y-6">
           <motion.div variants={fadeUp} className="space-y-3">
@@ -659,12 +738,12 @@ export default function InterviewPage() {
             </div>
             {liveTranscript && (
               <div className="rounded-lg bg-muted/50 p-4 max-h-32 overflow-y-auto">
-                <div className="flex items-center gap-2 mb-2"><Mic className="w-3.5 h-3.5 text-primary" /><span className="text-xs font-medium text-foreground">Live Transcript</span></div>
+                <div className="flex items-center gap-2 mb-2"><Mic className="w-3.5 h-3.5 text-primary" /><span className="text-xs font-medium text-foreground">Live Transcript (Auto-submits when you stop speaking)</span></div>
                 <p className="text-sm text-muted-foreground">{liveTranscript}</p>
               </div>
             )}
             <div className="flex items-center justify-between">
-              {isRecording ? <Button onClick={handleNextQuestion} className="bg-primary text-primary-foreground"><Square className="w-4 h-4 mr-2 fill-current" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" /></Button> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</div>}
+              {isRecording ? <Button onClick={handleNextQuestion} className="bg-primary text-primary-foreground"><Square className="w-4 h-4 mr-2 fill-current" /> Manual Submit <ChevronRight className="w-4 h-4 ml-1" /></Button> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</div>}
               <Button variant="outline" size="sm" onClick={() => handleForceEndInterview(true)} disabled={isSubmitting} className="text-xs border-destructive/30 text-destructive">Leave Interview</Button>
             </div>
           </div>

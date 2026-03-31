@@ -1,9 +1,9 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   Brain, FileText, Briefcase, User, Loader2, Mic, Volume2, Sparkles, Clock, Upload, X, CheckCircle2,
-  Wifi, WifiOff,
+  Wifi, WifiOff, Link as LinkIcon, Copy
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +12,8 @@ import { generateQuestions, generateJD, uploadResume, checkBackendHealth } from 
 import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
+
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
@@ -43,66 +45,16 @@ function generateLocalJD(position: string): string {
   return `Job Title: ${position}\n\nJob Summary:\nWe are looking for an experienced ${position} to join our growing team. The ideal candidate will have strong technical skills, excellent problem-solving abilities, and a proven track record of delivering high-quality work.\n\nKey Responsibilities:\n- Design, develop, and maintain solutions relevant to the ${position} role\n- Collaborate with cross-functional teams to define and implement features\n- Write clean, maintainable, and well-documented code/deliverables\n- Participate in reviews and provide constructive feedback\n- Troubleshoot and resolve complex issues\n- Stay current with industry trends and best practices\n- Mentor and guide junior team members\n\nRequired Skills & Qualifications:\n- 2+ years of relevant experience in the ${position} domain\n- Strong problem-solving and analytical skills\n- Excellent written and verbal communication\n- Proficiency in industry-standard tools and technologies\n- Bachelor's degree in a related field or equivalent experience\n- Ability to work independently and in a team\n\nPreferred Skills:\n- Experience with agile/scrum methodologies\n- Leadership or mentoring experience\n- Relevant industry certifications\n- Open source or community contributions\n\nExperience Level: Mid to Senior (2-5+ years)`;
 }
 
-function generateLocalQuestions(jd: string, resumeText: string, numQuestions: number) {
-  const categories = ["technical", "behavioral", "situational"];
-  const difficulties = ["easy", "easy", "medium", "medium", "hard", "hard"];
-  const technicalQs = [
-    "Can you walk me through a recent project you've worked on and the technical decisions you made?",
-    "How do you approach debugging a complex issue in production?",
-    "Explain a design pattern you've used recently and why it was appropriate.",
-    "What's your experience with version control workflows in a team setting?",
-    "How do you ensure code quality and maintainability in your projects?",
-    "Describe your approach to writing testable code.",
-    "What tools and technologies are you most proficient with?",
-    "How do you stay updated with the latest trends in your field?",
-    "Explain a time you had to optimize performance in an application.",
-    "What's the most technically challenging problem you've solved?",
-    "How do you approach system design for scalable applications?",
-    "Describe your experience with CI/CD pipelines.",
-    "What security best practices do you follow in development?",
-    "How do you handle technical debt in a project?",
-    "Explain your approach to API design and documentation.",
-  ];
-  const behavioralQs = [
-    "Tell me about a time you disagreed with a teammate. How did you resolve it?",
-    "Describe a situation where you had to learn something quickly under pressure.",
-    "How do you handle receiving critical feedback on your work?",
-    "Tell me about a time you went above and beyond for a project.",
-    "How do you prioritize tasks when you have multiple deadlines?",
-    "Describe a situation where you had to mentor or help a colleague.",
-    "Tell me about a failure you experienced and what you learned from it.",
-    "How do you handle ambiguity in project requirements?",
-  ];
-  const situationalQs = [
-    "If you joined our team and found the codebase poorly documented, what would you do?",
-    "How would you handle a situation where a critical feature deadline conflicts with code quality?",
-    "If a stakeholder requested a feature that you believe is technically flawed, how would you handle it?",
-    "Imagine you're leading a project and a key team member leaves mid-sprint. What's your plan?",
-    "How would you approach migrating a legacy system to modern technologies?",
-  ];
-  const allQs = { technical: technicalQs, behavioral: behavioralQs, situational: situationalQs };
-  const questions = [];
-  for (let i = 0; i < numQuestions; i++) {
-    const cat = categories[i % categories.length];
-    const diff = difficulties[Math.min(i, difficulties.length - 1)];
-    const pool = allQs[cat as keyof typeof allQs];
-    questions.push({
-      id: i + 1,
-      question: pool[i % pool.length],
-      category: cat,
-      difficulty: diff,
-    });
-  }
-  return questions;
-}
-
 export default function EvaluatePage() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingJD, setIsGeneratingJD] = useState(false);
   const [isExtractingResume, setIsExtractingResume] = useState(false);
+  
+  // States
   const [candidateName, setCandidateName] = useState("");
+  const [candidateEmail, setCandidateEmail] = useState("");
   const [position, setPosition] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [resume, setResume] = useState("");
@@ -110,10 +62,13 @@ export default function EvaluatePage() {
   const [voiceGender, setVoiceGender] = useState<"female" | "male">("female");
   const [selectedDuration, setSelectedDuration] = useState(DURATION_OPTIONS[2]);
   const [backendStatus, setBackendStatus] = useState<boolean | null>(null);
+  
+  // Link Generation State
+  const [generatedLink, setGeneratedLink] = useState("");
 
-  useState(() => {
+  useEffect(() => {
     checkBackendHealth().then(setBackendStatus);
-  });
+  }, []);
 
   const handleGenerateJD = async () => {
     if (!position) { toast.error("Enter the position title first"); return; }
@@ -161,11 +116,10 @@ export default function EvaluatePage() {
 
     setIsExtractingResume(true);
     
-    // ─── ENTERPRISE UPGRADE: Route through AI Semantic Parser first ───
     try {
       const result = await uploadResume(file);
       if (result.extracted_text) {
-        setResume(result.extracted_text); // Populates the text area with clean JSON!
+        setResume(result.extracted_text);
         setResumeFileName(file.name);
         toast.success(`Resume structured perfectly by AI Parser!`);
         setIsExtractingResume(false);
@@ -176,7 +130,6 @@ export default function EvaluatePage() {
       console.log("Backend semantic parser offline, falling back to raw local extraction...");
     }
 
-    // Fallback: Local Raw Extraction
     try {
       const text = await extractTextFromFile(file);
       if (text.trim()) {
@@ -201,45 +154,61 @@ export default function EvaluatePage() {
     setResume("");
   };
 
-  const handleStartInterview = async () => {
-    if (!candidateName || !position || !jobDescription || !resume) return;
+  const handleGenerateLink = async () => {
+    if (!candidateName || !candidateEmail || !position || !jobDescription || !resume) return;
     setIsGenerating(true);
+    
     try {
-      const questions = await generateQuestions(jobDescription, resume, selectedDuration.questions);
-      toast.success(`${questions.length} AI questions generated for ~${selectedDuration.value} min interview!`);
-      navigate("/interview", {
-        state: { candidateName, position, jobDescription, resume, questions, voiceGender, durationMinutes: selectedDuration.value },
+      const response = await fetch(`${API_URL}/sessions/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          candidate_name: candidateName,
+          candidate_email: candidateEmail,
+          position: position,
+          job_description: jobDescription,
+          resume_text: resume
+        })
       });
-    } catch {
-      const localQuestions = generateLocalQuestions(jobDescription, resume, selectedDuration.questions);
-      toast.success(`${localQuestions.length} questions generated locally for ~${selectedDuration.value} min interview!`);
-      navigate("/interview", {
-        state: { candidateName, position, jobDescription, resume, questions: localQuestions, voiceGender, durationMinutes: selectedDuration.value },
-      });
+
+      if (!response.ok) throw new Error("Failed to create session on backend");
+      
+      const data = await response.json();
+      const uniqueLink = `${window.location.origin}/interview/${data.session_id}`;
+      setGeneratedLink(uniqueLink);
+      toast.success("Interview Link Generated Successfully!");
+      
+    } catch (error) {
+      console.error(error);
+      toast.error("Error connecting to backend. Is it online?");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const isValid = candidateName && position && jobDescription && resume;
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(generatedLink);
+    toast.success("Link copied to clipboard!");
+  };
+
+  const isValid = candidateName && candidateEmail && position && jobDescription && resume;
 
   return (
     <div className="min-h-screen bg-background nexus-grid">
       <Navbar />
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-4xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
-          {/* Header */}
+          
           <motion.div variants={fadeUp} custom={0} className="text-center space-y-3">
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium mb-4">
               <Brain className="w-3.5 h-3.5" />
-              BATS AI-Powered Interview
+              BATS AI Recruiter Dashboard
             </div>
             <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
-              Start AI Interview
+              Create Interview <span className="text-primary">Session</span>
             </h1>
             <p className="text-muted-foreground max-w-xl mx-auto">
-              Enter candidate info, JD, and resume. BATS AI will conduct a full {selectedDuration.value}-minute interview
-              with {selectedDuration.questions} questions (easy → hard), record everything, and provide detailed evaluation.
+              Generate a unique, secure link for your candidate. BATS AI will conduct the interview asynchronously and evaluate them automatically.
             </p>
           </motion.div>
 
@@ -249,7 +218,7 @@ export default function EvaluatePage() {
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
                 <WifiOff className="w-4 h-4 text-destructive shrink-0" />
                 <p className="text-xs text-destructive">
-                  <strong>Backend offline</strong> — Interview will use local questions & local evaluation. Start backend for AI-powered experience.
+                  <strong>Backend offline</strong> — Link generation requires the backend to be awake.
                 </p>
               </div>
             )}
@@ -257,52 +226,53 @@ export default function EvaluatePage() {
               <div className="rounded-xl p-3 bg-primary/5 border border-primary/20 flex items-center gap-3">
                 <Wifi className="w-4 h-4 text-primary shrink-0" />
                 <p className="text-xs text-primary">
-                  <strong>Backend connected</strong> — AI question generation & semantic resume parsing active.
+                  <strong>Backend connected</strong> — Ready to generate secure sessions.
                 </p>
               </div>
             )}
           </motion.div>
 
-          {/* How it works */}
-          <motion.div variants={fadeUp} custom={0.5} className="glass rounded-xl p-5">
-            <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-3">How It Works</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-              {[
-                { step: "1", title: "Fill Details", desc: "Name, position & resume" },
-                { step: "2", title: "AI Creates JD", desc: "Auto-generate or paste JD" },
-                { step: "3", title: "AI Interviews", desc: `${selectedDuration.questions} Qs: easy → hard` },
-                { step: "4", title: "Records All", desc: "Video + live transcript" },
-                { step: "5", title: "AI Evaluates", desc: "Scores, sentiment & verdict" },
-              ].map((s) => (
-                <div key={s.step} className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <span className="text-xs font-bold text-primary">{s.step}</span>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{s.title}</p>
-                    <p className="text-xs text-muted-foreground">{s.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-
-          {/* Form */}
-          <div className="space-y-6">
-            {/* Candidate Name & Position */}
-            <motion.div variants={fadeUp} custom={1} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <User className="w-4 h-4 text-primary" /> Candidate Name *
-                </label>
-                <Input
-                  placeholder="e.g., Alex Chen"
-                  value={candidateName}
-                  onChange={(e) => setCandidateName(e.target.value)}
-                  className="bg-card border-border"
-                />
+          {generatedLink ? (
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="glass rounded-xl p-10 text-center space-y-6 border-primary/50 bg-primary/5">
+              <CheckCircle2 className="w-16 h-16 text-primary mx-auto" />
+              <h2 className="text-2xl font-bold">Session Created!</h2>
+              <p className="text-muted-foreground">Send this unique link to the candidate. They will enter the interview directly without needing to log in or upload anything.</p>
+              <div className="flex items-center gap-4 bg-background p-4 rounded-lg border border-border">
+                <LinkIcon className="w-5 h-5 text-muted-foreground shrink-0" />
+                <code className="flex-1 text-sm text-left truncate">{generatedLink}</code>
+                <Button onClick={copyToClipboard} variant="secondary" className="shrink-0"><Copy className="w-4 h-4 mr-2" /> Copy Link</Button>
               </div>
-              <div className="space-y-2">
+              <Button onClick={() => { setGeneratedLink(""); setCandidateName(""); setCandidateEmail(""); clearUploadedResume(); }} variant="outline" className="mt-4">Create Another Session</Button>
+            </motion.div>
+          ) : (
+            <div className="space-y-6">
+              <motion.div variants={fadeUp} custom={1} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <User className="w-4 h-4 text-primary" /> Candidate Name *
+                  </label>
+                  <Input
+                    placeholder="e.g., Alex Chen"
+                    value={candidateName}
+                    onChange={(e) => setCandidateName(e.target.value)}
+                    className="bg-card border-border"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <User className="w-4 h-4 text-primary" /> Candidate Email *
+                  </label>
+                  <Input
+                    type="email"
+                    placeholder="e.g., alex@email.com"
+                    value={candidateEmail}
+                    onChange={(e) => setCandidateEmail(e.target.value)}
+                    className="bg-card border-border"
+                  />
+                </div>
+              </motion.div>
+
+              <motion.div variants={fadeUp} custom={1.5} className="space-y-2">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <Briefcase className="w-4 h-4 text-accent" /> Position / Role *
                 </label>
@@ -312,141 +282,114 @@ export default function EvaluatePage() {
                   onChange={(e) => setPosition(e.target.value)}
                   className="bg-card border-border"
                 />
-              </div>
-            </motion.div>
+              </motion.div>
 
-            {/* JD */}
-            <motion.div variants={fadeUp} custom={2} className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <FileText className="w-4 h-4 text-primary" /> Job Description *
-                </label>
-                <Button
-                  type="button" variant="outline" size="sm"
-                  onClick={handleGenerateJD}
-                  disabled={isGeneratingJD || !position}
-                  className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
-                >
-                  {isGeneratingJD ? (
-                    <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Generating...</span>
-                  ) : (
-                    <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Auto-Generate JD</span>
-                  )}
-                </Button>
-              </div>
-              <Textarea
-                placeholder="Paste the job description here, or click 'Auto-Generate JD' above..."
-                value={jobDescription}
-                onChange={(e) => setJobDescription(e.target.value)}
-                className="bg-card border-border min-h-[140px] resize-none"
-              />
-            </motion.div>
-
-            {/* Resume */}
-            <motion.div variants={fadeUp} custom={3} className="space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <FileText className="w-4 h-4 text-primary" /> Candidate Resume *
-                </label>
-                <input ref={fileInputRef} type="file" accept=".pdf,.txt,.doc,.docx,.md" onChange={handleResumeUpload} className="hidden" />
-                <Button
-                  type="button" variant="outline" size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isExtractingResume}
-                  className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
-                >
-                  {isExtractingResume ? (
-                    <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Extracting...</span>
-                  ) : (
-                    <span className="flex items-center gap-1.5"><Upload className="w-3 h-3" /> Upload Resume (PDF/TXT/DOCX)</span>
-                  )}
-                </Button>
-              </div>
-
-              {resumeFileName && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20">
-                  <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
-                  <span className="text-xs text-primary font-medium truncate">{resumeFileName}</span>
-                  <button onClick={clearUploadedResume} className="ml-auto shrink-0">
-                    <X className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
-                  </button>
+              <motion.div variants={fadeUp} custom={2} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <FileText className="w-4 h-4 text-primary" /> Job Description *
+                  </label>
+                  <Button
+                    type="button" variant="outline" size="sm"
+                    onClick={handleGenerateJD}
+                    disabled={isGeneratingJD || !position}
+                    className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
+                  >
+                    {isGeneratingJD ? (
+                      <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Generating...</span>
+                    ) : (
+                      <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Auto-Generate JD</span>
+                    )}
+                  </Button>
                 </div>
-              )}
-              <Textarea
-                placeholder="Paste resume content here, or upload a file above to auto-structure it..."
-                value={resume}
-                onChange={(e) => setResume(e.target.value)}
-                className="bg-card border-border min-h-[120px] resize-none font-mono text-xs"
-              />
-            </motion.div>
+                <Textarea
+                  placeholder="Paste the job description here, or click 'Auto-Generate JD' above..."
+                  value={jobDescription}
+                  onChange={(e) => setJobDescription(e.target.value)}
+                  className="bg-card border-border min-h-[140px] resize-none"
+                />
+              </motion.div>
 
-            {/* Interview Duration */}
-            <motion.div variants={fadeUp} custom={4} className="space-y-3">
-              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <Clock className="w-4 h-4 text-primary" /> Interview Duration
-              </label>
-              <div className="flex gap-3">
-                {DURATION_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setSelectedDuration(opt)}
-                    className={`flex-1 py-3 rounded-xl border text-center transition-all ${
-                      selectedDuration.value === opt.value
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border text-muted-foreground hover:border-primary/30"
-                    }`}
+              <motion.div variants={fadeUp} custom={3} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <FileText className="w-4 h-4 text-primary" /> Candidate Resume *
+                  </label>
+                  <input ref={fileInputRef} type="file" accept=".pdf,.txt,.doc,.docx,.md" onChange={handleResumeUpload} className="hidden" />
+                  <Button
+                    type="button" variant="outline" size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isExtractingResume}
+                    className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
                   >
-                    <span className="block text-sm font-medium">{opt.label}</span>
-                    <span className="block text-[10px] mt-0.5 opacity-70">{opt.questions} Qs</span>
-                  </button>
-                ))}
-              </div>
-            </motion.div>
+                    {isExtractingResume ? (
+                      <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Extracting...</span>
+                    ) : (
+                      <span className="flex items-center gap-1.5"><Upload className="w-3 h-3" /> Upload Resume</span>
+                    )}
+                  </Button>
+                </div>
 
-            {/* Voice Selector */}
-            <motion.div variants={fadeUp} custom={5} className="space-y-3">
-              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <Volume2 className="w-4 h-4 text-primary" /> AI Voice
-              </label>
-              <div className="flex gap-3">
-                {(["female", "male"] as const).map((g) => (
-                  <button
-                    key={g}
-                    onClick={() => setVoiceGender(g)}
-                    className={`flex-1 py-3 rounded-xl border text-center transition-all ${
-                      voiceGender === g
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border text-muted-foreground hover:border-primary/30"
-                    }`}
-                  >
-                    <Mic className="w-4 h-4 mx-auto mb-1" />
-                    <span className="block text-sm font-medium capitalize">{g}</span>
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-
-            {/* Start Button */}
-            <motion.div variants={fadeUp} custom={6}>
-              <Button
-                onClick={handleStartInterview}
-                disabled={!isValid || isGenerating}
-                className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40"
-              >
-                {isGenerating ? (
-                  <span className="flex items-center gap-3">
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Generating questions...
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-3">
-                    <Brain className="w-5 h-5" />
-                    Start {selectedDuration.value}-Min AI Interview ({selectedDuration.questions} Questions)
-                  </span>
+                {resumeFileName && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20">
+                    <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+                    <span className="text-xs text-primary font-medium truncate">{resumeFileName}</span>
+                    <button onClick={clearUploadedResume} className="ml-auto shrink-0">
+                      <X className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
+                    </button>
+                  </div>
                 )}
-              </Button>
-            </motion.div>
-          </div>
+                <Textarea
+                  placeholder="Paste resume content here, or upload a file above to auto-structure it..."
+                  value={resume}
+                  onChange={(e) => setResume(e.target.value)}
+                  className="bg-card border-border min-h-[120px] resize-none font-mono text-xs"
+                />
+              </motion.div>
+
+              <motion.div variants={fadeUp} custom={4} className="space-y-3">
+                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Clock className="w-4 h-4 text-primary" /> Interview Duration Settings
+                </label>
+                <div className="flex gap-3">
+                  {DURATION_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setSelectedDuration(opt)}
+                      className={`flex-1 py-3 rounded-xl border text-center transition-all ${
+                        selectedDuration.value === opt.value
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground hover:border-primary/30"
+                      }`}
+                    >
+                      <span className="block text-sm font-medium">{opt.label}</span>
+                      <span className="block text-[10px] mt-0.5 opacity-70">{opt.questions} Qs</span>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+
+              <motion.div variants={fadeUp} custom={6}>
+                <Button
+                  onClick={handleGenerateLink}
+                  disabled={!isValid || isGenerating}
+                  className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40"
+                >
+                  {isGenerating ? (
+                    <span className="flex items-center gap-3">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Securing Session Link...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-3">
+                      <LinkIcon className="w-5 h-5" />
+                      Generate Secure Interview Link
+                    </span>
+                  )}
+                </Button>
+              </motion.div>
+            </div>
+          )}
         </motion.div>
       </div>
     </div>

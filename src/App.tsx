@@ -23,7 +23,10 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/evaluate" element={<Evaluate />} />
+          {/* Standard Interview Route */}
           <Route path="/interview" element={<Interview />} />
+          {/* NEW: Candidate Shared Link Route */}
+          <Route path="/interview/:sessionId" element={<Interview />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/history" element={<History />} />
           <Route path="/upload-analysis" element={<UploadAnalysis />} />
