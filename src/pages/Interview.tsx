@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { submitEvaluation, uploadVideo, getAcknowledgment } from "@/lib/api";
+import { submitEvaluation, uploadVideo } from "@/lib/api";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
@@ -41,23 +41,36 @@ const fadeUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
 };
 
+// UPGRADE: Advanced neural voice selection for highly realistic speech
 function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
   if (voices.length === 0) return null;
-  const femaleKeywords = ["google uk english female", "google us english female", "samantha", "karen", "fiona", "victoria", "zira", "female", "woman"];
-  const maleKeywords = ["google uk english male", "google us english male", "david", "daniel", "james", "mark", "alex", "male", "man"];
-  const keywords = gender === "female" ? femaleKeywords : maleKeywords;
-  const antiKeywords = gender === "female" ? maleKeywords : femaleKeywords;
-  for (const kw of keywords) {
-    const match = voices.find((v) => v.lang.startsWith("en") && v.name.toLowerCase().includes(kw) && !antiKeywords.some((ak) => v.name.toLowerCase().includes(ak)));
-    if (match) return match;
+  
+  const premiumKeywords = ["neural", "premium", "google", "microsoft"];
+  const femaleKeywords = ["female", "woman", "jenny", "samantha", "karen", "zira", "victoria"];
+  const maleKeywords = ["male", "man", "guy", "david", "mark", "daniel", "james"];
+  
+  const targetKws = gender === "female" ? femaleKeywords : maleKeywords;
+  const antiKws = gender === "female" ? maleKeywords : femaleKeywords;
+  
+  let bestMatch: SpeechSynthesisVoice | null = null;
+  let highestScore = -1;
+
+  for (const v of voices) {
+    if (!v.lang.startsWith("en")) continue;
+    const name = v.name.toLowerCase();
+    if (antiKws.some(k => name.includes(k))) continue;
+
+    let score = 0;
+    if (targetKws.some(k => name.includes(k))) score += 2;
+    if (premiumKeywords.some(k => name.includes(k))) score += 5; 
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestMatch = v;
+    }
   }
-  const englishVoices = voices.filter((v) => v.lang.startsWith("en"));
-  if (englishVoices.length > 1) {
-    const sorted = [...englishVoices].sort((a, b) => a.name.localeCompare(b.name));
-    return sorted[gender === "female" ? 0 : sorted.length - 1];
-  }
-  return englishVoices[0] || voices[0];
+  return bestMatch || voices.find(v => v.lang.startsWith("en")) || voices[0];
 }
 
 function speakText(text: string, gender: "female" | "male"): Promise<void> {
@@ -67,8 +80,11 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
     const utterance = new SpeechSynthesisUtterance(text);
     const voice = getVoice(gender);
     if (voice) utterance.voice = voice;
-    utterance.rate = 0.92;
-    utterance.pitch = gender === "female" ? 1.1 : 0.9;
+    
+    // UPGRADE: Adjusted to sound professional, deliberate, and less robotic
+    utterance.rate = 0.95; 
+    utterance.pitch = gender === "female" ? 1.05 : 0.95;
+    
     utterance.volume = 1;
     utterance.lang = "en-US";
     utterance.onend = () => resolve();
@@ -95,14 +111,13 @@ export default function InterviewPage() {
   const [liveTranscript, setLiveTranscript] = useState("");
   const [totalElapsed, setTotalElapsed] = useState(0);
   
-  const [interviewStep, setInterviewStep] = useState<"welcome" | "interview" | "submitting" | "feedback">("welcome");
+  // UPGRADE: Added "ready" step to guarantee Fullscreen doesn't drop
+  const [interviewStep, setInterviewStep] = useState<"welcome" | "ready" | "interview" | "submitting" | "feedback">("welcome");
   const [cameraReady, setCameraReady] = useState(false);
   
-  // Anti-Cheat States
   const [cheatStrikes, setCheatStrikes] = useState(0);
   const [terminationReason, setTerminationReason] = useState("");
   
-  // Feedback States
   const [rating, setRating] = useState(0);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
@@ -194,6 +209,7 @@ export default function InterviewPage() {
     }
   }, [timeRemaining, interviewStep, totalElapsed]);
 
+  // Anti-Cheat listener (Only applies AFTER the interview fully starts)
   useEffect(() => {
     if (interviewStep !== "interview") return;
 
@@ -238,15 +254,8 @@ export default function InterviewPage() {
   }, [interviewStep]);
 
 
-  const openSecurityVault = useCallback(async () => {
+  const requestPermissions = async () => {
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(d => d.kind === 'videoinput');
-      const hasVirtual = videoDevices.some(d => d.label.toLowerCase().includes('virtual') || d.label.toLowerCase().includes('obs'));
-      if (hasVirtual) {
-        toast.warning("Virtual Camera detected. This will be flagged in your final report.");
-      }
-
       const avStream = await navigator.mediaDevices.getUserMedia({
         video: { width: 1280, height: 720, facingMode: "user" },
         audio: true,
@@ -274,12 +283,41 @@ export default function InterviewPage() {
         }
       }, 50);
 
-      return avStream;
+      // Move to Phase 2: User must click button to trigger fullscreen safely
+      setInterviewStep("ready");
     } catch (err) {
-      toast.error("Security Requirement: You MUST allow Full-Screen, Camera, Mic, and Screen Sharing to proceed.");
-      throw err;
+      toast.error("Security Requirement: You MUST allow Camera, Mic, and Screen Sharing to proceed.");
     }
-  }, [interviewStep]);
+  };
+
+  const lockAndStart = async () => {
+    try {
+      if (document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+
+      setInterviewStep("interview");
+
+      if (sessionId) {
+        fetch(`${API_URL}/sessions/${sessionId}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "started" }),
+          keepalive: true
+        }).catch(err => console.log("Status update failed:", err));
+      }
+
+      startFullRecording(streamRef.current!);
+      totalTimerRef.current = setInterval(() => setTotalElapsed((t) => t + 1), 1000);
+
+      setTimeout(async () => {
+        const introText = `Hello ${candidateName}, welcome to your interview for the ${position} role. I'm your GeniusHub interviewer. Your screen and camera are now securely shared. Could you please introduce yourself?`;
+        await speakAndRecord(introText);
+      }, 800);
+    } catch (err) {
+      toast.error("Failed to enter Full Screen. Please click again.");
+    }
+  };
 
   const startFullRecording = useCallback((stream: MediaStream) => {
     const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
@@ -384,36 +422,6 @@ export default function InterviewPage() {
     }
   }, [voiceGender, startMediaRecorder, startSpeechRecognition]);
 
-  // FIX 1: FULLSCREEN FORCED IMMEDIATELY ON BUTTON CLICK
-  const handleBeginInterview = useCallback(async () => {
-    try {
-      // Step 1: Force Fullscreen instantly
-      if (document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch((err) => console.log("Fullscreen blocked:", err));
-      }
-
-      // Step 2: Instantly trigger Recruiter 'Started' Email
-      if (sessionId) {
-        fetch(`${API_URL}/sessions/${sessionId}/status`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "started" })
-        }).catch(err => console.log("Status update failed:", err));
-      }
-
-      // Step 3: Open Camera/Screen Vault
-      const stream = await openSecurityVault();
-      setInterviewStep("interview");
-
-      startFullRecording(stream);
-      totalTimerRef.current = setInterval(() => setTotalElapsed((t) => t + 1), 1000);
-
-      setTimeout(async () => {
-        const introText = `Hello ${candidateName}, welcome to your interview for the ${position} role. I'm your AI interviewer. Your screen and camera are now securely shared. Could you please introduce yourself?`;
-        await speakAndRecord(introText);
-      }, 800);
-    } catch {}
-  }, [openSecurityVault, candidateName, position, speakAndRecord, startFullRecording, sessionId]);
 
   const handleNextQuestion = useCallback(async () => {
     if (!isRecording) return;
@@ -421,6 +429,21 @@ export default function InterviewPage() {
     setLiveTranscript("");
     
     const hasAnswered = transcript.trim().length > 5;
+    const tLower = transcript.toLowerCase();
+
+    // UPGRADE: "Repeat Question" Logic
+    const wantsRepeat = tLower.includes("repeat") || tLower.includes("pardon") || (tLower.length < 25 && tLower.includes("sorry"));
+
+    if (wantsRepeat && !introPhase && currentQuestion) {
+      setIsSpeaking(true);
+      const ackText = "Sure, I can repeat that for you. " + currentQuestion.question;
+      setAiMessage(ackText);
+      await speakText(ackText, voiceGender);
+      setIsSpeaking(false);
+      setAiMessage("");
+      setTimeout(() => { speakAndRecord(currentQuestion.question); }, 300);
+      return; 
+    }
 
     if (introPhase) {
       setAnswers((prev) => [...prev, { questionId: 0, transcript: transcript || "(No speech detected)", videoBlob: null }]);
@@ -485,12 +508,12 @@ export default function InterviewPage() {
     setIsSpeaking(false);
     setAiMessage("");
 
-    // FIX 2: TRIGGER 'COMPLETED' EMAIL IMMEDIATELY BEFORE AI PROCESSING
     if (sessionId) {
       fetch(`${API_URL}/sessions/${sessionId}/status`, { 
         method: "PATCH", 
         headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ status: "completed" }) 
+        body: JSON.stringify({ status: "completed" }),
+        keepalive: true
       }).catch(err => console.log("Status update failed:", err));
     }
 
@@ -609,13 +632,13 @@ export default function InterviewPage() {
             
             {!feedbackSubmitted && !terminationReason ? (
               <div className="glass rounded-xl p-8 text-left space-y-6 mt-8">
-                <h3 className="text-xl font-semibold text-center">How was your AI interview experience?</h3>
+                <h3 className="text-xl font-semibold text-center">How was your GeniusHub interview experience?</h3>
                 <div className="flex justify-center gap-2">
                   {[1,2,3,4,5].map((star) => (
                     <Star key={star} onClick={() => setRating(star)} className={`w-10 h-10 cursor-pointer transition-colors ${rating >= star ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground"}`} />
                   ))}
                 </div>
-                <Textarea placeholder="Any thoughts on the AI's questions or behavior?" value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} className="bg-card min-h-[100px]" />
+                <Textarea placeholder="Any thoughts on the questions or behavior?" value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} className="bg-card min-h-[100px]" />
                 <Button onClick={submitFeedback} disabled={rating === 0} className="w-full h-12 bg-primary text-primary-foreground glow-cyan"><Send className="w-4 h-4 mr-2" /> Submit Feedback</Button>
               </div>
             ) : (
@@ -623,6 +646,34 @@ export default function InterviewPage() {
                 {terminationReason ? "You may now safely close this tab." : "Thank you for your feedback! You may now close this tab."}
               </div>
             )}
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
+
+  // UPGRADE: New intermediate step perfectly secures the Full Screen vault.
+  if (interviewStep === "ready") {
+    return (
+      <div className="min-h-screen bg-background nexus-grid">
+        <Navbar />
+        <div className="container mx-auto px-6 pt-24 pb-16 max-w-2xl">
+          <motion.div initial="hidden" animate="visible" className="space-y-8 text-center">
+            <motion.div variants={fadeUp} className="space-y-4">
+              <div className="w-20 h-20 rounded-full bg-green-500/10 flex items-center justify-center mx-auto"><CheckCircle2 className="w-10 h-10 text-green-500" /></div>
+              <h1 className="text-3xl font-display font-bold text-foreground">Permissions Granted</h1>
+              <p className="text-muted-foreground max-w-md mx-auto">Your camera and screen share are successfully connected.</p>
+            </motion.div>
+            <motion.div variants={fadeUp} className="glass rounded-xl p-6 text-left border border-primary/20">
+              <p className="text-sm text-muted-foreground text-center">
+                Clicking the button below will securely lock your browser into Full Screen mode and immediately begin the interview. 
+              </p>
+            </motion.div>
+            <motion.div variants={fadeUp}>
+              <Button onClick={lockAndStart} className="h-14 px-10 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan">
+                Lock Screen & Begin Interview
+              </Button>
+            </motion.div>
           </motion.div>
         </div>
       </div>
@@ -650,8 +701,8 @@ export default function InterviewPage() {
               </ul>
             </motion.div>
             <motion.div variants={fadeUp}>
-              <Button onClick={handleBeginInterview} className="h-14 px-10 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan">
-                Accept Rules & Enter Security Vault
+              <Button onClick={requestPermissions} className="h-14 px-10 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan">
+                Accept Rules & Grant Permissions
               </Button>
             </motion.div>
           </motion.div>
@@ -681,7 +732,7 @@ export default function InterviewPage() {
           
           {aiMessage && isSpeaking && (
             <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-4 border-l-4 border-nexus-amber">
-              <div className="flex items-center gap-2 mb-2"><Volume2 className="w-4 h-4 text-nexus-amber animate-pulse" /><span className="text-xs font-semibold text-nexus-amber uppercase tracking-wider">AI Interviewer</span></div>
+              <div className="flex items-center gap-2 mb-2"><Volume2 className="w-4 h-4 text-nexus-amber animate-pulse" /><span className="text-xs font-semibold text-nexus-amber uppercase tracking-wider">GeniusHub Interviewer</span></div>
               <p className="text-sm text-foreground leading-relaxed">{aiMessage}</p>
             </motion.div>
           )}

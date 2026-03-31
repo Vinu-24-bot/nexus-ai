@@ -108,7 +108,6 @@ def save_result_file(eval_id: str, candidate_name: str, result_data: dict):
 
 
 def extract_audio(video_path: str, audio_path: str) -> bool:
-    """Extracts audio from video using FFmpeg for highly accurate transcription."""
     try:
         command = [
             "ffmpeg", "-i", video_path, 
@@ -125,7 +124,7 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
         return False
 
 
-# --- ENTERPRISE EMAIL ENGINE ---
+# --- ENTERPRISE EMAIL ENGINE (FIXED SSL) ---
 def send_system_email(to_email: str, subject: str, body: str):
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
@@ -140,14 +139,14 @@ def send_system_email(to_email: str, subject: str, body: str):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        # UPGRADE: Using SMTP_SSL on Port 465 to bypass Cloud provider blocks
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS] Email successfully sent to {to_email}")
+        print(f"[BATS EMAIL SUCCESS] Successfully delivered tracking email to: {to_email}")
     except Exception as e:
-        print(f"[BATS] FATAL EMAIL ERROR: {e}")
+        print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}: {e}")
 
 
 @app.get("/")
@@ -158,7 +157,6 @@ async def root():
 
 @app.post("/api/sessions/create")
 async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Creates the session and emails both Candidate and Recruiter."""
     new_session = InterviewSession(
         candidate_name=req.candidate_name,
         candidate_email=req.candidate_email,
@@ -174,8 +172,6 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     db.refresh(new_session)
     
     frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app")
-    # For local development testing, you can uncomment this:
-    # frontend_url = "http://localhost:8080"
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
     # 1. Email Candidate
@@ -191,7 +187,6 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
 
 @app.get("/api/sessions/{session_id}")
 async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
-    """Candidate clicks the link; this fetches their specific interview details."""
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Interview link not found or expired.")
@@ -208,7 +203,6 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
 
 @app.patch("/api/sessions/{session_id}/status")
 async def update_session_status(session_id: str, req: SessionStatusUpdateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """Updates status and alerts Recruiter when candidate starts/finishes."""
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -216,7 +210,6 @@ async def update_session_status(session_id: str, req: SessionStatusUpdateRequest
     session.status = req.status
     db.commit()
 
-    # Recruiter Alerts
     if session.recruiter_email:
         if req.status == "started":
             body = f"Alert: {session.candidate_name} has just joined the interview room and started their camera/screen-share."
@@ -229,7 +222,6 @@ async def update_session_status(session_id: str, req: SessionStatusUpdateRequest
 
 @app.post("/api/feedback")
 async def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
-    """Stores candidate feedback after the interview."""
     feedback = CandidateFeedback(
         session_id=req.session_id,
         candidate_name=req.candidate_name,
@@ -299,7 +291,6 @@ async def upload_resume(file: UploadFile = File(...)):
         except ImportError:
             extracted_text = "[DOCX extraction requires python-docx. Install: pip install python-docx]"
 
-    print(f"[BATS] Running AI Semantic Parsing on {file.filename}...")
     structured_resume = await parse_resume_to_json(extracted_text)
 
     return ResumeUploadResponse(
@@ -312,12 +303,11 @@ async def upload_resume(file: UploadFile = File(...)):
 @app.post("/api/generate-questions")
 async def generate_questions(req: QuestionGenerationRequest):
     try:
-        # We now pass the interview_level to the AI!
         questions = await generate_interview_questions(
             job_description=req.job_description, 
             resume=req.resume, 
             num_questions=req.num_questions,
-            interview_level=req.interview_level # NEW
+            interview_level=req.interview_level 
         )
         return {"questions": questions}
     except Exception as e:
@@ -373,7 +363,7 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
             resume=req.resume,
             transcript=final_transcript,
             video_filename=req.video_filename,
-            remarks=req.remarks or "Completed normally.", # NEW
+            remarks=req.remarks or "Completed normally.", 
             candidate_overview=ai_result.get("candidate_overview", ""),
             scores=ai_result.get("scores", {}),
             sentiment=ai_result.get("sentiment", {"rating": "Neutral", "explanation": ""}),
