@@ -41,7 +41,6 @@ const fadeUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.4 } },
 };
 
-// UPGRADE: Advanced neural voice selection for highly realistic speech
 function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
   if (voices.length === 0) return null;
@@ -81,7 +80,6 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
     const voice = getVoice(gender);
     if (voice) utterance.voice = voice;
     
-    // UPGRADE: Adjusted to sound professional, deliberate, and less robotic
     utterance.rate = 0.95; 
     utterance.pitch = gender === "female" ? 1.05 : 0.95;
     
@@ -111,7 +109,6 @@ export default function InterviewPage() {
   const [liveTranscript, setLiveTranscript] = useState("");
   const [totalElapsed, setTotalElapsed] = useState(0);
   
-  // UPGRADE: Added "ready" step to guarantee Fullscreen doesn't drop
   const [interviewStep, setInterviewStep] = useState<"welcome" | "ready" | "interview" | "submitting" | "feedback">("welcome");
   const [cameraReady, setCameraReady] = useState(false);
   
@@ -209,7 +206,15 @@ export default function InterviewPage() {
     }
   }, [timeRemaining, interviewStep, totalElapsed]);
 
-  // Anti-Cheat listener (Only applies AFTER the interview fully starts)
+  // BUGFIX: Ensure the video player gets the stream when it actually renders!
+  useEffect(() => {
+    if (interviewStep === "interview" && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => console.log("Video autoplay blocked."));
+    }
+  }, [interviewStep, cameraReady]);
+
+  // Anti-Cheat listener
   useEffect(() => {
     if (interviewStep !== "interview") return;
 
@@ -260,12 +265,25 @@ export default function InterviewPage() {
         video: { width: 1280, height: 720, facingMode: "user" },
         audio: true,
       });
-      streamRef.current = avStream;
 
+      // BUGFIX: Force "Entire Screen" Verification
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        video: { displaySurface: "monitor" }, // Requests full screen natively
         audio: false
       });
+      
+      const videoTrack = screenStream.getVideoTracks()[0];
+      const settings = videoTrack.getSettings();
+      
+      // If they bypassed the native request and clicked Tab/Window, REJECT it.
+      if (settings.displaySurface && settings.displaySurface !== "monitor") {
+        avStream.getTracks().forEach(t => t.stop());
+        screenStream.getTracks().forEach(t => t.stop());
+        toast.error("Security Requirement: You MUST select 'Entire Screen'. Tabs or Windows are not allowed.");
+        return; // Abort
+      }
+
+      streamRef.current = avStream;
       screenStreamRef.current = screenStream;
 
       screenStream.getVideoTracks()[0].onended = () => {
@@ -276,17 +294,9 @@ export default function InterviewPage() {
       };
 
       setCameraReady(true);
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = avStream;
-          videoRef.current.play().catch(() => {});
-        }
-      }, 50);
-
-      // Move to Phase 2: User must click button to trigger fullscreen safely
       setInterviewStep("ready");
     } catch (err) {
-      toast.error("Security Requirement: You MUST allow Camera, Mic, and Screen Sharing to proceed.");
+      toast.error("Security Requirement: You MUST allow Camera, Mic, and Entire Screen Sharing to proceed.");
     }
   };
 
@@ -431,7 +441,6 @@ export default function InterviewPage() {
     const hasAnswered = transcript.trim().length > 5;
     const tLower = transcript.toLowerCase();
 
-    // UPGRADE: "Repeat Question" Logic
     const wantsRepeat = tLower.includes("repeat") || tLower.includes("pardon") || (tLower.length < 25 && tLower.includes("sorry"));
 
     if (wantsRepeat && !introPhase && currentQuestion) {
@@ -652,7 +661,6 @@ export default function InterviewPage() {
     );
   }
 
-  // UPGRADE: New intermediate step perfectly secures the Full Screen vault.
   if (interviewStep === "ready") {
     return (
       <div className="min-h-screen bg-background nexus-grid">
