@@ -1,5 +1,5 @@
 """
-BATS AI Interview Evaluator - Enterprise FastAPI Backend
+BATS GeniusHub Interview Evaluator - Enterprise FastAPI Backend
 """
 
 import os
@@ -52,15 +52,17 @@ RESUMES_DIR = UPLOAD_DIR / "resumes"
 RESUMES_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(
-    title="BATS AI Interview Evaluator",
+    title="BATS GeniusHub Backend",
     description="Enterprise AI-powered candidate evaluation backend",
     version="3.0.0",
 )
 
+# 🛑 ULTIMATE CORS KILL SWITCH 🛑
+# This completely disables CORS blocking between Vercel and Render.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://localhost:5173", "http://localhost:3000","https://nexus-ai-platform-omega.vercel.app","*"],
-    allow_credentials=True,
+    allow_origins=["*"], 
+    allow_credentials=False, 
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -92,6 +94,7 @@ def db_to_response(ev: Evaluation) -> dict:
         "hiring_recommendation": ev.hiring_recommendation or "Reject",
         "justification": ev.justification or "",
         "video_filename": ev.video_filename,
+        "remarks": ev.remarks
     }
 
 
@@ -108,6 +111,7 @@ def save_result_file(eval_id: str, candidate_name: str, result_data: dict):
 
 
 def extract_audio(video_path: str, audio_path: str) -> bool:
+    """Extracts audio from video using FFmpeg for highly accurate transcription."""
     try:
         command = [
             "ffmpeg", "-i", video_path, 
@@ -124,7 +128,7 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
         return False
 
 
-# --- ENTERPRISE EMAIL ENGINE (FIXED SSL) ---
+# --- ENTERPRISE EMAIL ENGINE ---
 def send_system_email(to_email: str, subject: str, body: str):
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
@@ -133,7 +137,7 @@ def send_system_email(to_email: str, subject: str, body: str):
         return
     
     msg = MIMEMultipart()
-    msg['From'] = f"BATS AI Recruitment <{sender_email}>"
+    msg['From'] = f"BATS GeniusHub Recruitment <{sender_email}>"
     msg['To'] = to_email
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'plain'))
@@ -151,12 +155,13 @@ def send_system_email(to_email: str, subject: str, body: str):
 
 @app.get("/")
 async def root():
-    return {"message": "BATS AI Enterprise Backend v3.0 is running", "docs": "/docs"}
+    return {"message": "BATS GeniusHub Enterprise Backend is awake and running!"}
 
 # ─── ENTERPRISE ROUTES: SESSION LINK & EMAIL GENERATION ───
 
 @app.post("/api/sessions/create")
 async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Creates the session and emails both Candidate and Recruiter."""
     new_session = InterviewSession(
         candidate_name=req.candidate_name,
         candidate_email=req.candidate_email,
@@ -175,18 +180,19 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
     # 1. Email Candidate
-    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to an AI Video Interview for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
+    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a GeniusHub Video Interview for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
     background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
 
     # 2. Email Recruiter
     if req.recruiter_email:
         recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\n\nYou will receive another alert the moment they begin, and when results are ready."
-        background_tasks.add_task(send_system_email, req.recruiter_email, f"BATS Tracking: Session Created for {req.candidate_name}", recruiter_body)
+        background_tasks.add_task(send_system_email, req.recruiter_email, f"GeniusHub Tracking: Session Created for {req.candidate_name}", recruiter_body)
     
     return {"message": "Session created and emails queued", "session_id": new_session.id}
 
 @app.get("/api/sessions/{session_id}")
 async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
+    """Candidate clicks the link; this fetches their specific interview details."""
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Interview link not found or expired.")
@@ -203,6 +209,7 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
 
 @app.patch("/api/sessions/{session_id}/status")
 async def update_session_status(session_id: str, req: SessionStatusUpdateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """Updates status and alerts Recruiter when candidate starts/finishes."""
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -210,6 +217,7 @@ async def update_session_status(session_id: str, req: SessionStatusUpdateRequest
     session.status = req.status
     db.commit()
 
+    # Recruiter Alerts
     if session.recruiter_email:
         if req.status == "started":
             body = f"Alert: {session.candidate_name} has just joined the interview room and started their camera/screen-share."
@@ -222,6 +230,7 @@ async def update_session_status(session_id: str, req: SessionStatusUpdateRequest
 
 @app.post("/api/feedback")
 async def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
+    """Stores candidate feedback after the interview."""
     feedback = CandidateFeedback(
         session_id=req.session_id,
         candidate_name=req.candidate_name,
@@ -291,6 +300,7 @@ async def upload_resume(file: UploadFile = File(...)):
         except ImportError:
             extracted_text = "[DOCX extraction requires python-docx. Install: pip install python-docx]"
 
+    print(f"[BATS] Running AI Semantic Parsing on {file.filename}...")
     structured_resume = await parse_resume_to_json(extracted_text)
 
     return ResumeUploadResponse(
