@@ -142,7 +142,6 @@ export default function InterviewPage() {
           if (!res.ok) throw new Error("Link expired or invalid");
           const session = await res.json();
           
-          // UPGRADE: Passing the interview_level to the AI Question Generator!
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -174,10 +173,6 @@ export default function InterviewPage() {
       fetchSessionDetails();
     }
   }, [sessionId, state, navigate]);
-
-  useEffect(() => {
-    if (!state && !sessionId) navigate("/evaluate");
-  }, [state, sessionId, navigate]);
 
   useEffect(() => {
     const loadVoices = () => { window.speechSynthesis.getVoices(); };
@@ -245,10 +240,6 @@ export default function InterviewPage() {
 
   const openSecurityVault = useCallback(async () => {
     try {
-      if (document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen();
-      }
-
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(d => d.kind === 'videoinput');
       const hasVirtual = videoDevices.some(d => d.label.toLowerCase().includes('virtual') || d.label.toLowerCase().includes('obs'));
@@ -393,18 +384,26 @@ export default function InterviewPage() {
     }
   }, [voiceGender, startMediaRecorder, startSpeechRecognition]);
 
+  // FIX 1: FULLSCREEN FORCED IMMEDIATELY ON BUTTON CLICK
   const handleBeginInterview = useCallback(async () => {
     try {
-      const stream = await openSecurityVault();
-      setInterviewStep("interview");
-      
+      // Step 1: Force Fullscreen instantly
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch((err) => console.log("Fullscreen blocked:", err));
+      }
+
+      // Step 2: Instantly trigger Recruiter 'Started' Email
       if (sessionId) {
         fetch(`${API_URL}/sessions/${sessionId}/status`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: "started" })
-        });
+        }).catch(err => console.log("Status update failed:", err));
       }
+
+      // Step 3: Open Camera/Screen Vault
+      const stream = await openSecurityVault();
+      setInterviewStep("interview");
 
       startFullRecording(stream);
       totalTimerRef.current = setInterval(() => setTotalElapsed((t) => t + 1), 1000);
@@ -486,6 +485,15 @@ export default function InterviewPage() {
     setIsSpeaking(false);
     setAiMessage("");
 
+    // FIX 2: TRIGGER 'COMPLETED' EMAIL IMMEDIATELY BEFORE AI PROCESSING
+    if (sessionId) {
+      fetch(`${API_URL}/sessions/${sessionId}/status`, { 
+        method: "PATCH", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ status: "completed" }) 
+      }).catch(err => console.log("Status update failed:", err));
+    }
+
     setInterviewStep("submitting");
 
     try {
@@ -517,7 +525,6 @@ export default function InterviewPage() {
         } catch {}
       }
 
-      // UPGRADE: Passing the remarks/security breach flag to the backend
       await submitEvaluation({
         candidate_name: candidateName,
         position,
@@ -526,11 +533,7 @@ export default function InterviewPage() {
         transcript: fullTranscript || "(No transcript)",
         video_filename: primaryVideoFilename,
         remarks: forcedTerminationReason || "Completed normally without interruptions.",
-      } as any); // Type assertion prevents TS errors if user hasn't updated types yet
-
-      if (sessionId) {
-        fetch(`${API_URL}/sessions/${sessionId}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "completed" }) });
-      }
+      } as any); 
 
       setInterviewStep("feedback");
     } catch (err: any) {
