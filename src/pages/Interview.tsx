@@ -141,12 +141,20 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Link expired or invalid");
           const session = await res.json();
+          
+          // UPGRADE: Passing the interview_level to the AI Question Generator!
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: 8 })
+            body: JSON.stringify({ 
+              job_description: session.job_description, 
+              resume: session.resume_text, 
+              num_questions: 8,
+              interview_level: session.interview_level || "L2 (Mid-Level)"
+            })
           });
           const qData = await qRes.json();
+          
           setFetchedData({
             candidateName: session.candidate_name,
             position: session.position,
@@ -185,23 +193,18 @@ export default function InterviewPage() {
     };
   }, []);
 
-  // Time expiry auto-submit
   useEffect(() => {
     if (timeRemaining <= 0 && interviewStep === "interview" && totalElapsed > 0) {
       handleForceEndInterview(false, "Time Expired.");
     }
   }, [timeRemaining, interviewStep, totalElapsed]);
 
-  // ─── ENTERPRISE ANTI-CHEAT ENGINE (KEYBOARD, FOCUS, FULLSCREEN) ───
   useEffect(() => {
     if (interviewStep !== "interview") return;
 
-    // 1. Keyboard 3-Strike Rule
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") return; // Allow Esc (which triggers fullscreenchange termination below)
-      
-      e.preventDefault(); // Block typing to AI tools
-      
+      if (e.key === "Escape") return; 
+      e.preventDefault(); 
       setCheatStrikes(prev => {
         const newStrikes = prev + 1;
         if (newStrikes >= 3) {
@@ -214,7 +217,6 @@ export default function InterviewPage() {
       });
     };
 
-    // 2. Fullscreen Exit Detection
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
         toast.error("SECURITY BREACH: You exited Full Screen mode.");
@@ -222,7 +224,6 @@ export default function InterviewPage() {
       }
     };
 
-    // 3. Tab/Window Focus Detection (Dual Monitor cheating)
     const handleVisibilityChange = () => {
       if (document.hidden) {
         toast.error("SECURITY BREACH: Tab lost focus.");
@@ -244,12 +245,10 @@ export default function InterviewPage() {
 
   const openSecurityVault = useCallback(async () => {
     try {
-      // 1. Force Full Screen
       if (document.documentElement.requestFullscreen) {
         await document.documentElement.requestFullscreen();
       }
 
-      // 2. Scan for Virtual Cameras (Parkeet AI, OBS)
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoDevices = devices.filter(d => d.kind === 'videoinput');
       const hasVirtual = videoDevices.some(d => d.label.toLowerCase().includes('virtual') || d.label.toLowerCase().includes('obs'));
@@ -257,21 +256,18 @@ export default function InterviewPage() {
         toast.warning("Virtual Camera detected. This will be flagged in your final report.");
       }
 
-      // 3. Get Camera and Mic
       const avStream = await navigator.mediaDevices.getUserMedia({
         video: { width: 1280, height: 720, facingMode: "user" },
         audio: true,
       });
       streamRef.current = avStream;
 
-      // 4. Get Screen Share
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: false
       });
       screenStreamRef.current = screenStream;
 
-      // 5. Screen Share Termination Check
       screenStream.getVideoTracks()[0].onended = () => {
         if (interviewStep === "interview") {
           toast.error("SECURITY BREACH: Screen sharing stopped.");
@@ -390,7 +386,6 @@ export default function InterviewPage() {
     if (streamRef.current) {
       startMediaRecorder(streamRef.current);
       startSpeechRecognition();
-      // Safety net: if they never speak at all, auto-submit after 15 seconds.
       silenceTimerRef.current = setTimeout(() => {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) btn.click();
@@ -426,7 +421,6 @@ export default function InterviewPage() {
     const { transcript } = await stopRecording(); 
     setLiveTranscript("");
     
-    // Strict Listening Fix
     const hasAnswered = transcript.trim().length > 5;
 
     if (introPhase) {
@@ -475,14 +469,13 @@ export default function InterviewPage() {
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
     const fullBlob = await stopFullRecording();
 
-    // Kill cameras and exit fullscreen
     if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
     if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraReady(false);
 
-    setTerminationReason(forcedTerminationReason); // Save for UI
+    setTerminationReason(forcedTerminationReason); 
 
     setIsSpeaking(true);
     const closingMsg = forcedTerminationReason 
@@ -508,7 +501,6 @@ export default function InterviewPage() {
         return `Q${i} [${q?.difficulty}]: ${q?.question || "Unknown"}\nA${i}: ${a.transcript}`;
       }).join("\n\n");
 
-      // Inject Cheating Log directly to AI Evaluator!
       if (forcedTerminationReason) {
         fullTranscript += `\n\n[SYSTEM LOG]: ${forcedTerminationReason}`;
       }
@@ -525,6 +517,7 @@ export default function InterviewPage() {
         } catch {}
       }
 
+      // UPGRADE: Passing the remarks/security breach flag to the backend
       await submitEvaluation({
         candidate_name: candidateName,
         position,
@@ -532,7 +525,8 @@ export default function InterviewPage() {
         resume,
         transcript: fullTranscript || "(No transcript)",
         video_filename: primaryVideoFilename,
-      });
+        remarks: forcedTerminationReason || "Completed normally without interruptions.",
+      } as any); // Type assertion prevents TS errors if user hasn't updated types yet
 
       if (sessionId) {
         fetch(`${API_URL}/sessions/${sessionId}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "completed" }) });
@@ -577,7 +571,6 @@ export default function InterviewPage() {
   if (isInitializing) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-12 h-12 text-primary animate-spin" /></div>;
   if (!state && !fetchedData) return null;
 
-  // ─── POST-INTERVIEW: SUBMITTING STATE ───
   if (interviewStep === "submitting") {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center space-y-6">
@@ -588,7 +581,6 @@ export default function InterviewPage() {
     );
   }
 
-  // ─── POST-INTERVIEW: FEEDBACK & THANK YOU ───
   if (interviewStep === "feedback") {
     return (
       <div className="min-h-screen bg-background nexus-grid">
@@ -634,7 +626,6 @@ export default function InterviewPage() {
     );
   }
 
-  // ─── PRE-INTERVIEW: WELCOME & SECURITY ───
   if (interviewStep === "welcome") {
     return (
       <div className="min-h-screen bg-background nexus-grid">
@@ -666,7 +657,6 @@ export default function InterviewPage() {
     );
   }
 
-  // ─── THE ACTIVE INTERVIEW ROOM ───
   return (
     <div className="min-h-screen bg-background nexus-grid">
       <Navbar />

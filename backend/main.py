@@ -312,7 +312,13 @@ async def upload_resume(file: UploadFile = File(...)):
 @app.post("/api/generate-questions")
 async def generate_questions(req: QuestionGenerationRequest):
     try:
-        questions = await generate_interview_questions(req.job_description, req.resume, req.num_questions)
+        # We now pass the interview_level to the AI!
+        questions = await generate_interview_questions(
+            job_description=req.job_description, 
+            resume=req.resume, 
+            num_questions=req.num_questions,
+            interview_level=req.interview_level # NEW
+        )
         return {"questions": questions}
     except Exception as e:
         raise HTTPException(500, detail=f"Question generation failed: {str(e)}")
@@ -367,6 +373,7 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
             resume=req.resume,
             transcript=final_transcript,
             video_filename=req.video_filename,
+            remarks=req.remarks or "Completed normally.", # NEW
             candidate_overview=ai_result.get("candidate_overview", ""),
             scores=ai_result.get("scores", {}),
             sentiment=ai_result.get("sentiment", {"rating": "Neutral", "explanation": ""}),

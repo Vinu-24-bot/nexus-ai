@@ -10,11 +10,13 @@ class EvaluationRequest(BaseModel):
     resume: str = Field(..., min_length=10)
     transcript: str = Field(..., min_length=10)
     video_filename: Optional[str] = None
+    remarks: Optional[str] = None # NEW: Passes the cheat logs
 
 class QuestionGenerationRequest(BaseModel):
     job_description: str = Field(..., min_length=10)
     resume: str = Field(..., min_length=10)
     num_questions: int = Field(default=12, ge=3, le=20)
+    interview_level: Optional[str] = "L2 (Mid-Level)" # NEW: Scales question difficulty
 
 class JDGenerationRequest(BaseModel):
     position: str = Field(..., min_length=2, max_length=200)

@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import {
   ArrowLeft, CheckCircle2, AlertTriangle, MessageSquare,
   HelpCircle, FileText, Sparkles, Loader2, Play, 
-  Smile, Meh, Frown, Shield, Download, Copy, UserCheck, UserX
+  Smile, Meh, Frown, Shield, Download, Copy, UserCheck, UserX, ShieldAlert
 } from "lucide-react";
 import { getEvaluation, updateSelectionStatus } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
@@ -96,7 +96,6 @@ export default function ResultPage() {
   const SentimentIconComp = sentimentIcon[result.sentiment?.rating as keyof typeof sentimentIcon] || Meh;
   const sentClr = sentimentColor[result.sentiment?.rating as keyof typeof sentimentColor] || sentimentColor.Neutral;
   
-  // Clean single video URL if it exists
   const videoUrl = result.video_filename ? `${API_BASE}/uploads/recordings/${encodeURIComponent(result.video_filename)}` : null;
 
   return (
@@ -105,7 +104,6 @@ export default function ResultPage() {
       <div className="container mx-auto px-6 pt-24 max-w-5xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
           
-          {/* Header & Back Link */}
           <motion.div variants={fadeUp} custom={0} className="space-y-4">
             <Link to="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
               <ArrowLeft className="w-4 h-4" />
@@ -138,7 +136,6 @@ export default function ResultPage() {
             </div>
           </motion.div>
 
-          {/* Action Buttons Toolbar */}
           <motion.div variants={fadeUp} custom={0.5} className="flex flex-wrap items-center justify-between gap-4 p-4 glass rounded-xl border border-primary/10">
             <div className="flex gap-2">
               <Button
@@ -173,7 +170,19 @@ export default function ResultPage() {
             </div>
           </motion.div>
 
-          {/* Executive Overview */}
+          {/* UPGRADE: Security Remarks Banner */}
+          {/* @ts-ignore - Bypass TS error if remarks is not yet in EvaluationResult types */}
+          {(result as any).remarks && (result as any).remarks !== "Completed normally without interruptions." && (result as any).remarks !== "Completed normally." && (
+            <motion.div variants={fadeUp} custom={0.8} className="w-full bg-destructive/10 border border-destructive/30 rounded-xl p-4 mb-6 flex items-start gap-3">
+              <ShieldAlert className="w-6 h-6 text-destructive shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-bold text-destructive uppercase tracking-wider">System Alert / Security Breach</h3>
+                {/* @ts-ignore */}
+                <p className="text-sm text-foreground">{(result as any).remarks}</p>
+              </div>
+            </motion.div>
+          )}
+
           <motion.div variants={fadeUp} custom={1} className="glass rounded-xl p-6 border-l-4 border-l-primary">
             <div className="flex items-center gap-2 mb-3">
               <Sparkles className="w-5 h-5 text-primary" />
@@ -182,7 +191,6 @@ export default function ResultPage() {
             <p className="text-muted-foreground leading-relaxed text-base">{result.candidate_overview}</p>
           </motion.div>
 
-          {/* ENTERPRISE METRICS: Sentiment + Candidate Status */}
           <motion.div variants={fadeUp} custom={1.5} className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="glass rounded-xl p-6 border border-border/50">
               <div className="flex justify-between items-start mb-4">
@@ -214,7 +222,6 @@ export default function ResultPage() {
             </div>
           </motion.div>
 
-          {/* Scores Grid */}
           <motion.div variants={fadeUp} custom={2} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="glass rounded-xl p-6 flex flex-col items-center border border-border/50">
               <h2 className="text-sm font-bold text-foreground uppercase tracking-wider mb-6 self-start">
@@ -235,7 +242,6 @@ export default function ResultPage() {
             </div>
           </motion.div>
 
-          {/* Interview Recording (Single Video Player) */}
           {videoUrl && (
             <motion.div variants={fadeUp} custom={2.5} className="glass rounded-xl p-6 border border-border/50">
               <div className="flex items-center justify-between mb-4">
@@ -252,7 +258,6 @@ export default function ResultPage() {
             </motion.div>
           )}
 
-          {/* Strengths & Weaknesses */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6 border border-green-500/20 bg-gradient-to-b from-green-500/5 to-transparent">
               <div className="flex items-center gap-2 mb-6">
@@ -285,7 +290,6 @@ export default function ResultPage() {
             </motion.div>
           </div>
 
-          {/* Dynamic Follow-up Questions */}
           <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6 border-l-4 border-l-accent">
             <div className="flex items-center gap-2 mb-4">
               <HelpCircle className="w-5 h-5 text-accent" />
@@ -302,7 +306,6 @@ export default function ResultPage() {
             </div>
           </motion.div>
 
-          {/* Final Justification */}
           <motion.div variants={fadeUp} custom={6} className="glass rounded-xl p-6 border border-border/50">
             <div className="flex items-center gap-2 mb-4">
               <FileText className="w-5 h-5 text-primary" />

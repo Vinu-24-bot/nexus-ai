@@ -27,6 +27,7 @@ class Evaluation(Base):
     dynamic_follow_up_questions = Column(JSON, default=list)
     hiring_recommendation = Column(String(50), default="")
     justification = Column(Text, default="")
+    remarks = Column(Text, default="")
 
     # New fields from video reference
     sentiment = Column(JSON, default=lambda: {"rating": "Neutral", "explanation": ""})
