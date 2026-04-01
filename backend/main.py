@@ -118,10 +118,13 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
 
 
 def send_system_email(to_email: str, subject: str, body: str):
+    """
+    🛡️ RESTORED: The working Dual-Engine Email logic that fires on both ports.
+    """
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
     if not sender_email or not sender_password:
-        print(f"[BATS] Email credentials missing. Cannot send email to {to_email}.")
+        print(f"[BATS EMAIL FAIL] Missing SENDER_EMAIL or SENDER_PASSWORD in env. Cannot send to {to_email}.")
         return
     
     msg = MIMEMultipart()
@@ -131,15 +134,25 @@ def send_system_email(to_email: str, subject: str, body: str):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        # ATTEMPT 1: Port 587 (TLS)
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
+        server.starttls()
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS EMAIL SUCCESS] Successfully delivered tracking email to: {to_email}")
-    except Exception as e:
-        print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}: {e}")
+        print(f"[BATS EMAIL SUCCESS] Successfully delivered via Port 587 to: {to_email}")
+    except Exception as e1:
+        print(f"[BATS EMAIL WARNING] Port 587 failed: {e1}. Pivoting to Port 465 (SSL)...")
+        try:
+            # ATTEMPT 2: Port 465 (SSL)
+            server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, to_email, msg.as_string())
+            server.quit()
+            print(f"[BATS EMAIL SUCCESS] Successfully delivered via Port 465 to: {to_email}")
+        except Exception as e2:
+            print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}. Error: {e2}")
 
-# ─── THE 24/7 DATABASE DEFIBRILLATOR ───
 
 @app.get("/")
 async def root():
@@ -153,7 +166,6 @@ async def health_check(db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "offline", "error": str(e)}
 
-# ─── ENTERPRISE ROUTES: SESSION LINK & EMAIL GENERATION ───
 
 @app.post("/api/sessions/create")
 async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
