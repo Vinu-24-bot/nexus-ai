@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal, HandHandshake
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -182,7 +182,6 @@ export default function InterviewPage() {
     }
   }, [interviewStep, cameraReady]);
 
-  // 🛡️ 3-Strike Security System
   const handleSecurityViolation = useCallback((reason: string) => {
     setCheatStrikes(prev => {
       const newStrikes = prev + 1;
@@ -199,7 +198,17 @@ export default function InterviewPage() {
     if (interviewStep !== "interview") return;
     
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" || isTerminatingRef.current) return; 
+      // 🛡️ BUGFIX: Whitelist Media, Volume, and Brightness Keys!
+      const allowedKeys = [
+        "Escape", "AudioVolumeUp", "AudioVolumeDown", "AudioVolumeMute",
+        "BrightnessUp", "BrightnessDown", "MediaPlayPause", "MediaTrackNext",
+        "MediaTrackPrevious", "MediaStop"
+      ];
+
+      if (allowedKeys.includes(e.key) || isTerminatingRef.current) {
+        return; // Allow the system to natively handle volume/brightness
+      }
+
       e.preventDefault(); 
       handleSecurityViolation("Keyboard usage is disabled");
     };
@@ -296,13 +305,11 @@ export default function InterviewPage() {
     setIsRecording(true);
   }, []);
 
-  // 🧠 The "Smart Auto-Submit" Engine (6 Seconds)
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     setIsThinking(false);
     isRecordingRef.current = true;
     
-    // Give 15 seconds to say the first word
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     silenceTimerRef.current = setTimeout(() => {
         if (isRecordingRef.current) {
@@ -337,7 +344,7 @@ export default function InterviewPage() {
       const tLower = allFinal.toLowerCase();
       const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to");
       
-      const waitTime = isSkipping ? 1500 : 6000; // 6 seconds of silence before auto-submit
+      const waitTime = isSkipping ? 1500 : 6000; 
 
       silenceTimerRef.current = setTimeout(() => {
         if (isRecordingRef.current) {
@@ -380,7 +387,6 @@ export default function InterviewPage() {
     startSpeechRecognition();
   }, [voiceGender, startSpeechRecognition]);
 
-  // 🧠 Alex AI Conversational Bridge
   const handleAnswerSubmit = useCallback(async () => {
     if (!isRecording) return;
     setIsRecording(false);
@@ -430,7 +436,6 @@ export default function InterviewPage() {
                 })
             });
             const ackData = await ackRes.json();
-            // Handle if backend returns plain text or JSON
             dynamicResponse = ackData.response_text || ackData.acknowledgment || ("Thank you. " + nextQText);
             isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
         } catch (err) {
@@ -740,8 +745,8 @@ export default function InterviewPage() {
             <div className="flex flex-col gap-2">
               {isRecording && !isSpeaking && (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
-                   <Mic className="w-4 h-4 text-green-500" />
-                   Listening... Take your time. Auto-submits after 6 seconds of silence.
+                   {isThinking ? <MoreHorizontal className="w-4 h-4 text-primary" /> : <Mic className="w-4 h-4 text-green-500" />}
+                   {isThinking ? "Listening... (Take your time, it will auto-submit when you stop)" : "AI is listening. Speak naturally or click Submit when done."}
                  </div>
               )}
               {liveTranscript && (
@@ -755,7 +760,7 @@ export default function InterviewPage() {
             <div className="flex items-center justify-between">
               {isRecording ? (
                  <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
-                   <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
+                   <HandHandshake className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
                  </Button>
               ) : (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>
