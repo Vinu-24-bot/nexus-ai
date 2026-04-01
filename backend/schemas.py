@@ -1,8 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
-# --- EXISTING SCHEMAS ---
-
 class EvaluationRequest(BaseModel):
     candidate_name: str = Field(..., min_length=1, max_length=200)
     position: str = Field(..., min_length=1, max_length=200)
@@ -23,8 +21,8 @@ class JDGenerationRequest(BaseModel):
 
 class AcknowledgmentRequest(BaseModel):
     question: str = Field(..., min_length=5)
-    answer: str = Field(..., min_length=2)
-    next_question: Optional[str] = None  # REQUIRED for Alex AI smooth transition
+    answer: str = Field(..., min_length=1) # FIX: Allows short 1-word answers without crashing
+    next_question: Optional[str] = None  
 
 class SelectionStatusRequest(BaseModel):
     status: str = Field(..., pattern="^(pending|selected|rejected)$")
@@ -75,11 +73,11 @@ class EvaluationResponse(BaseModel):
     hiring_recommendation: str
     justification: str
     video_filename: Optional[str] = None
+    remarks: Optional[str] = None
 
     class Config:
         from_attributes = True
 
-# --- ENTERPRISE SESSION & FEEDBACK SCHEMAS ---
 
 class SessionCreateRequest(BaseModel):
     candidate_name: str

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal, HandHandshake
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -198,7 +198,6 @@ export default function InterviewPage() {
     if (interviewStep !== "interview") return;
     
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 🛡️ BUGFIX: Whitelist Media, Volume, and Brightness Keys!
       const allowedKeys = [
         "Escape", "AudioVolumeUp", "AudioVolumeDown", "AudioVolumeMute",
         "BrightnessUp", "BrightnessDown", "MediaPlayPause", "MediaTrackNext",
@@ -206,7 +205,7 @@ export default function InterviewPage() {
       ];
 
       if (allowedKeys.includes(e.key) || isTerminatingRef.current) {
-        return; // Allow the system to natively handle volume/brightness
+        return; 
       }
 
       e.preventDefault(); 
@@ -745,8 +744,8 @@ export default function InterviewPage() {
             <div className="flex flex-col gap-2">
               {isRecording && !isSpeaking && (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
-                   {isThinking ? <MoreHorizontal className="w-4 h-4 text-primary" /> : <Mic className="w-4 h-4 text-green-500" />}
-                   {isThinking ? "Listening... (Take your time, it will auto-submit when you stop)" : "AI is listening. Speak naturally or click Submit when done."}
+                   <Mic className="w-4 h-4 text-green-500" />
+                   Listening... Take your time. Auto-submits after 6 seconds of silence.
                  </div>
               )}
               {liveTranscript && (
@@ -760,7 +759,7 @@ export default function InterviewPage() {
             <div className="flex items-center justify-between">
               {isRecording ? (
                  <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
-                   <HandHandshake className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
+                   <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
                  </Button>
               ) : (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>
