@@ -36,19 +36,14 @@ from ai_service import (
 
 load_dotenv()
 
-# Create tables
 Base.metadata.create_all(bind=engine)
 
-# Create directories
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
 UPLOAD_DIR.mkdir(exist_ok=True)
-
 RECORDINGS_DIR = UPLOAD_DIR / "recordings"
 RECORDINGS_DIR.mkdir(exist_ok=True)
-
 RESULTS_DIR = UPLOAD_DIR / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
-
 RESUMES_DIR = UPLOAD_DIR / "resumes"
 RESUMES_DIR.mkdir(exist_ok=True)
 
@@ -58,7 +53,6 @@ app = FastAPI(
     version="3.0.0",
 )
 
-# 🛑 ULTIMATE CORS KILL SWITCH 🛑
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -75,7 +69,6 @@ def generate_candidate_id(name: str, position: str) -> str:
     role_short = re.sub(r'[^a-zA-Z]', '', position.replace(" ", ""))[:20]
     unique_hash = hashlib.md5(f"{name}{position}{datetime.now().isoformat()}".encode()).hexdigest()[:6]
     return f"BATS-{first_name}_{role_short}-{unique_hash}"
-
 
 def db_to_response(ev: Evaluation) -> dict:
     return {
@@ -97,7 +90,6 @@ def db_to_response(ev: Evaluation) -> dict:
         "remarks": ev.remarks
     }
 
-
 def save_result_file(eval_id: str, candidate_name: str, result_data: dict):
     safe_name = candidate_name.replace(" ", "_").replace("/", "_")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -107,7 +99,6 @@ def save_result_file(eval_id: str, candidate_name: str, result_data: dict):
         json.dump(result_data, f, indent=2, ensure_ascii=False)
     return str(filepath)
 
-
 def extract_audio(video_path: str, audio_path: str) -> bool:
     try:
         command = ["ffmpeg", "-i", video_path, "-q:a", "0", "-map", "a", audio_path, "-y"]
@@ -116,15 +107,12 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
-
+# 🛡️ THE FIX: Absolute Direct SSL Connection. No hanging on Port 587.
 def send_system_email(to_email: str, subject: str, body: str):
-    """
-    🛡️ RESTORED: The working Dual-Engine Email logic that fires on both ports.
-    """
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
     if not sender_email or not sender_password:
-        print(f"[BATS EMAIL FAIL] Missing SENDER_EMAIL or SENDER_PASSWORD in env. Cannot send to {to_email}.")
+        print(f"[BATS EMAIL FAIL] Missing SENDER_EMAIL or SENDER_PASSWORD in env.")
         return
     
     msg = MIMEMultipart()
@@ -134,25 +122,13 @@ def send_system_email(to_email: str, subject: str, body: str):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        # ATTEMPT 1: Port 587 (TLS)
-        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
-        server.starttls()
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15)
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS EMAIL SUCCESS] Successfully delivered via Port 587 to: {to_email}")
-    except Exception as e1:
-        print(f"[BATS EMAIL WARNING] Port 587 failed: {e1}. Pivoting to Port 465 (SSL)...")
-        try:
-            # ATTEMPT 2: Port 465 (SSL)
-            server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, to_email, msg.as_string())
-            server.quit()
-            print(f"[BATS EMAIL SUCCESS] Successfully delivered via Port 465 to: {to_email}")
-        except Exception as e2:
-            print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}. Error: {e2}")
-
+        print(f"[BATS EMAIL SUCCESS] Successfully delivered email to: {to_email}")
+    except Exception as e:
+        print(f"[BATS EMAIL ERROR] Failed to send to {to_email}. Error: {e}")
 
 @app.get("/")
 async def root():
@@ -165,7 +141,6 @@ async def health_check(db: Session = Depends(get_db)):
         return {"status": "online", "database": "connected and awake"}
     except Exception as e:
         return {"status": "offline", "error": str(e)}
-
 
 @app.post("/api/sessions/create")
 async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
