@@ -10,13 +10,13 @@ class EvaluationRequest(BaseModel):
     resume: str = Field(..., min_length=10)
     transcript: str = Field(..., min_length=10)
     video_filename: Optional[str] = None
-    remarks: Optional[str] = None
+    remarks: Optional[str] = None 
 
 class QuestionGenerationRequest(BaseModel):
     job_description: str = Field(..., min_length=10)
     resume: str = Field(..., min_length=10)
     num_questions: int = Field(default=12, ge=3, le=20)
-    interview_level: Optional[str] = "L2 (Mid-Level)"
+    interview_level: Optional[str] = "L2 (Mid-Level)" 
 
 class JDGenerationRequest(BaseModel):
     position: str = Field(..., min_length=2, max_length=200)
@@ -24,7 +24,7 @@ class JDGenerationRequest(BaseModel):
 class AcknowledgmentRequest(BaseModel):
     question: str = Field(..., min_length=5)
     answer: str = Field(..., min_length=2)
-    next_question: Optional[str] = None  # NEW: Enables Alex AI smoothness
+    next_question: Optional[str] = None  # REQUIRED for Alex AI smooth transition
 
 class SelectionStatusRequest(BaseModel):
     status: str = Field(..., pattern="^(pending|selected|rejected)$")
@@ -75,7 +75,6 @@ class EvaluationResponse(BaseModel):
     hiring_recommendation: str
     justification: str
     video_filename: Optional[str] = None
-    remarks: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -92,7 +91,7 @@ class SessionCreateRequest(BaseModel):
     resume_text: str
 
 class SessionStatusUpdateRequest(BaseModel):
-    status: str
+    status: str 
 
 class FeedbackRequest(BaseModel):
     session_id: str

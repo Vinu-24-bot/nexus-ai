@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal, HandHandshake
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,7 +41,6 @@ const CandidateHeader = ({ isLive }: { isLive: boolean }) => (
 function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
   if (voices.length === 0) return null;
-  const premiumKeywords = ["neural", "premium", "google", "microsoft"];
   const femaleKeywords = ["female", "woman", "jenny", "samantha", "karen", "zira", "victoria"];
   const maleKeywords = ["male", "man", "guy", "david", "mark", "daniel", "james"];
   
@@ -53,7 +52,7 @@ function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
     const name = v.name.toLowerCase();
     let score = 0;
     if ((gender === "female" ? femaleKeywords : maleKeywords).some(k => name.includes(k))) score += 2;
-    if (premiumKeywords.some(k => name.includes(k))) score += 5; 
+    if (name.includes("google") || name.includes("neural") || name.includes("premium")) score += 5; 
     if (score > highestScore) { highestScore = score; bestMatch = v; }
   }
   return bestMatch || voices.find(v => v.lang.startsWith("en")) || voices[0];
@@ -183,7 +182,7 @@ export default function InterviewPage() {
     }
   }, [interviewStep, cameraReady]);
 
-  // 🛡️ UPGRADE: 3-Strike Forgiveness System (Prevents false positive crashes)
+  // 🛡️ 3-Strike Security System
   const handleSecurityViolation = useCallback((reason: string) => {
     setCheatStrikes(prev => {
       const newStrikes = prev + 1;
@@ -244,7 +243,7 @@ export default function InterviewPage() {
       screenStreamRef.current = screenStream;
       screenStream.getVideoTracks()[0].onended = () => {
         if (interviewStep === "interview" && !isTerminatingRef.current) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing screen.");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate manually stopped sharing their screen.");
         }
       };
       setCameraReady(true);
@@ -297,13 +296,13 @@ export default function InterviewPage() {
     setIsRecording(true);
   }, []);
 
-  // 🧠 UPGRADE: The "Smart Auto-Submit" Engine
+  // 🧠 The "Smart Auto-Submit" Engine (6 Seconds)
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     setIsThinking(false);
     isRecordingRef.current = true;
     
-    // Give them 15 seconds to say their FIRST word before timing out.
+    // Give 15 seconds to say the first word
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     silenceTimerRef.current = setTimeout(() => {
         if (isRecordingRef.current) {
@@ -338,8 +337,7 @@ export default function InterviewPage() {
       const tLower = allFinal.toLowerCase();
       const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to");
       
-      // Auto-submit after 6 seconds of silence (or 1.5s if they skip). Perfect human pacing.
-      const waitTime = isSkipping ? 1500 : 6000; 
+      const waitTime = isSkipping ? 1500 : 6000; // 6 seconds of silence before auto-submit
 
       silenceTimerRef.current = setTimeout(() => {
         if (isRecordingRef.current) {
@@ -382,6 +380,7 @@ export default function InterviewPage() {
     startSpeechRecognition();
   }, [voiceGender, startSpeechRecognition]);
 
+  // 🧠 Alex AI Conversational Bridge
   const handleAnswerSubmit = useCallback(async () => {
     if (!isRecording) return;
     setIsRecording(false);
@@ -431,8 +430,9 @@ export default function InterviewPage() {
                 })
             });
             const ackData = await ackRes.json();
-            dynamicResponse = ackData.response_text;
-            isSufficient = ackData.is_sufficient;
+            // Handle if backend returns plain text or JSON
+            dynamicResponse = ackData.response_text || ackData.acknowledgment || ("Thank you. " + nextQText);
+            isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
         } catch (err) {
             dynamicResponse = "Thank you for that. " + nextQText;
         }
@@ -740,8 +740,8 @@ export default function InterviewPage() {
             <div className="flex flex-col gap-2">
               {isRecording && !isSpeaking && (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
-                   {isThinking ? <MoreHorizontal className="w-4 h-4 text-primary" /> : <Mic className="w-4 h-4 text-green-500" />}
-                   {isThinking ? "Listening... (Take your time, it will auto-submit when you stop)" : "AI is listening. Speak naturally or click Submit when done."}
+                   <Mic className="w-4 h-4 text-green-500" />
+                   Listening... Take your time. Auto-submits after 6 seconds of silence.
                  </div>
               )}
               {liveTranscript && (
@@ -755,7 +755,7 @@ export default function InterviewPage() {
             <div className="flex items-center justify-between">
               {isRecording ? (
                  <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
-                   <HandHandshake className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
+                   <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
                  </Button>
               ) : (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>

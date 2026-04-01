@@ -58,7 +58,6 @@ app = FastAPI(
     version="3.0.0",
 )
 
-# 🛑 ULTIMATE CORS KILL SWITCH 🛑
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -119,14 +118,12 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
 
 def send_system_email(to_email: str, subject: str, body: str):
     """
-    CRITICAL WARNING: If you are hosted on Render Free Tier, this WILL fail.
-    Render actively blocks outgoing ports 465, 587, and 25 to stop spammers.
+    Using the user's validated Port 465 logic.
     """
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
-    
     if not sender_email or not sender_password:
-        print(f"\n[BATS EMAIL FAIL] Missing SENDER_EMAIL or SENDER_PASSWORD in env.\n")
+        print(f"[BATS] Email credentials missing. Cannot send to {to_email}.")
         return
     
     msg = MIMEMultipart()
@@ -136,24 +133,13 @@ def send_system_email(to_email: str, subject: str, body: str):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
-        server.starttls()
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"\n[BATS EMAIL SUCCESS] Delivered via Port 587 (TLS) to: {to_email}\n")
-    except Exception as e1:
-        print(f"\n[BATS EMAIL WARNING] Port 587 failed: {e1}. Pivoting to Port 465 (SSL)...\n")
-        try:
-            server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, to_email, msg.as_string())
-            server.quit()
-            print(f"\n[BATS EMAIL SUCCESS] Delivered via Port 465 (SSL) to: {to_email}\n")
-        except Exception as e2:
-            print(f"\n[BATS EMAIL CRITICAL ERROR] FATAL EMAIL FAILURE to {to_email}.")
-            print(f"Error Log: {e2}")
-            print("INFO: You are likely being blocked by the Render Firewall. Upgrade Render or use SendGrid.\n")
+        print(f"[BATS EMAIL SUCCESS] Successfully delivered tracking email to: {to_email}")
+    except Exception as e:
+        print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}: {e}")
 
 # ─── THE 24/7 DATABASE DEFIBRILLATOR ───
 
@@ -290,7 +276,6 @@ async def generate_job_description(req: JDGenerationRequest):
 @app.post("/api/acknowledge-answer")
 async def acknowledge_answer(req: AcknowledgmentRequest):
     try:
-        # NEW: Pass the next question to the AI to build the conversational bridge
         ack_data = await get_answer_acknowledgment(req.question, req.answer, req.next_question)
         return ack_data
     except Exception as e:
