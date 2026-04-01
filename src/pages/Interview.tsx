@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Video, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal, HandHandshake
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -45,18 +45,14 @@ function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
   const femaleKeywords = ["female", "woman", "jenny", "samantha", "karen", "zira", "victoria"];
   const maleKeywords = ["male", "man", "guy", "david", "mark", "daniel", "james"];
   
-  const targetKws = gender === "female" ? femaleKeywords : maleKeywords;
-  const antiKws = gender === "female" ? maleKeywords : femaleKeywords;
-  
   let bestMatch: SpeechSynthesisVoice | null = null;
   let highestScore = -1;
 
   for (const v of voices) {
     if (!v.lang.startsWith("en")) continue;
     const name = v.name.toLowerCase();
-    if (antiKws.some(k => name.includes(k))) continue;
     let score = 0;
-    if (targetKws.some(k => name.includes(k))) score += 2;
+    if ((gender === "female" ? femaleKeywords : maleKeywords).some(k => name.includes(k))) score += 2;
     if (premiumKeywords.some(k => name.includes(k))) score += 5; 
     if (score > highestScore) { highestScore = score; bestMatch = v; }
   }
@@ -95,16 +91,18 @@ export default function InterviewPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
-  const [liveTranscript, setLiveTranscript] = useState("");
-  const [totalElapsed, setTotalElapsed] = useState(0);
   
+  // Transcripts
+  const [liveTranscript, setLiveTranscript] = useState("");
+  const [accumulatedTranscript, setAccumulatedTranscript] = useState(""); // Holds full answer across probing turns
+  
+  const [totalElapsed, setTotalElapsed] = useState(0);
   const [interviewStep, setInterviewStep] = useState<"welcome" | "ready" | "interview" | "submitting" | "feedback">("welcome");
   const [cameraReady, setCameraReady] = useState(false);
-  const [isThinking, setIsThinking] = useState(false); // UI State for "Candidate is thinking"
+  const [isThinking, setIsThinking] = useState(false); 
   
   const [cheatStrikes, setCheatStrikes] = useState(0);
   const [terminationReason, setTerminationReason] = useState("");
-  
   const [rating, setRating] = useState(0);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
@@ -115,8 +113,9 @@ export default function InterviewPage() {
   const totalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  
   const recognitionRef = useRef<any>(null);
-  const fullTranscriptRef = useRef("");
+  const isRecordingRef = useRef(false); // Hard ref to prevent WebSpeech from dying
   const fullRecordingChunksRef = useRef<Blob[]>([]);
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -159,20 +158,6 @@ export default function InterviewPage() {
   }, [sessionId, state, navigate]);
 
   useEffect(() => {
-    const loadVoices = () => { window.speechSynthesis.getVoices(); };
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-    return () => {
-      window.speechSynthesis.cancel();
-      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
-      if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
-      if (totalTimerRef.current) clearInterval(totalTimerRef.current);
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      if (recognitionRef.current) recognitionRef.current.stop();
-    };
-  }, []);
-
-  useEffect(() => {
     if (timeRemaining <= 0 && interviewStep === "interview" && totalElapsed > 0) {
       handleForceEndInterview(false, "Time Expired.");
     }
@@ -193,7 +178,7 @@ export default function InterviewPage() {
       setCheatStrikes(prev => {
         const newStrikes = prev + 1;
         if (newStrikes >= 3) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate exceeded 3 keyboard warnings. Probable use of external AI typing tool.");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate exceeded 3 keyboard warnings.");
         } else {
           toast.warning(`Security Warning (${newStrikes}/3): Keyboard disabled. Use ONLY your mouse and voice.`);
         }
@@ -202,12 +187,12 @@ export default function InterviewPage() {
     };
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement && !isTerminatingRef.current) {
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode to access other applications.");
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode.");
       }
     };
     const handleVisibilityChange = () => {
       if (document.hidden && !isTerminatingRef.current) {
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched tabs.");
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized window.");
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -236,7 +221,7 @@ export default function InterviewPage() {
       screenStreamRef.current = screenStream;
       screenStream.getVideoTracks()[0].onended = () => {
         if (interviewStep === "interview" && !isTerminatingRef.current) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing their screen mid-interview.");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing screen.");
         }
       };
       setCameraReady(true);
@@ -280,19 +265,12 @@ export default function InterviewPage() {
     });
   }, []);
 
-  const startMediaRecorder = useCallback((stream: MediaStream) => {
-    const mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-    chunksRef.current = [];
-    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-    mediaRecorderRef.current = mediaRecorder;
-    mediaRecorder.start(1000);
-    setIsRecording(true);
-  }, []);
-
+  // UPGRADE: Bulletproof Speech Recognition Loop
   const startSpeechRecognition = useCallback(() => {
-    fullTranscriptRef.current = "";
     setLiveTranscript("");
     setIsThinking(false);
+    isRecordingRef.current = true;
+    
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
     
@@ -309,43 +287,41 @@ export default function InterviewPage() {
         if (event.results[i].isFinal) allFinal += transcript + " ";
         else interim += transcript;
       }
-      fullTranscriptRef.current = allFinal.trim();
       setLiveTranscript((allFinal + interim).trim());
       
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       
-      // UPGRADE: "Patience Engine" & Smart Intercepts
-      const tLower = allFinal.toLowerCase();
-      const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to");
-      
-      // If they explicitly give up, submit fast (1.5s). Otherwise, give them 12 seconds to think!
-      const waitTime = isSkipping ? 1500 : 12000; 
-
+      // Only auto-submit if they are DEAD SILENT for 15 seconds. Give them time to think!
       silenceTimerRef.current = setTimeout(() => {
-        setIsThinking(false);
-        const btn = document.getElementById("auto-submit-btn");
-        if (btn) btn.click();
-      }, waitTime); 
+        if (isRecordingRef.current) {
+            setIsThinking(false);
+            const btn = document.getElementById("auto-submit-btn");
+            if (btn) btn.click();
+        }
+      }, 15000); 
     };
     
     recognition.onerror = () => {};
-    recognition.onend = () => { if (mediaRecorderRef.current?.state === "recording") { try { recognition.start(); } catch {} } };
+    recognition.onend = () => { 
+        // If the browser killed the mic but the candidate didn't click submit, RESTART IT.
+        if (isRecordingRef.current) { 
+            try { recognition.start(); } catch {} 
+        } 
+    };
+    
     recognition.start();
     recognitionRef.current = recognition;
   }, []);
 
   const stopRecording = useCallback(() => {
-    return new Promise<{ blob: Blob; transcript: string }>((resolve) => {
-      setIsThinking(false);
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
-      const recorder = mediaRecorderRef.current;
-      if (recorder && recorder.state === "recording") {
-        recorder.onstop = () => { resolve({ blob: new Blob(chunksRef.current, { type: "video/webm" }), transcript: fullTranscriptRef.current.trim() || liveTranscript.trim() }); };
-        recorder.stop();
-      } else { resolve({ blob: new Blob(), transcript: fullTranscriptRef.current.trim() }); }
-      setIsRecording(false);
-    });
+    isRecordingRef.current = false; // Kill the endless loop
+    setIsThinking(false);
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
+    
+    const currentText = liveTranscript.trim();
+    setLiveTranscript("");
+    return currentText;
   }, [liveTranscript]);
 
   const speakAndRecord = useCallback(async (questionText: string) => {
@@ -354,27 +330,25 @@ export default function InterviewPage() {
     await speakText(questionText, voiceGender);
     setIsSpeaking(false);
     setAiMessage("");
-    if (streamRef.current) {
-      startMediaRecorder(streamRef.current);
-      startSpeechRecognition();
-      
-      // UPGRADE: Wait up to 45 seconds for the candidate to speak their first word before timing out.
-      silenceTimerRef.current = setTimeout(() => { 
-        const btn = document.getElementById("auto-submit-btn"); 
-        if (btn) btn.click(); 
-      }, 45000); 
-    }
-  }, [voiceGender, startMediaRecorder, startSpeechRecognition]);
+    setIsRecording(true);
+    startSpeechRecognition();
+  }, [voiceGender, startSpeechRecognition]);
 
-  const handleNextQuestion = useCallback(async () => {
+  // UPGRADE: Human-Like Dynamic Interaction Loop
+  const handleAnswerSubmit = useCallback(async () => {
     if (!isRecording) return;
-    const { transcript } = await stopRecording(); 
-    setLiveTranscript("");
+    setIsRecording(false);
+    const newTranscriptChunk = stopRecording(); 
     
-    const hasAnswered = transcript.trim().length > 2;
-    const tLower = transcript.toLowerCase();
+    // Add what they just said to anything they previously said for this question
+    const totalAnswerSoFar = (accumulatedTranscript + " " + newTranscriptChunk).trim();
+    setAccumulatedTranscript(totalAnswerSoFar);
+
+    const hasAnswered = newTranscriptChunk.trim().length > 2;
+    const tLower = newTranscriptChunk.toLowerCase();
     const wantsRepeat = tLower.includes("repeat") || tLower.includes("pardon") || (tLower.length < 25 && tLower.includes("sorry"));
 
+    // Handle "Can you repeat that?"
     if (wantsRepeat && !introPhase && currentQuestion) {
       setIsSpeaking(true);
       const ackText = "Of course, let me repeat that for you. " + currentQuestion.question;
@@ -382,7 +356,10 @@ export default function InterviewPage() {
       await speakText(ackText, voiceGender);
       setIsSpeaking(false);
       setAiMessage("");
-      setTimeout(() => { speakAndRecord(currentQuestion.question); }, 300);
+      setTimeout(() => { 
+          setIsRecording(true);
+          startSpeechRecognition(); 
+      }, 300);
       return; 
     }
 
@@ -391,14 +368,17 @@ export default function InterviewPage() {
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
     
     let dynamicAck = "Got it. Let's move on.";
+    let isSufficient = true;
+
     if (hasAnswered) {
         try {
             const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: currentQText, answer: transcript })
+                body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar })
             });
             const ackData = await ackRes.json();
-            dynamicAck = ackData.acknowledgment;
+            dynamicAck = ackData.response_text;
+            isSufficient = ackData.is_sufficient;
         } catch (err) {
             dynamicAck = "Thank you. Let's move on to the next one.";
         }
@@ -406,16 +386,25 @@ export default function InterviewPage() {
         dynamicAck = "I didn't hear anything, but that's alright. Let's move ahead.";
     }
 
+    setAiMessage(dynamicAck);
+    await speakText(dynamicAck, voiceGender);
+    setIsSpeaking(false);
+    setAiMessage("");
+
+    // If answer was weak, ASK A FOLLOW UP AND STAY ON THE QUESTION!
+    if (!isSufficient) {
+        setIsRecording(true);
+        startSpeechRecognition();
+        return; 
+    }
+
+    // IF WE REACH HERE, the answer was sufficient. Move to next question!
+    setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
+    setAccumulatedTranscript(""); // Reset accumulator for the new question
+
     if (introPhase) {
-      setAnswers((prev) => [...prev, { questionId: 0, transcript: transcript || "(No speech detected)", videoBlob: null }]);
       setIntroPhase(false);
       setCurrentQ(0);
-
-      setAiMessage(dynamicAck);
-      await speakText(dynamicAck, voiceGender);
-      setIsSpeaking(false);
-      setAiMessage("");
-
       const nextQData = questions[0];
       if (nextQData) {
         setTimeout(() => { speakAndRecord(nextQData.question); }, 300);
@@ -425,27 +414,15 @@ export default function InterviewPage() {
       return;
     }
 
-    if (!currentQuestion) return;
-    setAnswers((prev) => [...prev, { questionId: currentQuestion.id, transcript: transcript || "(No speech detected)", videoBlob: null }]);
-
     if (currentQ < totalQuestions - 1) {
       const nextIndex = currentQ + 1;
       setCurrentQ(nextIndex);
-
-      setAiMessage(dynamicAck);
-      await speakText(dynamicAck, voiceGender);
-      setIsSpeaking(false);
-      setAiMessage("");
-
       setTimeout(() => { speakAndRecord(questions[nextIndex].question); }, 300);
     } else {
-      setAiMessage(dynamicAck);
-      await speakText(dynamicAck, voiceGender);
-      setIsSpeaking(false);
-      setAiMessage("");
       finalizeInterviewAndUpload();
     }
-  }, [isRecording, stopRecording, introPhase, currentQuestion, currentQ, totalQuestions, questions, speakAndRecord, candidateName, voiceGender]);
+  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, questions, speakAndRecord, voiceGender]);
+
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
@@ -530,8 +507,9 @@ export default function InterviewPage() {
     isTerminatingRef.current = true;
 
     if (isRecording) {
-      const { transcript } = await stopRecording();
-      setAnswers(prev => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: transcript || "(Left early)", videoBlob: null }]);
+      const finalTranscriptChunk = stopRecording();
+      const totalTranscript = (accumulatedTranscript + " " + finalTranscriptChunk).trim();
+      setAnswers(prev => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalTranscript || "(Left early)", videoBlob: null }]);
     }
     finalizeInterviewAndUpload(reason || (isEarlyLeave ? "Candidate left early manually." : "Time Expired."));
   };
@@ -579,23 +557,15 @@ export default function InterviewPage() {
         <CandidateHeader isLive={false} />
         <div className="container mx-auto px-6 pt-32 pb-16 max-w-2xl text-center">
           <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-8">
-            
-            {isCheat ? (
-              <ShieldX className="w-20 h-20 text-destructive mx-auto" />
-            ) : (
-              <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto" />
-            )}
-            
+            {isCheat ? <ShieldX className="w-20 h-20 text-destructive mx-auto" /> : <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto" />}
             <h1 className="text-4xl font-display font-bold text-foreground">
               {isCheat ? "Interview Terminated" : isLeave ? "Interview Ended Early" : "Interview Complete!"}
             </h1>
-            
             <p className="text-lg text-muted-foreground">
               {isCheat 
                 ? "This session was automatically terminated due to a security violation. A full incident report has been sent to the recruiter."
                 : `Thank you for your time, ${candidateName}. Your encrypted interview has been securely sent directly to the Recruiter's Dashboard.`}
             </p>
-            
             {!feedbackSubmitted && !isCheat ? (
               <div className="glass rounded-xl p-8 text-left space-y-6 mt-8">
                 <h3 className="text-xl font-semibold text-center">How was your GeniusHub interview experience?</h3>
@@ -679,7 +649,7 @@ export default function InterviewPage() {
   return (
     <div className="min-h-screen bg-background nexus-grid">
       <CandidateHeader isLive={true} />
-      <button id="auto-submit-btn" className="hidden" onClick={handleNextQuestion}></button>
+      <button id="auto-submit-btn" className="hidden" onClick={handleAnswerSubmit}></button>
 
       <div className="container mx-auto px-6 pt-32 pb-16 max-w-4xl">
         <motion.div initial="hidden" animate="visible" className="space-y-6">
@@ -716,12 +686,11 @@ export default function InterviewPage() {
               {isRecording && <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/80 text-primary-foreground text-[10px] font-medium"><span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" /> SESSION & SCREEN RECORDING</div>}
             </div>
             
-            {/* UPGRADE: Clearer UI Feedback for "Thinking" vs "Listening" */}
             <div className="flex flex-col gap-2">
               {isRecording && !isSpeaking && (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
                    {isThinking ? <MoreHorizontal className="w-4 h-4 text-primary" /> : <Mic className="w-4 h-4 text-green-500" />}
-                   {isThinking ? "Thinking... (AI waiting to ensure you are done)" : "AI is listening. Speak your answer naturally..."}
+                   {isThinking ? "Thinking... (AI waiting to ensure you are done)" : "AI is listening. Speak naturally or click Submit when done."}
                  </div>
               )}
               {liveTranscript && (
@@ -733,7 +702,13 @@ export default function InterviewPage() {
             </div>
             
             <div className="flex items-center justify-between">
-              {isRecording ? <Button onClick={handleNextQuestion} className="bg-primary text-primary-foreground"><Square className="w-4 h-4 mr-2 fill-current" /> Manual Submit <ChevronRight className="w-4 h-4 ml-1" /></Button> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</div>}
+              {isRecording ? (
+                 <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
+                   <HandHandshake className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
+                 </Button>
+              ) : (
+                 <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>
+              )}
               <Button variant="outline" size="sm" onClick={() => handleForceEndInterview(true, "Candidate left early manually.")} className="text-xs border-destructive/30 text-destructive">Leave Interview</Button>
             </div>
           </div>
