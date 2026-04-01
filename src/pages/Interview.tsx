@@ -309,7 +309,6 @@ export default function InterviewPage() {
     setIsThinking(false);
     isRecordingRef.current = true;
     
-    // Give 15 seconds to say the first word
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     silenceTimerRef.current = setTimeout(() => {
         if (isRecordingRef.current) {
@@ -631,7 +630,6 @@ export default function InterviewPage() {
                   ))}
                 </div>
                 <Textarea placeholder="Any thoughts on the questions or behavior?" value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} className="bg-card min-h-[100px]" />
-                {/* 🛡️ THE FIX: Using Send instead of HandHandshake */}
                 <Button onClick={submitFeedback} disabled={rating === 0} className="w-full h-12 bg-primary text-primary-foreground glow-cyan"><Send className="w-4 h-4 mr-2" /> Submit Feedback</Button>
               </div>
             ) : (
@@ -761,7 +759,6 @@ export default function InterviewPage() {
             <div className="flex items-center justify-between">
               {isRecording ? (
                  <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
-                   {/* 🛡️ THE FIX: Using Send instead of HandHandshake */}
                    <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
                  </Button>
               ) : (

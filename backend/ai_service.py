@@ -16,8 +16,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
-TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # ─── UTILITY FUNCTIONS ──────────────────────────────────────
@@ -173,7 +171,7 @@ Task: Analyze the candidate's answer and generate ONE fluid, conversational resp
    - response_text: Gently acknowledge what they said, then ask a probing follow-up question to make them elaborate on that specific topic. Do NOT ask the Next Question yet.
 3. If they give a strong, detailed answer:
    - Set is_sufficient to true.
-   - response_text: Acknowledge a specific technical point they made (e.g. "That's a great point about using Tuples as dictionary keys"), AND THEN seamlessly transition into asking the Next Question (e.g. "Now, moving on to data... [Insert the Next Question here]").
+   - response_text: Acknowledge a specific technical point they made, AND THEN seamlessly transition into asking the Next Question (e.g. "Now, moving on to data... [Insert the Next Question here]").
 
 Output ONLY valid JSON matching this exact structure:
 {
@@ -185,7 +183,7 @@ Output ONLY valid JSON matching this exact structure:
 RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies. 
 Your job is to read unstructured, messy resume text and meticulously extract EVERYTHING into a "Liquid JSON Schema".
 
-CRITICAL EXTRACTION RULES (STRICT COMPLIANCE REQUIRED):
+CRITICAL EXTRACTION RULES:
 1. NEVER output `null`. If data is missing, use "Not Provided" or an empty array `[]`.
 2. NO GENERIC SUMMARIES. For 'key_achievements', you MUST extract the candidate's EXACT numbers, metrics, scale, and highly specific technical outcomes.
 3. Extract ALL contact info, including GitHub, LinkedIn, or Portfolio URLs.
@@ -224,22 +222,18 @@ Raw Resume Text:
 {raw_text}
 """
 
-# ─── HYBRID AI PROVIDER CALLS ───────────────────────────────
+# ─── BULLETPROOF REST API CALLS (NO SDK CRASHES) ───
 
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            with open(file_path, "rb") as audio_file:
-                files = {"file": (os.path.basename(file_path), audio_file, "audio/mpeg")}
-                data = {"model": "whisper-large-v3", "response_format": "text"}
-                url = "https://api.groq.com/openai/v1/audio/transcriptions"
-                resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, files=files, data=data)
-                resp.raise_for_status()
-                return resp.text
-    except Exception as e:
-        print(f"[BATS] Transcription failed: {e}")
-        raise
+    async with httpx.AsyncClient(timeout=120) as client:
+        with open(file_path, "rb") as audio_file:
+            files = {"file": (os.path.basename(file_path), audio_file, "audio/mpeg")}
+            data = {"model": "whisper-large-v3", "response_format": "text"}
+            url = "https://api.groq.com/openai/v1/audio/transcriptions"
+            resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, files=files, data=data)
+            resp.raise_for_status()
+            return resp.text
 
 async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000) -> dict:
     async with httpx.AsyncClient(timeout=60) as client:
@@ -258,16 +252,19 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
         if force_json: return json.loads(resp.json()["choices"][0]["message"]["content"])
         return _parse_json_response(resp.json()["choices"][0]["message"]["content"])
 
-def _call_gemini_sync(prompt: str) -> str:
-    # 🛡️ THE FIX: Uses the `google-genai` SDK exactly as written in your requirements.txt
-    from google import genai
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-    return response.text
-
-async def _call_gemini(prompt: str) -> dict:
-    text = await asyncio.to_thread(_call_gemini_sync, prompt)
-    return _parse_json_response(text)
+async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
+    """PURE REST API: Bypasses Google SDK entirely to prevent module crashes."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    if force_json:
+        payload["generationConfig"] = {"responseMimeType": "application/json"}
+        
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
+        resp.raise_for_status()
+        content = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+        if force_json: return json.loads(content)
+        return _parse_json_response(content)
 
 async def _call_groq_text(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=30) as client:
@@ -290,7 +287,7 @@ async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: in
             
     if GEMINI_API_KEY:
         try:
-            return await _call_gemini(prompt)
+            return await _call_gemini(prompt, force_json=force_json)
         except Exception as e:
             errors.append(f"Gemini Error: {e}")
             
@@ -301,31 +298,22 @@ async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: in
 async def parse_resume_to_json(raw_text: str) -> dict:
     print(f"[BATS] Extracted Resume Text Length: {len(raw_text)}")
 
-    if "requires PyMuPDF" in raw_text or "requires python-docx" in raw_text:
-        return {
-            "candidate_info": {"name": "Library Missing on Server", "email": "Not Provided", "phone": "Not Provided", "links": []},
-            "executive_summary": "CRITICAL ERROR: Your Render backend is missing required Python libraries. Please add 'pymupdf' and 'python-docx' to your requirements.txt file and redeploy.",
-            "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []},
-            "experience_and_projects": [],
-            "education_and_certifications": []
-        }
-
     if len(raw_text.strip()) < 50:
         print("[BATS] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
         
-    safe_text = raw_text[:6500] 
+    safe_text = raw_text[:12000] # Safe character slice
 
     if GEMINI_API_KEY:
         try:
-            print("[BATS] Parsing Resume with Gemini (High Token Capacity)...")
+            print("[BATS] Parsing Resume with Gemini REST API (High Token Capacity)...")
             prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
-            return await _call_gemini(prompt)
+            return await _call_gemini(prompt, force_json=True)
         except Exception as e:
-            print(f"[BATS] Gemini parsing failed: {e}. Falling back to Groq.")
+            print(f"[BATS] Gemini REST parsing failed: {e}. Falling back to Groq.")
     
     try:
         print("[BATS] Parsing Resume with Groq...")
-        prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
+        prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text[:6000]) # Extra safe strict bound for Groq fallback
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=2500)
         
     except Exception as e:

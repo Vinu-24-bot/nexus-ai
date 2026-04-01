@@ -107,12 +107,11 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
-# 🛡️ THE FIX: Absolute Direct SSL Connection. No hanging on Port 587.
 def send_system_email(to_email: str, subject: str, body: str):
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
     if not sender_email or not sender_password:
-        print(f"[BATS EMAIL FAIL] Missing SENDER_EMAIL or SENDER_PASSWORD in env.")
+        print(f"[BATS] Email credentials missing. Cannot send email to {to_email}.")
         return
     
     msg = MIMEMultipart()
@@ -126,9 +125,9 @@ def send_system_email(to_email: str, subject: str, body: str):
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS EMAIL SUCCESS] Successfully delivered email to: {to_email}")
+        print(f"[BATS EMAIL SUCCESS] Successfully delivered tracking email to: {to_email}")
     except Exception as e:
-        print(f"[BATS EMAIL ERROR] Failed to send to {to_email}. Error: {e}")
+        print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}: {e}")
 
 @app.get("/")
 async def root():
