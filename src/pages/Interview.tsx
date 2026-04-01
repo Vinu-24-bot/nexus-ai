@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Video, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal, HandHandshake
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -98,7 +98,6 @@ export default function InterviewPage() {
   const [totalElapsed, setTotalElapsed] = useState(0);
   const [interviewStep, setInterviewStep] = useState<"welcome" | "ready" | "interview" | "submitting" | "feedback">("welcome");
   const [cameraReady, setCameraReady] = useState(false);
-  const [isThinking, setIsThinking] = useState(false); 
   
   const [cheatStrikes, setCheatStrikes] = useState(0);
   const [terminationReason, setTerminationReason] = useState("");
@@ -117,7 +116,6 @@ export default function InterviewPage() {
   const isRecordingRef = useRef(false); 
   const fullRecordingChunksRef = useRef<Blob[]>([]);
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const isTerminatingRef = useRef(false);
 
@@ -165,7 +163,6 @@ export default function InterviewPage() {
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
       if (totalTimerRef.current) clearInterval(totalTimerRef.current);
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (recognitionRef.current) recognitionRef.current.stop();
     };
   }, []);
@@ -183,6 +180,7 @@ export default function InterviewPage() {
     }
   }, [interviewStep, cameraReady]);
 
+  // UPGRADE: Hyper-specific Security Breach tracking
   useEffect(() => {
     if (interviewStep !== "interview") return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -191,7 +189,7 @@ export default function InterviewPage() {
       setCheatStrikes(prev => {
         const newStrikes = prev + 1;
         if (newStrikes >= 3) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate exceeded 3 keyboard warnings. Probable use of external AI typing tool.");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate exceeded 3 keyboard warnings. (Tried to type or use hotkeys).");
         } else {
           toast.warning(`Security Warning (${newStrikes}/3): Keyboard disabled. Use ONLY your mouse and voice.`);
         }
@@ -200,12 +198,12 @@ export default function InterviewPage() {
     };
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement && !isTerminatingRef.current) {
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode to access other applications.");
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode (Pressed ESC or F11).");
       }
     };
     const handleVisibilityChange = () => {
       if (document.hidden && !isTerminatingRef.current) {
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched tabs.");
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched to another tab.");
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -234,7 +232,7 @@ export default function InterviewPage() {
       screenStreamRef.current = screenStream;
       screenStream.getVideoTracks()[0].onended = () => {
         if (interviewStep === "interview" && !isTerminatingRef.current) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing their screen mid-interview.");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate manually stopped sharing their screen.");
         }
       };
       setCameraReady(true);
@@ -287,9 +285,9 @@ export default function InterviewPage() {
     setIsRecording(true);
   }, []);
 
+  // UPGRADE: Bulletproof Speech Recognition Loop (Manual Submit Only)
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
-    setIsThinking(false);
     isRecordingRef.current = true;
     
     // @ts-ignore
@@ -303,7 +301,6 @@ export default function InterviewPage() {
     
     // @ts-ignore
     recognition.onresult = (event) => {
-      setIsThinking(true);
       let interim = ""; let allFinal = "";
       for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
@@ -311,22 +308,7 @@ export default function InterviewPage() {
         else interim += transcript;
       }
       setLiveTranscript((allFinal + interim).trim());
-      
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      
-      const tLower = allFinal.toLowerCase();
-      const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to");
-      
-      // UPGRADE: 8 seconds of silence allowed to think. If they skip, submit instantly.
-      const waitTime = isSkipping ? 1500 : 8000; 
-
-      silenceTimerRef.current = setTimeout(() => {
-        if (isRecordingRef.current) {
-            setIsThinking(false);
-            const btn = document.getElementById("auto-submit-btn");
-            if (btn) btn.click();
-        }
-      }, waitTime); 
+      // NO AUTO-SUBMIT TIMEOUT! It will wait forever until they click "Submit Answer".
     };
     
     recognition.onerror = () => {};
@@ -342,8 +324,6 @@ export default function InterviewPage() {
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false; 
-    setIsThinking(false);
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
     
     const currentText = liveTranscript.trim();
@@ -359,7 +339,7 @@ export default function InterviewPage() {
     setAiMessage("");
     setIsRecording(true);
     startSpeechRecognition();
-  }, [voiceGender, startSpeechRecognition]);
+  }, [voiceGender, startSpeechRecognition, startMediaRecorder]);
 
   const handleAnswerSubmit = useCallback(async () => {
     if (!isRecording) return;
@@ -711,8 +691,8 @@ export default function InterviewPage() {
             <div className="flex flex-col gap-2">
               {isRecording && !isSpeaking && (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
-                   {isThinking ? <MoreHorizontal className="w-4 h-4 text-primary" /> : <Mic className="w-4 h-4 text-green-500" />}
-                   {isThinking ? "Listening... (Take your time to think)" : "AI is listening. Speak naturally or click Submit when done."}
+                   <Mic className="w-4 h-4 text-green-500" />
+                   Listening... Take your time. Click "Submit Answer" when you are finished.
                  </div>
               )}
               {liveTranscript && (
@@ -726,7 +706,7 @@ export default function InterviewPage() {
             <div className="flex items-center justify-between">
               {isRecording ? (
                  <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
-                   <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
+                   <HandHandshake className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
                  </Button>
               ) : (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>
