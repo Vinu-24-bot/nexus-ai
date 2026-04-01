@@ -134,15 +134,14 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
 # --- ENTERPRISE EMAIL ENGINE ---
 def send_system_email(to_email: str, subject: str, body: str):
     """
-    BUGFIX: Double-Engine Email Fallback.
-    Some servers block Port 465, some block Port 587. 
-    This tries 587 (TLS) first, and instantly falls back to 465 (SSL) if it fails.
+    NOTE: Render's Free Tier regularly blocks outbound SMTP to prevent spam. 
+    If this fails, it is not your code, it is the Render Firewall.
     """
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
     
     if not sender_email or not sender_password:
-        print(f"[BATS] Email credentials missing in Environment Variables. Cannot send email to {to_email}.")
+        print(f"\n[BATS EMAIL FAIL] Missing SENDER_EMAIL or SENDER_PASSWORD in env.\n")
         return
     
     msg = MIMEMultipart()
@@ -158,19 +157,20 @@ def send_system_email(to_email: str, subject: str, body: str):
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS EMAIL SUCCESS] Delivered via Port 587 (TLS) to: {to_email}")
+        print(f"\n[BATS EMAIL SUCCESS] Delivered via Port 587 (TLS) to: {to_email}\n")
     except Exception as e1:
-        print(f"[BATS EMAIL] Port 587 failed: {e1}. Pivoting to Port 465...")
+        print(f"\n[BATS EMAIL WARNING] Port 587 failed: {e1}. Pivoting to Port 465 (SSL)...\n")
         try:
             # ATTEMPT 2: Port 465 (SSL Fallback)
             server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
             server.login(sender_email, sender_password)
             server.sendmail(sender_email, to_email, msg.as_string())
             server.quit()
-            print(f"[BATS EMAIL SUCCESS] Delivered via Port 465 (SSL) to: {to_email}")
+            print(f"\n[BATS EMAIL SUCCESS] Delivered via Port 465 (SSL) to: {to_email}\n")
         except Exception as e2:
-            print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}.")
-            print(f"Make sure you generated a 16-letter App Password from Google!")
+            print(f"\n[BATS EMAIL CRITICAL ERROR] FATAL EMAIL FAILURE to {to_email}.")
+            print(f"Error Log: {e2}")
+            print("INFO: If you are using an App Password and it still fails, Render Free Tier is actively blocking your outbound port.\n")
 
 
 @app.get("/")
@@ -389,7 +389,6 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
                     except Exception as e:
                         print(f"[BATS] Whisper transcription failed, falling back to frontend text: {e}")
 
-        # Basic text presence check before the AI kill switch handles it
         if len(final_transcript.strip()) < 5:
             raise ValueError("Transcript is essentially empty. Audio extraction failed to find speech.")
 

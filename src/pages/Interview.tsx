@@ -18,7 +18,6 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-// UPGRADE: Secure Candidate Header (No links to Recruiter Dashboard)
 const CandidateHeader = ({ isLive }: { isLive: boolean }) => (
   <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-border/50">
     <div className="container mx-auto px-6 h-16 flex items-center justify-between">
@@ -121,6 +120,9 @@ export default function InterviewPage() {
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // FIX: Anti-Cheat execution lock to prevent recursive false alarms
+  const isTerminatingRef = useRef(false);
+
   const candidateName = state?.candidateName || fetchedData?.candidateName || "";
   const position = state?.position || fetchedData?.position || "";
   const jobDescription = state?.jobDescription || fetchedData?.jobDescription || "";
@@ -183,10 +185,11 @@ export default function InterviewPage() {
     }
   }, [interviewStep, cameraReady]);
 
+  // BUGFIX: Inject isTerminatingRef to ignore fullscreen changes when intentionally exiting
   useEffect(() => {
     if (interviewStep !== "interview") return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") return; 
+      if (e.key === "Escape" || isTerminatingRef.current) return; 
       e.preventDefault(); 
       setCheatStrikes(prev => {
         const newStrikes = prev + 1;
@@ -199,10 +202,14 @@ export default function InterviewPage() {
       });
     };
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode to access other applications.");
+      if (!document.fullscreenElement && !isTerminatingRef.current) {
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode to access other applications.");
+      }
     };
     const handleVisibilityChange = () => {
-      if (document.hidden) handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched tabs.");
+      if (document.hidden && !isTerminatingRef.current) {
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched tabs.");
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
@@ -229,7 +236,9 @@ export default function InterviewPage() {
       streamRef.current = avStream;
       screenStreamRef.current = screenStream;
       screenStream.getVideoTracks()[0].onended = () => {
-        if (interviewStep === "interview") handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing their screen mid-interview.");
+        if (interviewStep === "interview" && !isTerminatingRef.current) {
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing their screen mid-interview.");
+        }
       };
       setCameraReady(true);
       setInterviewStep("ready");
@@ -337,12 +346,13 @@ export default function InterviewPage() {
     }
   }, [voiceGender, startMediaRecorder, startSpeechRecognition]);
 
+  // BUGFIX: Dynamic Conversational AI for EVERY turn, including the intro.
   const handleNextQuestion = useCallback(async () => {
     if (!isRecording) return;
     const { transcript } = await stopRecording(); 
     setLiveTranscript("");
     
-    const hasAnswered = transcript.trim().length > 5;
+    const hasAnswered = transcript.trim().length > 2;
     const tLower = transcript.toLowerCase();
     const wantsRepeat = tLower.includes("repeat") || tLower.includes("pardon") || (tLower.length < 25 && tLower.includes("sorry"));
 
@@ -357,22 +367,38 @@ export default function InterviewPage() {
       return; 
     }
 
+    // Connect to AI to get a dynamic acknowledgment of their answer
+    setIsSpeaking(true);
+    setAiMessage("Thinking..."); 
+    const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
+    
+    let dynamicAck = "Got it. Let's move on.";
+    if (hasAnswered) {
+        try {
+            const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: currentQText, answer: transcript })
+            });
+            const ackData = await ackRes.json();
+            dynamicAck = ackData.acknowledgment;
+        } catch (err) {
+            dynamicAck = "Thank you. Let's move on.";
+        }
+    } else {
+        dynamicAck = "I didn't hear anything, but that's alright. Let's move ahead.";
+    }
+
     if (introPhase) {
       setAnswers((prev) => [...prev, { questionId: 0, transcript: transcript || "(No speech detected)", videoBlob: null }]);
       setIntroPhase(false);
       setCurrentQ(0);
 
-      setIsSpeaking(true);
-      let ackText = hasAnswered 
-        ? `Thank you for that introduction, ${candidateName}. Let's start with some technical questions.` 
-        : `I didn't quite catch an introduction, but that's okay. Let's move straight to the interview questions.`;
-      
-      setAiMessage(ackText);
-      await speakText(ackText, voiceGender);
+      setAiMessage(dynamicAck);
+      await speakText(dynamicAck, voiceGender);
       setIsSpeaking(false);
       setAiMessage("");
 
-      // FIX 4: Guarantee Q1 is fetched directly from the array memory to prevent the silence hang
       const nextQData = questions[0];
       if (nextQData) {
         setTimeout(() => { speakAndRecord(nextQData.question); }, 300);
@@ -389,18 +415,17 @@ export default function InterviewPage() {
       const nextIndex = currentQ + 1;
       setCurrentQ(nextIndex);
 
-      setIsSpeaking(true);
-      let ackText = hasAnswered 
-        ? "Got it. Thank you." 
-        : "I didn't hear an answer for that one, let's move ahead to the next question.";
-      
-      setAiMessage(ackText);
-      await speakText(ackText, voiceGender);
+      setAiMessage(dynamicAck);
+      await speakText(dynamicAck, voiceGender);
       setIsSpeaking(false);
       setAiMessage("");
 
       setTimeout(() => { speakAndRecord(questions[nextIndex].question); }, 300);
     } else {
+      setAiMessage(dynamicAck);
+      await speakText(dynamicAck, voiceGender);
+      setIsSpeaking(false);
+      setAiMessage("");
       finalizeInterviewAndUpload();
     }
   }, [isRecording, stopRecording, introPhase, currentQuestion, currentQ, totalQuestions, questions, speakAndRecord, candidateName, voiceGender]);
@@ -417,7 +442,6 @@ export default function InterviewPage() {
 
     setTerminationReason(forcedTerminationReason); 
 
-    // FIX 3: Explicitly separate cheating from just leaving early
     const isCheat = forcedTerminationReason.includes("SECURITY BREACH");
     const isLeave = forcedTerminationReason.includes("Candidate left early");
 
@@ -484,7 +508,11 @@ export default function InterviewPage() {
     }
   }, [answers, questions, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording]);
 
+  // BUGFIX: Set the lock BEFORE triggering finalize so exitFullscreen doesn't trigger cheat
   const handleForceEndInterview = async (isEarlyLeave = false, reason = "") => {
+    if (isTerminatingRef.current) return;
+    isTerminatingRef.current = true;
+
     if (isRecording) {
       const { transcript } = await stopRecording();
       setAnswers(prev => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: transcript || "(Left early)", videoBlob: null }]);
