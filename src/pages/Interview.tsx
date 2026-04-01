@@ -2,8 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
-  Mic, Video, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal, HandHandshake
+  Mic, Square, ChevronRight, Loader2,
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -98,6 +98,7 @@ export default function InterviewPage() {
   const [totalElapsed, setTotalElapsed] = useState(0);
   const [interviewStep, setInterviewStep] = useState<"welcome" | "ready" | "interview" | "submitting" | "feedback">("welcome");
   const [cameraReady, setCameraReady] = useState(false);
+  const [isThinking, setIsThinking] = useState(false); 
   
   const [cheatStrikes, setCheatStrikes] = useState(0);
   const [terminationReason, setTerminationReason] = useState("");
@@ -180,7 +181,6 @@ export default function InterviewPage() {
     }
   }, [interviewStep, cameraReady]);
 
-  // UPGRADE: Hyper-specific Security Breach tracking
   useEffect(() => {
     if (interviewStep !== "interview") return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -285,7 +285,6 @@ export default function InterviewPage() {
     setIsRecording(true);
   }, []);
 
-  // UPGRADE: Bulletproof Speech Recognition Loop (Manual Submit Only)
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     isRecordingRef.current = true;
@@ -308,7 +307,6 @@ export default function InterviewPage() {
         else interim += transcript;
       }
       setLiveTranscript((allFinal + interim).trim());
-      // NO AUTO-SUBMIT TIMEOUT! It will wait forever until they click "Submit Answer".
     };
     
     recognition.onerror = () => {};
@@ -339,8 +337,9 @@ export default function InterviewPage() {
     setAiMessage("");
     setIsRecording(true);
     startSpeechRecognition();
-  }, [voiceGender, startSpeechRecognition, startMediaRecorder]);
+  }, [voiceGender, startSpeechRecognition]);
 
+  // 🧠 UPGRADE: The "Alex AI" Conversational Engine
   const handleAnswerSubmit = useCallback(async () => {
     if (!isRecording) return;
     setIsRecording(false);
@@ -369,61 +368,70 @@ export default function InterviewPage() {
 
     setIsSpeaking(true);
     setAiMessage("Thinking..."); 
+    
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
     
-    let dynamicAck = "Got it. Let's move on.";
+    // Get the NEXT question ready to pass to the AI so it can bridge them together smoothly
+    let nextIndex = currentQ + 1;
+    let nextQData = questions[nextIndex];
+    let nextQText = nextQData ? nextQData.question : "Thank the candidate, we have finished all the questions.";
+
+    let dynamicResponse = "Got it. Let's move on.";
     let isSufficient = true;
 
     if (hasAnswered) {
         try {
             const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar })
+                body: JSON.stringify({ 
+                    question: currentQText, 
+                    answer: totalAnswerSoFar,
+                    next_question: nextQText // Send next question to AI
+                })
             });
             const ackData = await ackRes.json();
-            dynamicAck = ackData.response_text;
+            dynamicResponse = ackData.response_text;
             isSufficient = ackData.is_sufficient;
         } catch (err) {
-            dynamicAck = "Thank you. Let's move on to the next one.";
+            dynamicResponse = "Thank you for that. " + nextQText;
         }
     } else {
-        dynamicAck = "I didn't quite catch that, but let's move forward anyway.";
+        dynamicResponse = "I didn't quite catch that, but let's move forward anyway. " + nextQText;
     }
 
-    setAiMessage(dynamicAck);
-    await speakText(dynamicAck, voiceGender);
+    // The AI speaks ONE fluid paragraph that acknowledges the answer AND asks the next question
+    setAiMessage(dynamicResponse);
+    await speakText(dynamicResponse, voiceGender);
     setIsSpeaking(false);
     setAiMessage("");
 
     if (!isSufficient) {
+        // The AI asked a probing follow-up, so we stay on the same question
         setIsRecording(true);
         startSpeechRecognition();
         return; 
     }
 
+    // The answer was sufficient, we formally move to the next question in React state
     setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
     setAccumulatedTranscript(""); 
 
     if (introPhase) {
       setIntroPhase(false);
       setCurrentQ(0);
-      const nextQData = questions[0];
-      if (nextQData) {
-        setTimeout(() => { speakAndRecord(nextQData.question); }, 300);
-      } else {
-        finalizeInterviewAndUpload("Error: Questions array failed to load.");
-      }
+      setIsRecording(true);
+      startSpeechRecognition();
       return;
     }
 
     if (currentQ < totalQuestions - 1) {
-      const nextIndex = currentQ + 1;
       setCurrentQ(nextIndex);
-      setTimeout(() => { speakAndRecord(questions[nextIndex].question); }, 300);
+      setIsRecording(true);
+      startSpeechRecognition();
     } else {
       finalizeInterviewAndUpload();
     }
-  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, questions, speakAndRecord, voiceGender]);
+  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, questions, voiceGender, startSpeechRecognition]);
 
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
@@ -706,7 +714,7 @@ export default function InterviewPage() {
             <div className="flex items-center justify-between">
               {isRecording ? (
                  <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
-                   <HandHandshake className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
+                   <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
                  </Button>
               ) : (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>
