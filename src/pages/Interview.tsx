@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal, HandHandshake
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -117,6 +117,7 @@ export default function InterviewPage() {
   const isRecordingRef = useRef(false); 
   const fullRecordingChunksRef = useRef<Blob[]>([]);
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const isTerminatingRef = useRef(false);
 
@@ -164,6 +165,7 @@ export default function InterviewPage() {
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
       if (totalTimerRef.current) clearInterval(totalTimerRef.current);
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (recognitionRef.current) recognitionRef.current.stop();
     };
   }, []);
@@ -181,40 +183,50 @@ export default function InterviewPage() {
     }
   }, [interviewStep, cameraReady]);
 
+  // 🛡️ UPGRADE: 3-Strike Forgiveness System (Prevents false positive crashes)
+  const handleSecurityViolation = useCallback((reason: string) => {
+    setCheatStrikes(prev => {
+      const newStrikes = prev + 1;
+      if (newStrikes >= 3) {
+        handleForceEndInterview(true, `SECURITY BREACH: ${reason} (Exceeded 3 Strikes).`);
+      } else {
+        toast.warning(`Security Warning (${newStrikes}/3): ${reason}. Please follow interview rules.`);
+      }
+      return newStrikes;
+    });
+  }, []);
+
   useEffect(() => {
     if (interviewStep !== "interview") return;
+    
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" || isTerminatingRef.current) return; 
       e.preventDefault(); 
-      setCheatStrikes(prev => {
-        const newStrikes = prev + 1;
-        if (newStrikes >= 3) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate exceeded 3 keyboard warnings. (Tried to type or use hotkeys).");
-        } else {
-          toast.warning(`Security Warning (${newStrikes}/3): Keyboard disabled. Use ONLY your mouse and voice.`);
-        }
-        return newStrikes;
-      });
+      handleSecurityViolation("Keyboard usage is disabled");
     };
+    
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement && !isTerminatingRef.current) {
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode (Pressed ESC or F11).");
+        handleSecurityViolation("Exited Full-Screen mode");
       }
     };
+    
     const handleVisibilityChange = () => {
       if (document.hidden && !isTerminatingRef.current) {
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched to another tab.");
+        handleSecurityViolation("Minimized window or switched tabs");
       }
     };
+    
     window.addEventListener("keydown", handleKeyDown);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [interviewStep]);
+  }, [interviewStep, handleSecurityViolation]);
 
   const requestPermissions = async () => {
     try {
@@ -232,7 +244,7 @@ export default function InterviewPage() {
       screenStreamRef.current = screenStream;
       screenStream.getVideoTracks()[0].onended = () => {
         if (interviewStep === "interview" && !isTerminatingRef.current) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate manually stopped sharing their screen.");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing screen.");
         }
       };
       setCameraReady(true);
@@ -285,10 +297,22 @@ export default function InterviewPage() {
     setIsRecording(true);
   }, []);
 
+  // 🧠 UPGRADE: The "Smart Auto-Submit" Engine
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
+    setIsThinking(false);
     isRecordingRef.current = true;
     
+    // Give them 15 seconds to say their FIRST word before timing out.
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    silenceTimerRef.current = setTimeout(() => {
+        if (isRecordingRef.current) {
+            setIsThinking(false);
+            const btn = document.getElementById("auto-submit-btn");
+            if (btn) btn.click();
+        }
+    }, 15000); 
+
     // @ts-ignore
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
@@ -300,6 +324,7 @@ export default function InterviewPage() {
     
     // @ts-ignore
     recognition.onresult = (event) => {
+      setIsThinking(true);
       let interim = ""; let allFinal = "";
       for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
@@ -307,6 +332,22 @@ export default function InterviewPage() {
         else interim += transcript;
       }
       setLiveTranscript((allFinal + interim).trim());
+      
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      
+      const tLower = allFinal.toLowerCase();
+      const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to");
+      
+      // Auto-submit after 6 seconds of silence (or 1.5s if they skip). Perfect human pacing.
+      const waitTime = isSkipping ? 1500 : 6000; 
+
+      silenceTimerRef.current = setTimeout(() => {
+        if (isRecordingRef.current) {
+            setIsThinking(false);
+            const btn = document.getElementById("auto-submit-btn");
+            if (btn) btn.click();
+        }
+      }, waitTime); 
     };
     
     recognition.onerror = () => {};
@@ -322,6 +363,8 @@ export default function InterviewPage() {
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false; 
+    setIsThinking(false);
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
     
     const currentText = liveTranscript.trim();
@@ -339,7 +382,6 @@ export default function InterviewPage() {
     startSpeechRecognition();
   }, [voiceGender, startSpeechRecognition]);
 
-  // 🧠 UPGRADE: The "Alex AI" Conversational Engine
   const handleAnswerSubmit = useCallback(async () => {
     if (!isRecording) return;
     setIsRecording(false);
@@ -371,8 +413,7 @@ export default function InterviewPage() {
     
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
     
-    // Get the NEXT question ready to pass to the AI so it can bridge them together smoothly
-    let nextIndex = currentQ + 1;
+    let nextIndex = introPhase ? 0 : currentQ + 1;
     let nextQData = questions[nextIndex];
     let nextQText = nextQData ? nextQData.question : "Thank the candidate, we have finished all the questions.";
 
@@ -386,7 +427,7 @@ export default function InterviewPage() {
                 body: JSON.stringify({ 
                     question: currentQText, 
                     answer: totalAnswerSoFar,
-                    next_question: nextQText // Send next question to AI
+                    next_question: nextQText 
                 })
             });
             const ackData = await ackRes.json();
@@ -399,28 +440,29 @@ export default function InterviewPage() {
         dynamicResponse = "I didn't quite catch that, but let's move forward anyway. " + nextQText;
     }
 
-    // The AI speaks ONE fluid paragraph that acknowledges the answer AND asks the next question
     setAiMessage(dynamicResponse);
     await speakText(dynamicResponse, voiceGender);
     setIsSpeaking(false);
     setAiMessage("");
 
     if (!isSufficient) {
-        // The AI asked a probing follow-up, so we stay on the same question
         setIsRecording(true);
         startSpeechRecognition();
         return; 
     }
 
-    // The answer was sufficient, we formally move to the next question in React state
     setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
     setAccumulatedTranscript(""); 
 
     if (introPhase) {
       setIntroPhase(false);
       setCurrentQ(0);
-      setIsRecording(true);
-      startSpeechRecognition();
+      if (questions.length > 0) {
+          setIsRecording(true);
+          startSpeechRecognition();
+      } else {
+          finalizeInterviewAndUpload("Error: Questions array failed to load.");
+      }
       return;
     }
 
@@ -432,7 +474,6 @@ export default function InterviewPage() {
       finalizeInterviewAndUpload();
     }
   }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, questions, voiceGender, startSpeechRecognition]);
-
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
@@ -573,7 +614,7 @@ export default function InterviewPage() {
             </h1>
             <p className="text-lg text-muted-foreground">
               {isCheat 
-                ? "This session was automatically terminated due to a security violation. A full incident report has been sent to the recruiter."
+                ? `This session was automatically terminated due to a security violation. A full incident report has been sent to the recruiter.`
                 : `Thank you for your time, ${candidateName}. Your encrypted interview has been securely sent directly to the Recruiter's Dashboard.`}
             </p>
             {!feedbackSubmitted && !isCheat ? (
@@ -639,8 +680,8 @@ export default function InterviewPage() {
             <motion.div variants={fadeUp} className="glass rounded-xl p-6 text-left border border-primary/20">
               <h3 className="text-sm font-semibold text-primary uppercase tracking-wider mb-4">Enterprise Security Rules</h3>
               <ul className="space-y-3 text-sm text-muted-foreground">
-                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Full Screen Lock:</strong> You will be forced into Full Screen. Exiting full screen terminates the interview instantly.</li>
-                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Screen & Camera Enforced:</strong> You must share your entire screen. If you switch tabs, the interview terminates.</li>
+                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Full Screen Lock:</strong> You will be forced into Full Screen. Exiting full screen flags a security warning.</li>
+                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Screen & Camera Enforced:</strong> You must share your entire screen. Switching tabs flags a security warning.</li>
                 <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Keyboard Disabled (3-Strikes):</strong> Do not touch your keyboard to access AI tools. 3 strikes and you are terminated.</li>
                 <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Hands-Free Flow:</strong> The AI will listen and wait for you to finish answering naturally.</li>
               </ul>
@@ -699,8 +740,8 @@ export default function InterviewPage() {
             <div className="flex flex-col gap-2">
               {isRecording && !isSpeaking && (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
-                   <Mic className="w-4 h-4 text-green-500" />
-                   Listening... Take your time. Click "Submit Answer" when you are finished.
+                   {isThinking ? <MoreHorizontal className="w-4 h-4 text-primary" /> : <Mic className="w-4 h-4 text-green-500" />}
+                   {isThinking ? "Listening... (Take your time, it will auto-submit when you stop)" : "AI is listening. Speak naturally or click Submit when done."}
                  </div>
               )}
               {liveTranscript && (
@@ -714,7 +755,7 @@ export default function InterviewPage() {
             <div className="flex items-center justify-between">
               {isRecording ? (
                  <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
-                   <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
+                   <HandHandshake className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
                  </Button>
               ) : (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>
