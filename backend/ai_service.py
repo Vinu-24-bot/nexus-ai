@@ -259,10 +259,10 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
         return _parse_json_response(resp.json()["choices"][0]["message"]["content"])
 
 def _call_gemini_sync(prompt: str) -> str:
-    import google.generativeai as genai
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-2.0-flash')
-    response = model.generate_content(prompt)
+    # 🛡️ THE FIX: Uses the `google-genai` SDK exactly as written in your requirements.txt
+    from google import genai
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
     return response.text
 
 async def _call_gemini(prompt: str) -> dict:
@@ -299,27 +299,38 @@ async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: in
 # ─── PUBLIC API EXPORTS ───────────────────────────────
 
 async def parse_resume_to_json(raw_text: str) -> dict:
-    # 🛡️ THE FIX: Image-only PDF detector
-    if len(raw_text.strip()) < 20:
+    print(f"[BATS] Extracted Resume Text Length: {len(raw_text)}")
+
+    if "requires PyMuPDF" in raw_text or "requires python-docx" in raw_text:
         return {
-            "candidate_info": {"name": "Blank Document", "email": "Not Provided", "phone": "Not Provided", "links": []},
-            "executive_summary": "The uploaded PDF contains no readable text. It might be a scanned image or heavily formatted. Please copy-paste the text manually.",
+            "candidate_info": {"name": "Library Missing on Server", "email": "Not Provided", "phone": "Not Provided", "links": []},
+            "executive_summary": "CRITICAL ERROR: Your Render backend is missing required Python libraries. Please add 'pymupdf' and 'python-docx' to your requirements.txt file and redeploy.",
             "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []},
             "experience_and_projects": [],
             "education_and_certifications": []
         }
-        
-    # 🛡️ THE FIX: Hard-cap at 6500 chars so it mathematically never breaks Groq's token limit
-    safe_text = raw_text[:6500] 
-    prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
 
+    if len(raw_text.strip()) < 50:
+        print("[BATS] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
+        
+    safe_text = raw_text[:6500] 
+
+    if GEMINI_API_KEY:
+        try:
+            print("[BATS] Parsing Resume with Gemini (High Token Capacity)...")
+            prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
+            return await _call_gemini(prompt)
+        except Exception as e:
+            print(f"[BATS] Gemini parsing failed: {e}. Falling back to Groq.")
+    
     try:
-        # 🛡️ THE FIX: Max tokens set to a safe 2500 for the JSON response
+        print("[BATS] Parsing Resume with Groq...")
+        prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=2500)
+        
     except Exception as e:
         error_msg = str(e).replace('"', "'")
         print(f"[BATS] FATAL Parsing Error: {error_msg}")
-        # 🛡️ THE DIAGNOSTIC UI: If it fails, it will now print the literal API error on your screen!
         return {
             "candidate_info": {"name": "Extraction Failed", "email": "Error", "phone": "Error", "links": []},
             "executive_summary": f"AI API ERROR: {error_msg}. Check your backend terminal for full details.",
