@@ -35,10 +35,10 @@ from ai_service import (
 
 load_dotenv()
 
-# Create tables
+# Create database tables
 Base.metadata.create_all(bind=engine)
 
-# Create directories
+# Create file directories
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
 UPLOAD_DIR.mkdir(exist_ok=True)
 
@@ -71,6 +71,7 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 
 def generate_candidate_id(name: str, position: str) -> str:
+    """Generates a secure, unique Candidate ID."""
     first_name = re.sub(r'[^a-zA-Z]', '', name.split()[0] if name.strip() else "Unknown")
     role_short = re.sub(r'[^a-zA-Z]', '', position.replace(" ", ""))[:20]
     unique_hash = hashlib.md5(f"{name}{position}{datetime.now().isoformat()}".encode()).hexdigest()[:6]
@@ -78,6 +79,7 @@ def generate_candidate_id(name: str, position: str) -> str:
 
 
 def db_to_response(ev: Evaluation) -> dict:
+    """Formats the Evaluation database object to a clean JSON response."""
     return {
         "id": ev.id,
         "candidateName": ev.candidate_name,
@@ -99,6 +101,7 @@ def db_to_response(ev: Evaluation) -> dict:
 
 
 def save_result_file(eval_id: str, candidate_name: str, result_data: dict):
+    """Saves the final JSON result locally."""
     safe_name = candidate_name.replace(" ", "_").replace("/", "_")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{eval_id}_{safe_name}_{timestamp}.json"
@@ -130,10 +133,16 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
 
 # --- ENTERPRISE EMAIL ENGINE ---
 def send_system_email(to_email: str, subject: str, body: str):
+    """
+    BUGFIX: Double-Engine Email Fallback.
+    Some servers block Port 465, some block Port 587. 
+    This tries 587 (TLS) first, and instantly falls back to 465 (SSL) if it fails.
+    """
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
+    
     if not sender_email or not sender_password:
-        print(f"[BATS] Email credentials missing. Cannot send email to {to_email}.")
+        print(f"[BATS] Email credentials missing in Environment Variables. Cannot send email to {to_email}.")
         return
     
     msg = MIMEMultipart()
@@ -143,14 +152,25 @@ def send_system_email(to_email: str, subject: str, body: str):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        # UPGRADE: Using SMTP_SSL on Port 465 to bypass Cloud provider blocks
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        # ATTEMPT 1: Port 587 (TLS)
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS EMAIL SUCCESS] Successfully delivered tracking email to: {to_email}")
-    except Exception as e:
-        print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}: {e}")
+        print(f"[BATS EMAIL SUCCESS] Delivered via Port 587 (TLS) to: {to_email}")
+    except Exception as e1:
+        print(f"[BATS EMAIL] Port 587 failed: {e1}. Pivoting to Port 465...")
+        try:
+            # ATTEMPT 2: Port 465 (SSL Fallback)
+            server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, to_email, msg.as_string())
+            server.quit()
+            print(f"[BATS EMAIL SUCCESS] Delivered via Port 465 (SSL) to: {to_email}")
+        except Exception as e2:
+            print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}.")
+            print(f"Make sure you generated a 16-letter App Password from Google!")
 
 
 @app.get("/")
@@ -190,6 +210,7 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     
     return {"message": "Session created and emails queued", "session_id": new_session.id}
 
+
 @app.get("/api/sessions/{session_id}")
 async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     """Candidate clicks the link; this fetches their specific interview details."""
@@ -206,6 +227,7 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
         "interview_level": session.interview_level,
         "status": session.status
     }
+
 
 @app.patch("/api/sessions/{session_id}/status")
 async def update_session_status(session_id: str, req: SessionStatusUpdateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -228,6 +250,7 @@ async def update_session_status(session_id: str, req: SessionStatusUpdateRequest
 
     return {"message": f"Status updated to {req.status}", "candidate": session.candidate_name}
 
+
 @app.post("/api/feedback")
 async def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
     """Stores candidate feedback after the interview."""
@@ -241,10 +264,12 @@ async def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Feedback saved successfully"}
 
+
 # ─── CORE EVALUATION ROUTES ───
 
 @app.post("/api/upload-video")
 async def upload_video(video: UploadFile = File(...)):
+    """Handles the webm background upload."""
     if not video.filename:
         raise HTTPException(400, "No filename provided")
 
@@ -262,8 +287,10 @@ async def upload_video(video: UploadFile = File(...)):
         "timestamp": timestamp,
     }
 
+
 @app.post("/api/upload-resume", response_model=ResumeUploadResponse)
 async def upload_resume(file: UploadFile = File(...)):
+    """Handles PDF/DOC uploads and triggers semantic parsing."""
     if not file.filename:
         raise HTTPException(400, "No filename provided")
 
@@ -310,8 +337,10 @@ async def upload_resume(file: UploadFile = File(...)):
         size=len(content),
     )
 
+
 @app.post("/api/generate-questions")
 async def generate_questions(req: QuestionGenerationRequest):
+    """Generates unique questions dynamically based on JD, Resume, and Level."""
     try:
         questions = await generate_interview_questions(
             job_description=req.job_description, 
@@ -323,24 +352,30 @@ async def generate_questions(req: QuestionGenerationRequest):
     except Exception as e:
         raise HTTPException(500, detail=f"Question generation failed: {str(e)}")
 
+
 @app.post("/api/generate-jd")
 async def generate_job_description(req: JDGenerationRequest):
+    """Auto-generates a JD from a job title."""
     try:
         jd = await generate_jd(req.position)
         return {"job_description": jd}
     except Exception as e:
         raise HTTPException(500, detail=f"JD generation failed: {str(e)}")
 
+
 @app.post("/api/acknowledge-answer")
 async def acknowledge_answer(req: AcknowledgmentRequest):
+    """Real-time response generation (Skeptic Agent)."""
     try:
         ack = await get_answer_acknowledgment(req.question, req.answer)
         return {"acknowledgment": ack}
     except Exception as e:
         return {"acknowledgment": "Thank you for that context. Let's move on."}
 
+
 @app.post("/api/evaluate")
 async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db)):
+    """The core engine that runs the final candidate evaluation."""
     try:
         final_transcript = req.transcript
         
@@ -354,8 +389,9 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
                     except Exception as e:
                         print(f"[BATS] Whisper transcription failed, falling back to frontend text: {e}")
 
-        if len(final_transcript.strip()) < 10:
-            raise ValueError("Transcript is too short or audio extraction failed to find speech.")
+        # Basic text presence check before the AI kill switch handles it
+        if len(final_transcript.strip()) < 5:
+            raise ValueError("Transcript is essentially empty. Audio extraction failed to find speech.")
 
         ai_result = await evaluate_candidate(
             job_description=req.job_description,
@@ -399,10 +435,12 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
     except Exception as e:
         raise HTTPException(500, detail=f"AI evaluation failed: {str(e)}")
 
+
 @app.get("/api/evaluations")
 async def list_evaluations(db: Session = Depends(get_db)):
     evaluations = db.query(Evaluation).order_by(Evaluation.created_at.desc()).all()
     return [db_to_response(ev) for ev in evaluations]
+
 
 @app.get("/api/evaluations/{eval_id}")
 async def get_evaluation(eval_id: str, db: Session = Depends(get_db)):
@@ -410,6 +448,7 @@ async def get_evaluation(eval_id: str, db: Session = Depends(get_db)):
     if not ev:
         raise HTTPException(404, "Evaluation not found")
     return db_to_response(ev)
+
 
 @app.patch("/api/evaluations/{eval_id}/status")
 async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db: Session = Depends(get_db)):
@@ -422,6 +461,7 @@ async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db:
     db.refresh(ev)
     return db_to_response(ev)
 
+
 @app.delete("/api/evaluations/{eval_id}")
 async def delete_evaluation(eval_id: str, db: Session = Depends(get_db)):
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
@@ -432,8 +472,10 @@ async def delete_evaluation(eval_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Deleted successfully"}
 
+
 @app.get("/api/stats")
 async def get_stats(db: Session = Depends(get_db)):
+    """Powers the ATS Dashboard Analytics."""
     evaluations = db.query(Evaluation).all()
     total = len(evaluations)
     
@@ -473,8 +515,10 @@ async def get_stats(db: Session = Depends(get_db)):
         "positions": list(set(ev.position for ev in evaluations)),
     }
 
+
 @app.post("/api/compare")
 async def compare_candidates(candidate_ids: List[str], db: Session = Depends(get_db)):
+    """Enterprise ATS feature for side-by-side candidate comparison."""
     evaluations = db.query(Evaluation).filter(Evaluation.id.in_(candidate_ids)).all()
     if len(evaluations) < 2:
         raise HTTPException(400, "Need at least 2 valid candidate IDs to compare")
