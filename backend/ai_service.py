@@ -15,24 +15,36 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# --- API KEYS ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+
 # ─── UTILITY FUNCTIONS ──────────────────────────────────────
 
 def format_prompt(template: str, **kwargs) -> str:
+    """Bulletproof prompt formatter to prevent crashes from technical characters."""
     prompt = template
     for key, value in kwargs.items():
         prompt = prompt.replace(f"{{{key}}}", str(value))
     return prompt
 
+
 def _parse_json_response(text: str) -> dict:
+    """
+    🛡️ UPGRADED: A hyper-resilient JSON parser that survives formatting glitches.
+    It hunts down the exact start and end brackets even if the AI adds markdown or conversational fluff.
+    """
     try:
-        match = re.search(r'\{.*\}', text.strip(), re.DOTALL)
-        if match:
-            clean_json = match.group(0)
+        # Find the first '{' and the last '}' to perfectly isolate the JSON object
+        start_idx = text.find('{')
+        end_idx = text.rfind('}')
+        
+        if start_idx != -1 and end_idx != -1:
+            clean_json = text[start_idx:end_idx+1]
+            # Strip out trailing commas that break standard JSON parsers
             clean_json = re.sub(r',\s*}', '}', clean_json)
             clean_json = re.sub(r',\s*]', ']', clean_json)
             return json.loads(clean_json)
@@ -41,6 +53,7 @@ def _parse_json_response(text: str) -> dict:
     except Exception as e:
         print(f"[BATS] Critical JSON Parsing Error: {e}\nRaw Text snippet: {text[:300]}...")
         raise ValueError("AI generated invalid or truncated JSON.")
+
 
 def _validate_result(result: dict) -> dict:
     required = [
@@ -52,6 +65,7 @@ def _validate_result(result: dict) -> dict:
         if field not in result:
             raise ValueError(f"Missing required field: {field}")
     return result
+
 
 # ─── ENTERPRISE PROMPTS ──────────────────────────────────────
 
@@ -183,7 +197,7 @@ Output ONLY valid JSON matching this exact structure:
 """
 
 RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies. 
-Your job is to read unstructured, messy resume text and meticulously extract EVERYTHING into a "Liquid JSON Schema".
+Your job is to read unstructured, messy resume text and meticulously extract EVERYTHING into a strict JSON Schema.
 
 CRITICAL EXTRACTION RULES (STRICT COMPLIANCE REQUIRED):
 1. NEVER output `null`. If data is missing, use "Not Provided" or an empty array `[]`.
@@ -224,10 +238,13 @@ Raw Resume Text:
 {raw_text}
 """
 
+
 # ─── HYBRID AI PROVIDER CALLS ───────────────────────────────
 
 async def transcribe_audio(file_path: str) -> str:
-    if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
+    """Extracts text from audio using Groq's Whisper."""
+    if not GROQ_API_KEY: 
+        raise ValueError("GROQ_API_KEY is required.")
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             with open(file_path, "rb") as audio_file:
@@ -241,7 +258,9 @@ async def transcribe_audio(file_path: str) -> str:
         print(f"[BATS] Transcription failed: {e}")
         raise
 
+
 async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000) -> dict:
+    """Standard Groq LLM Call"""
     async with httpx.AsyncClient(timeout=90) as client:
         payload = {
             "model": "llama-3.3-70b-versatile", 
@@ -249,14 +268,17 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
             "temperature": 0.2, 
             "max_tokens": max_tokens
         }
-        if force_json: payload["response_format"] = {"type": "json_object"}
+        if force_json: 
+            payload["response_format"] = {"type": "json_object"}
             
         url = "https://api.groq.com/openai/v1/chat/completions"
         resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
         resp.raise_for_status()
         
-        if force_json: return json.loads(resp.json()["choices"][0]["message"]["content"])
+        if force_json: 
+            return json.loads(resp.json()["choices"][0]["message"]["content"])
         return _parse_json_response(resp.json()["choices"][0]["message"]["content"])
+
 
 def _call_gemini_sync(prompt: str) -> str:
     import google.generativeai as genai
@@ -265,9 +287,11 @@ def _call_gemini_sync(prompt: str) -> str:
     response = model.generate_content(prompt)
     return response.text
 
+
 async def _call_gemini(prompt: str) -> dict:
     text = await asyncio.to_thread(_call_gemini_sync, prompt)
     return _parse_json_response(text)
+
 
 async def _call_groq_text(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=60) as client:
@@ -279,6 +303,7 @@ async def _call_groq_text(prompt: str) -> str:
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
+
 
 async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: int = 6000) -> dict:
     errors = []
@@ -296,12 +321,12 @@ async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: in
             
     raise ValueError(f"All AI Cascade providers failed: {'; '.join(errors)}")
 
+
 # ─── PUBLIC API EXPORTS ───────────────────────────────
 
 async def parse_resume_to_json(raw_text: str) -> dict:
     print(f"[BATS] Extracted Resume Text Length: {len(raw_text)}")
 
-    # 🛡️ THE FIX 1: If Render is missing the PyMuPDF library, tell the user gracefully!
     if "requires PyMuPDF" in raw_text or "requires python-docx" in raw_text:
         return {
             "candidate_info": {"name": "Library Missing on Server", "email": "Not Provided", "phone": "Not Provided", "links": []},
@@ -314,7 +339,6 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     if len(raw_text.strip()) < 50:
         print("[BATS] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
         
-    # 🛡️ THE FIX 2: Hard-cap at 8,000 characters to mathematically guarantee we never exceed Groq's token limit.
     safe_text = raw_text[:8000]
 
     if GEMINI_API_KEY:
@@ -328,7 +352,8 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     try:
         print("[BATS] Parsing Resume with Groq...")
         prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
-        return await _call_ai_cascade(prompt, force_json=True, max_tokens=2000)
+        # 🛡️ UPGRADE: Token memory maxed out to 6000 to prevent JSON truncation
+        return await _call_ai_cascade(prompt, force_json=True, max_tokens=6000)
         
     except Exception as e:
         print(f"[BATS] FATAL Parsing Error (Token Limit Exceeded): {e}")
@@ -339,6 +364,7 @@ async def parse_resume_to_json(raw_text: str) -> dict:
             "experience_and_projects": [{"name": "System Error", "role": "Not Provided", "duration": "Not Provided", "technologies_used": [], "key_achievements": []}],
             "education_and_certifications": []
         }
+
 
 async def evaluate_candidate(job_description: str, resume: str, transcript: str) -> dict:
     clean_transcript = transcript.replace("(No speech detected)", "").strip()
@@ -370,14 +396,17 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str)
     result = await _call_ai_cascade(prompt, force_json=True, max_tokens=6000)
     return _validate_result(result)
 
+
 async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 10, interview_level: str = "L2"):
     prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=job_description, resume=resume, num_questions=num_questions, interview_level=interview_level)
     result = await _call_ai_cascade(prompt, force_json=True)
     return result.get("questions", [])
 
+
 async def generate_jd(position: str) -> str:
     prompt = format_prompt(JD_GENERATION_PROMPT, position=position)
     return await _call_groq_text(prompt)
+
 
 async def get_answer_acknowledgment(question: str, answer: str, next_question: str = None) -> dict:
     next_q_text = next_question if next_question else "Thank the candidate and conclude this section."
