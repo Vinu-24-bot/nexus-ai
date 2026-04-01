@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Video, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -100,6 +100,7 @@ export default function InterviewPage() {
   
   const [interviewStep, setInterviewStep] = useState<"welcome" | "ready" | "interview" | "submitting" | "feedback">("welcome");
   const [cameraReady, setCameraReady] = useState(false);
+  const [isThinking, setIsThinking] = useState(false); // UI State for "Candidate is thinking"
   
   const [cheatStrikes, setCheatStrikes] = useState(0);
   const [terminationReason, setTerminationReason] = useState("");
@@ -120,7 +121,6 @@ export default function InterviewPage() {
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // FIX: Anti-Cheat execution lock to prevent recursive false alarms
   const isTerminatingRef = useRef(false);
 
   const candidateName = state?.candidateName || fetchedData?.candidateName || "";
@@ -185,7 +185,6 @@ export default function InterviewPage() {
     }
   }, [interviewStep, cameraReady]);
 
-  // BUGFIX: Inject isTerminatingRef to ignore fullscreen changes when intentionally exiting
   useEffect(() => {
     if (interviewStep !== "interview") return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -293,13 +292,17 @@ export default function InterviewPage() {
   const startSpeechRecognition = useCallback(() => {
     fullTranscriptRef.current = "";
     setLiveTranscript("");
+    setIsThinking(false);
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
+    
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
+    
     recognition.onresult = (event: any) => {
+      setIsThinking(true);
       let interim = ""; let allFinal = "";
       for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
@@ -308,12 +311,23 @@ export default function InterviewPage() {
       }
       fullTranscriptRef.current = allFinal.trim();
       setLiveTranscript((allFinal + interim).trim());
+      
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      
+      // UPGRADE: "Patience Engine" & Smart Intercepts
+      const tLower = allFinal.toLowerCase();
+      const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to");
+      
+      // If they explicitly give up, submit fast (1.5s). Otherwise, give them 12 seconds to think!
+      const waitTime = isSkipping ? 1500 : 12000; 
+
       silenceTimerRef.current = setTimeout(() => {
+        setIsThinking(false);
         const btn = document.getElementById("auto-submit-btn");
         if (btn) btn.click();
-      }, 4500); 
+      }, waitTime); 
     };
+    
     recognition.onerror = () => {};
     recognition.onend = () => { if (mediaRecorderRef.current?.state === "recording") { try { recognition.start(); } catch {} } };
     recognition.start();
@@ -322,6 +336,7 @@ export default function InterviewPage() {
 
   const stopRecording = useCallback(() => {
     return new Promise<{ blob: Blob; transcript: string }>((resolve) => {
+      setIsThinking(false);
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
       const recorder = mediaRecorderRef.current;
@@ -342,11 +357,15 @@ export default function InterviewPage() {
     if (streamRef.current) {
       startMediaRecorder(streamRef.current);
       startSpeechRecognition();
-      silenceTimerRef.current = setTimeout(() => { const btn = document.getElementById("auto-submit-btn"); if (btn) btn.click(); }, 15000); 
+      
+      // UPGRADE: Wait up to 45 seconds for the candidate to speak their first word before timing out.
+      silenceTimerRef.current = setTimeout(() => { 
+        const btn = document.getElementById("auto-submit-btn"); 
+        if (btn) btn.click(); 
+      }, 45000); 
     }
   }, [voiceGender, startMediaRecorder, startSpeechRecognition]);
 
-  // BUGFIX: Dynamic Conversational AI for EVERY turn, including the intro.
   const handleNextQuestion = useCallback(async () => {
     if (!isRecording) return;
     const { transcript } = await stopRecording(); 
@@ -358,7 +377,7 @@ export default function InterviewPage() {
 
     if (wantsRepeat && !introPhase && currentQuestion) {
       setIsSpeaking(true);
-      const ackText = "Sure, I can repeat that for you. " + currentQuestion.question;
+      const ackText = "Of course, let me repeat that for you. " + currentQuestion.question;
       setAiMessage(ackText);
       await speakText(ackText, voiceGender);
       setIsSpeaking(false);
@@ -367,7 +386,6 @@ export default function InterviewPage() {
       return; 
     }
 
-    // Connect to AI to get a dynamic acknowledgment of their answer
     setIsSpeaking(true);
     setAiMessage("Thinking..."); 
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
@@ -376,14 +394,13 @@ export default function InterviewPage() {
     if (hasAnswered) {
         try {
             const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
+                method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ question: currentQText, answer: transcript })
             });
             const ackData = await ackRes.json();
             dynamicAck = ackData.acknowledgment;
         } catch (err) {
-            dynamicAck = "Thank you. Let's move on.";
+            dynamicAck = "Thank you. Let's move on to the next one.";
         }
     } else {
         dynamicAck = "I didn't hear anything, but that's alright. Let's move ahead.";
@@ -508,7 +525,6 @@ export default function InterviewPage() {
     }
   }, [answers, questions, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording]);
 
-  // BUGFIX: Set the lock BEFORE triggering finalize so exitFullscreen doesn't trigger cheat
   const handleForceEndInterview = async (isEarlyLeave = false, reason = "") => {
     if (isTerminatingRef.current) return;
     isTerminatingRef.current = true;
@@ -643,10 +659,10 @@ export default function InterviewPage() {
             <motion.div variants={fadeUp} className="glass rounded-xl p-6 text-left border border-primary/20">
               <h3 className="text-sm font-semibold text-primary uppercase tracking-wider mb-4">Enterprise Security Rules</h3>
               <ul className="space-y-3 text-sm text-muted-foreground">
-                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Full Screen Lock:</strong> You will be forced into Full Screen. Exiting full screen (via mouse or Esc) terminates the interview instantly.</li>
+                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Full Screen Lock:</strong> You will be forced into Full Screen. Exiting full screen terminates the interview instantly.</li>
                 <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Screen & Camera Enforced:</strong> You must share your entire screen. If you switch tabs, the interview terminates.</li>
-                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Keyboard Disabled (3-Strikes):</strong> Do not touch your keyboard to access AI tools. 3 strikes and you are terminated. Use only your mouse and voice.</li>
-                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Strict Hands-Free AI:</strong> Just talk naturally. If you stay silent for 10+ seconds, the AI assumes you don't know the answer and moves on.</li>
+                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Keyboard Disabled (3-Strikes):</strong> Do not touch your keyboard to access AI tools. 3 strikes and you are terminated.</li>
+                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Hands-Free Flow:</strong> The AI will listen and wait for you to finish answering naturally.</li>
               </ul>
             </motion.div>
             <motion.div variants={fadeUp}>
@@ -699,12 +715,23 @@ export default function InterviewPage() {
               <video ref={videoRef} muted playsInline className={`w-full h-full object-cover ${cameraReady ? "block" : "hidden"}`} style={{ transform: "scaleX(-1)" }} />
               {isRecording && <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/80 text-primary-foreground text-[10px] font-medium"><span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" /> SESSION & SCREEN RECORDING</div>}
             </div>
-            {liveTranscript && (
-              <div className="rounded-lg bg-muted/50 p-4 max-h-32 overflow-y-auto">
-                <div className="flex items-center gap-2 mb-2"><Mic className="w-3.5 h-3.5 text-primary" /><span className="text-xs font-medium text-foreground">Live Transcript</span></div>
-                <p className="text-sm text-muted-foreground">{liveTranscript}</p>
-              </div>
-            )}
+            
+            {/* UPGRADE: Clearer UI Feedback for "Thinking" vs "Listening" */}
+            <div className="flex flex-col gap-2">
+              {isRecording && !isSpeaking && (
+                 <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
+                   {isThinking ? <MoreHorizontal className="w-4 h-4 text-primary" /> : <Mic className="w-4 h-4 text-green-500" />}
+                   {isThinking ? "Thinking... (AI waiting to ensure you are done)" : "AI is listening. Speak your answer naturally..."}
+                 </div>
+              )}
+              {liveTranscript && (
+                <div className="rounded-lg bg-muted/50 p-4 max-h-32 overflow-y-auto">
+                  <div className="flex items-center gap-2 mb-2"><Mic className="w-3.5 h-3.5 text-primary" /><span className="text-xs font-medium text-foreground">Live Transcript</span></div>
+                  <p className="text-sm text-muted-foreground">{liveTranscript}</p>
+                </div>
+              )}
+            </div>
+            
             <div className="flex items-center justify-between">
               {isRecording ? <Button onClick={handleNextQuestion} className="bg-primary text-primary-foreground"><Square className="w-4 h-4 mr-2 fill-current" /> Manual Submit <ChevronRight className="w-4 h-4 ml-1" /></Button> : <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Preparing...</div>}
               <Button variant="outline" size="sm" onClick={() => handleForceEndInterview(true, "Candidate left early manually.")} className="text-xs border-destructive/30 text-destructive">Leave Interview</Button>
