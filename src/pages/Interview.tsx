@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Video, Square, ChevronRight, Loader2,
-  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal, HandHandshake
+  Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck, MoreHorizontal
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -92,9 +92,8 @@ export default function InterviewPage() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
   
-  // Transcripts
   const [liveTranscript, setLiveTranscript] = useState("");
-  const [accumulatedTranscript, setAccumulatedTranscript] = useState(""); // Holds full answer across probing turns
+  const [accumulatedTranscript, setAccumulatedTranscript] = useState(""); 
   
   const [totalElapsed, setTotalElapsed] = useState(0);
   const [interviewStep, setInterviewStep] = useState<"welcome" | "ready" | "interview" | "submitting" | "feedback">("welcome");
@@ -115,7 +114,7 @@ export default function InterviewPage() {
   const screenStreamRef = useRef<MediaStream | null>(null);
   
   const recognitionRef = useRef<any>(null);
-  const isRecordingRef = useRef(false); // Hard ref to prevent WebSpeech from dying
+  const isRecordingRef = useRef(false); 
   const fullRecordingChunksRef = useRef<Blob[]>([]);
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -158,6 +157,20 @@ export default function InterviewPage() {
   }, [sessionId, state, navigate]);
 
   useEffect(() => {
+    const loadVoices = () => { window.speechSynthesis.getVoices(); };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => {
+      window.speechSynthesis.cancel();
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+      if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      if (totalTimerRef.current) clearInterval(totalTimerRef.current);
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (recognitionRef.current) recognitionRef.current.stop();
+    };
+  }, []);
+
+  useEffect(() => {
     if (timeRemaining <= 0 && interviewStep === "interview" && totalElapsed > 0) {
       handleForceEndInterview(false, "Time Expired.");
     }
@@ -178,7 +191,7 @@ export default function InterviewPage() {
       setCheatStrikes(prev => {
         const newStrikes = prev + 1;
         if (newStrikes >= 3) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate exceeded 3 keyboard warnings.");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate exceeded 3 keyboard warnings. Probable use of external AI typing tool.");
         } else {
           toast.warning(`Security Warning (${newStrikes}/3): Keyboard disabled. Use ONLY your mouse and voice.`);
         }
@@ -187,12 +200,12 @@ export default function InterviewPage() {
     };
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement && !isTerminatingRef.current) {
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode.");
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate exited full-screen mode to access other applications.");
       }
     };
     const handleVisibilityChange = () => {
       if (document.hidden && !isTerminatingRef.current) {
-        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized window.");
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate minimized the window or switched tabs.");
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -221,7 +234,7 @@ export default function InterviewPage() {
       screenStreamRef.current = screenStream;
       screenStream.getVideoTracks()[0].onended = () => {
         if (interviewStep === "interview" && !isTerminatingRef.current) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing screen.");
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate stopped sharing their screen mid-interview.");
         }
       };
       setCameraReady(true);
@@ -241,7 +254,7 @@ export default function InterviewPage() {
       startFullRecording(streamRef.current!);
       totalTimerRef.current = setInterval(() => setTotalElapsed((t) => t + 1), 1000);
       setTimeout(async () => {
-        const introText = `Hello ${candidateName}, welcome to your interview for the ${position} role. I'm your GeniusHub interviewer. Your screen and camera are now securely shared. Could you please introduce yourself?`;
+        const introText = `Hello ${candidateName}, welcome to your interview for the ${position} role. I am your GeniusHub AI interviewer. Your screen and camera are securely shared. Let's start by having you introduce yourself.`;
         await speakAndRecord(introText);
       }, 800);
     } catch (err) { toast.error("Failed to enter Full Screen. Please click again."); }
@@ -265,13 +278,22 @@ export default function InterviewPage() {
     });
   }, []);
 
-  // UPGRADE: Bulletproof Speech Recognition Loop
+  const startMediaRecorder = useCallback((stream: MediaStream) => {
+    const mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+    chunksRef.current = [];
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    mediaRecorderRef.current = mediaRecorder;
+    mediaRecorder.start(1000);
+    setIsRecording(true);
+  }, []);
+
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     setIsThinking(false);
     isRecordingRef.current = true;
     
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    // @ts-ignore
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
     
     const recognition = new SpeechRecognition();
@@ -279,7 +301,8 @@ export default function InterviewPage() {
     recognition.interimResults = true;
     recognition.lang = "en-US";
     
-    recognition.onresult = (event: any) => {
+    // @ts-ignore
+    recognition.onresult = (event) => {
       setIsThinking(true);
       let interim = ""; let allFinal = "";
       for (let i = 0; i < event.results.length; i++) {
@@ -291,19 +314,23 @@ export default function InterviewPage() {
       
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       
-      // Only auto-submit if they are DEAD SILENT for 15 seconds. Give them time to think!
+      const tLower = allFinal.toLowerCase();
+      const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to");
+      
+      // UPGRADE: 8 seconds of silence allowed to think. If they skip, submit instantly.
+      const waitTime = isSkipping ? 1500 : 8000; 
+
       silenceTimerRef.current = setTimeout(() => {
         if (isRecordingRef.current) {
             setIsThinking(false);
             const btn = document.getElementById("auto-submit-btn");
             if (btn) btn.click();
         }
-      }, 15000); 
+      }, waitTime); 
     };
     
     recognition.onerror = () => {};
     recognition.onend = () => { 
-        // If the browser killed the mic but the candidate didn't click submit, RESTART IT.
         if (isRecordingRef.current) { 
             try { recognition.start(); } catch {} 
         } 
@@ -314,7 +341,7 @@ export default function InterviewPage() {
   }, []);
 
   const stopRecording = useCallback(() => {
-    isRecordingRef.current = false; // Kill the endless loop
+    isRecordingRef.current = false; 
     setIsThinking(false);
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
@@ -334,13 +361,11 @@ export default function InterviewPage() {
     startSpeechRecognition();
   }, [voiceGender, startSpeechRecognition]);
 
-  // UPGRADE: Human-Like Dynamic Interaction Loop
   const handleAnswerSubmit = useCallback(async () => {
     if (!isRecording) return;
     setIsRecording(false);
     const newTranscriptChunk = stopRecording(); 
     
-    // Add what they just said to anything they previously said for this question
     const totalAnswerSoFar = (accumulatedTranscript + " " + newTranscriptChunk).trim();
     setAccumulatedTranscript(totalAnswerSoFar);
 
@@ -348,10 +373,9 @@ export default function InterviewPage() {
     const tLower = newTranscriptChunk.toLowerCase();
     const wantsRepeat = tLower.includes("repeat") || tLower.includes("pardon") || (tLower.length < 25 && tLower.includes("sorry"));
 
-    // Handle "Can you repeat that?"
     if (wantsRepeat && !introPhase && currentQuestion) {
       setIsSpeaking(true);
-      const ackText = "Of course, let me repeat that for you. " + currentQuestion.question;
+      const ackText = "Of course, let me repeat the question. " + currentQuestion.question;
       setAiMessage(ackText);
       await speakText(ackText, voiceGender);
       setIsSpeaking(false);
@@ -383,7 +407,7 @@ export default function InterviewPage() {
             dynamicAck = "Thank you. Let's move on to the next one.";
         }
     } else {
-        dynamicAck = "I didn't hear anything, but that's alright. Let's move ahead.";
+        dynamicAck = "I didn't quite catch that, but let's move forward anyway.";
     }
 
     setAiMessage(dynamicAck);
@@ -391,16 +415,14 @@ export default function InterviewPage() {
     setIsSpeaking(false);
     setAiMessage("");
 
-    // If answer was weak, ASK A FOLLOW UP AND STAY ON THE QUESTION!
     if (!isSufficient) {
         setIsRecording(true);
         startSpeechRecognition();
         return; 
     }
 
-    // IF WE REACH HERE, the answer was sufficient. Move to next question!
     setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
-    setAccumulatedTranscript(""); // Reset accumulator for the new question
+    setAccumulatedTranscript(""); 
 
     if (introPhase) {
       setIntroPhase(false);
@@ -690,7 +712,7 @@ export default function InterviewPage() {
               {isRecording && !isSpeaking && (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
                    {isThinking ? <MoreHorizontal className="w-4 h-4 text-primary" /> : <Mic className="w-4 h-4 text-green-500" />}
-                   {isThinking ? "Thinking... (AI waiting to ensure you are done)" : "AI is listening. Speak naturally or click Submit when done."}
+                   {isThinking ? "Listening... (Take your time to think)" : "AI is listening. Speak naturally or click Submit when done."}
                  </div>
               )}
               {liveTranscript && (
@@ -704,7 +726,7 @@ export default function InterviewPage() {
             <div className="flex items-center justify-between">
               {isRecording ? (
                  <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
-                   <HandHandshake className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
+                   <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
                  </Button>
               ) : (
                  <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>

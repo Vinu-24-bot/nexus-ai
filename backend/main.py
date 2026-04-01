@@ -119,7 +119,6 @@ def send_system_email(to_email: str, subject: str, body: str):
     """
     CRITICAL WARNING: If you are hosted on Render Free Tier, this WILL fail.
     Render actively blocks outgoing ports 465, 587, and 25 to stop spammers.
-    You must upgrade to a paid Render tier or use an API like SendGrid.
     """
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
@@ -135,7 +134,6 @@ def send_system_email(to_email: str, subject: str, body: str):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        # ATTEMPT 1: Port 587 (TLS)
         server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
         server.starttls()
         server.login(sender_email, sender_password)
@@ -145,7 +143,6 @@ def send_system_email(to_email: str, subject: str, body: str):
     except Exception as e1:
         print(f"\n[BATS EMAIL WARNING] Port 587 failed: {e1}. Pivoting to Port 465 (SSL)...\n")
         try:
-            # ATTEMPT 2: Port 465 (SSL Fallback)
             server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
             server.login(sender_email, sender_password)
             server.sendmail(sender_email, to_email, msg.as_string())
@@ -181,7 +178,7 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
 
     if req.recruiter_email:
         recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\n\nYou will receive another alert the moment they begin, and when results are ready."
-        background_tasks.add_task(send_system_email, req.recruiter_email, f"GeniusHub Tracking: Session Created for {req.candidate_name}", recruiter_body)
+        background_tasks.add_task(send_system_email, req.recruiter_email, f"BATS Tracking: Session Created for {req.candidate_name}", recruiter_body)
     
     return {"message": "Session created and emails queued", "session_id": new_session.id}
 
@@ -279,7 +276,7 @@ async def generate_job_description(req: JDGenerationRequest):
 
 @app.post("/api/acknowledge-answer")
 async def acknowledge_answer(req: AcknowledgmentRequest):
-    """UPGRADED: Returns JSON indicating if the answer was sufficient."""
+    """UPGRADED: Returns JSON indicating if the answer was sufficient to ask a follow up."""
     try:
         ack_data = await get_answer_acknowledgment(req.question, req.answer)
         return ack_data
