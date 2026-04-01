@@ -20,6 +20,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Backgroun
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from sqlalchemy import text  # NEW: Required for the Database Defibrillator
 
 from database import Base, engine, get_db
 from models import Evaluation, InterviewSession, CandidateFeedback
@@ -116,10 +117,6 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
 
 
 def send_system_email(to_email: str, subject: str, body: str):
-    """
-    CRITICAL WARNING: If you are hosted on Render Free Tier, this WILL fail.
-    Render actively blocks outgoing ports 465, 587, and 25 to stop spammers.
-    """
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
     
@@ -153,10 +150,25 @@ def send_system_email(to_email: str, subject: str, body: str):
             print(f"Error Log: {e2}")
             print("INFO: You are likely being blocked by the Render Firewall. Upgrade Render or use SendGrid.\n")
 
+# ─── THE 24/7 DATABASE DEFIBRILLATOR ───
 
 @app.get("/")
 async def root():
     return {"message": "BATS GeniusHub Enterprise Backend is awake and running!"}
+
+@app.get("/api/health")
+async def health_check(db: Session = Depends(get_db)):
+    """
+    Forces the Neon database to stay awake by executing a microscopic SQL query.
+    If cron-job.org pings this every 4 minutes, the DB will NEVER sleep.
+    """
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "online", "database": "connected and awake"}
+    except Exception as e:
+        return {"status": "offline", "error": str(e)}
+
+# ─── ENTERPRISE ROUTES: SESSION LINK & EMAIL GENERATION ───
 
 @app.post("/api/sessions/create")
 async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -276,7 +288,6 @@ async def generate_job_description(req: JDGenerationRequest):
 
 @app.post("/api/acknowledge-answer")
 async def acknowledge_answer(req: AcknowledgmentRequest):
-    """UPGRADED: Returns JSON indicating if the answer was sufficient to ask a follow up."""
     try:
         ack_data = await get_answer_acknowledgment(req.question, req.answer)
         return ack_data
