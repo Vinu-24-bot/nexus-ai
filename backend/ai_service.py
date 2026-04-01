@@ -15,20 +15,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# --- API KEYS ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+
 # ─── UTILITY FUNCTIONS ──────────────────────────────────────
 
 def format_prompt(template: str, **kwargs) -> str:
+    """Bulletproof prompt formatter to prevent crashes from technical characters."""
     prompt = template
     for key, value in kwargs.items():
         prompt = prompt.replace(f"{{{key}}}", str(value))
     return prompt
 
+
 def _parse_json_response(text: str) -> dict:
+    """Highly resilient JSON parser that ignores all markdown and conversational fluff."""
     try:
         match = re.search(r'\{.*\}', text.strip(), re.DOTALL)
         if match:
@@ -42,6 +47,7 @@ def _parse_json_response(text: str) -> dict:
         print(f"[BATS] Critical JSON Parsing Error: {e}\nRaw Text snippet: {text[:300]}...")
         raise ValueError("AI generated invalid or truncated JSON.")
 
+
 def _validate_result(result: dict) -> dict:
     required = [
         "candidate_overview", "scores", "strengths",
@@ -53,17 +59,25 @@ def _validate_result(result: dict) -> dict:
             raise ValueError(f"Missing required field: {field}")
     return result
 
+
 # ─── ENTERPRISE PROMPTS ──────────────────────────────────────
 
 EVALUATION_PROMPT = """You are "BATS", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Job Description, the Candidate's Deeply Parsed Resume, and the actual Live Interview Transcript.
+
+*** ZERO-TOLERANCE KILL SWITCH (CRITICAL) ***
+If the [INTERVIEW_TRANSCRIPT] contains the phrase "[SYSTEM LOG]" (indicating a security breach/cheat):
+1. You MUST set ALL scores (technical_proficiency, relevance_to_jd, communication, confidence_level, overall_score) to EXACTLY 0.
+2. You MUST set hiring_recommendation to "Reject".
+3. You MUST state the security breach in the justification. 
+DO NOT evaluate the candidate's resume if this kill switch is triggered.
 
 CRITICAL ENTERPRISE RULES:
 1. FAIRNESS DOCTRINE: You MUST NOT penalize the candidate's "Technical Proficiency" or "Overall Score" for broken English, grammatical errors, or fumbling. Judge them PURELY on the technical accuracy and logic of their answers. 
 2. CONFIDENCE SCORE (0-100): Analyze the transcript for filler words ("um", "uh", "like"), sudden pauses, or incomplete sentences. Generate a separate Confidence Score based purely on these speech patterns.
 3. RUTHLESS TECHNICAL STANDARD: If the candidate provides generic, high-level, or superficial answers without specific technical implementation details, you MUST assign a Technical Score below 50. Do not inflate scores out of politeness.
 
-You MUST use the following "Mixture of Experts" framework to grade the candidate:
+You MUST use the following "Mixture of Experts" framework to grade the candidate (UNLESS the Kill Switch is activated):
 
 Step 1: THE ADVOCATE (Alignment & Strengths)
 Find every piece of evidence in the transcript that proves the candidate possesses the skills listed in the JD.
@@ -150,11 +164,30 @@ Output ONLY valid JSON:
 
 JD_GENERATION_PROMPT = """Generate a detailed, professional Job Description for: {position}. Output plain text only."""
 
-DYNAMIC_INTERVIEW_TURN_PROMPT = """You are an elite AI technical interviewer. 
-Question: {question}
-Candidate's Answer: {answer}
+DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS, an elite, empathetic AI technical interviewer. 
+You are conducting a live voice interview (similar to a real human).
 
-Task: If the answer is vague or lacks technical depth, generate a probing follow-up question to test their actual knowledge. If strong, briefly acknowledge and move on. Output ONLY the exact text you would speak. Max 2 sentences."""
+Question you just asked: {question}
+Candidate's Answer: {answer}
+Next Question you need to ask (if you decide to move on): {next_question}
+
+Task: Analyze the candidate's answer and generate ONE fluid, conversational response.
+1. If they say "I don't know", "skip", or refuse:
+   - Set is_sufficient to true.
+   - response_text: "No problem at all, let's move on. [Insert the Next Question here]"
+2. If their answer is very short, vague, or lacks technical depth:
+   - Set is_sufficient to false.
+   - response_text: Gently acknowledge what they said, then ask a probing follow-up question to make them elaborate on that specific topic. Do NOT ask the Next Question yet.
+3. If they give a strong, detailed answer:
+   - Set is_sufficient to true.
+   - response_text: Acknowledge a specific technical point they made (e.g. "That's a great point about using Tuples as dictionary keys"), AND THEN seamlessly transition into asking the Next Question (e.g. "Now, moving on to data... [Insert the Next Question here]").
+
+Output ONLY valid JSON matching this exact structure:
+{
+  "response_text": "The exact conversational words you will speak.",
+  "is_sufficient": true
+}
+"""
 
 RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies. 
 Your job is to read unstructured, messy resume text and meticulously extract EVERYTHING into a "Liquid JSON Schema".
@@ -198,16 +231,19 @@ Raw Resume Text:
 {raw_text}
 """
 
+
 # ─── HYBRID AI PROVIDER CALLS ───────────────────────────────
 
 async def transcribe_audio(file_path: str) -> str:
-    if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
+    """Extracts text from audio using Groq's Whisper."""
+    if not GROQ_API_KEY: 
+        raise ValueError("GROQ_API_KEY is required.")
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             with open(file_path, "rb") as audio_file:
                 files = {"file": (os.path.basename(file_path), audio_file, "audio/mpeg")}
                 data = {"model": "whisper-large-v3", "response_format": "text"}
-                url = "https://" + "api.groq.com/openai/v1/audio/transcriptions"
+                url = "https://api.groq.com/openai/v1/audio/transcriptions"
                 resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, files=files, data=data)
                 resp.raise_for_status()
                 return resp.text
@@ -215,75 +251,116 @@ async def transcribe_audio(file_path: str) -> str:
         print(f"[BATS] Transcription failed: {e}")
         raise
 
+
 async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000) -> dict:
+    """Standard Groq LLM Call"""
     async with httpx.AsyncClient(timeout=90) as client:
         payload = {
             "model": "llama-3.3-70b-versatile", 
             "messages": [{"role": "user", "content": prompt}], 
-            "temperature": 0.1, 
+            "temperature": 0.2, 
             "max_tokens": max_tokens
         }
-        if force_json: payload["response_format"] = {"type": "json_object"}
-        url = "https://" + "api.groq.com/openai/v1/chat/completions"
+        if force_json: 
+            payload["response_format"] = {"type": "json_object"}
+            
+        url = "https://api.groq.com/openai/v1/chat/completions"
         resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
         resp.raise_for_status()
-        if force_json: return json.loads(resp.json()["choices"][0]["message"]["content"])
+        
+        if force_json: 
+            return json.loads(resp.json()["choices"][0]["message"]["content"])
         return _parse_json_response(resp.json()["choices"][0]["message"]["content"])
 
+
 def _call_gemini_sync(prompt: str) -> str:
-    from google import genai
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+    """FIX: Reverted to classic standard Google Generative AI SDK to stop Render from crashing."""
+    import google.generativeai as genai
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-2.0-flash')
+    response = model.generate_content(prompt)
     return response.text
+
 
 async def _call_gemini(prompt: str) -> dict:
     text = await asyncio.to_thread(_call_gemini_sync, prompt)
     return _parse_json_response(text)
 
+
 async def _call_groq_text(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=60) as client:
-        url = "https://" + "api.groq.com/openai/v1/chat/completions"
-        resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 1000})
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        resp = await client.post(
+            url, 
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, 
+            json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 1000}
+        )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
 
-async def _call_ai_cascade(prompt: str, force_json: bool = False) -> dict:
+
+async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: int = 6000) -> dict:
     errors = []
     if GROQ_API_KEY:
         try:
-            return await _call_groq(prompt, force_json, max_tokens=6000)
+            return await _call_groq(prompt, force_json, max_tokens=max_tokens)
         except Exception as e:
-            errors.append(f"Groq: {e}")
+            errors.append(f"Groq Error: {e}")
+            
     if GEMINI_API_KEY:
         try:
             return await _call_gemini(prompt)
         except Exception as e:
-            errors.append(f"Gemini: {e}")
+            errors.append(f"Gemini Error: {e}")
+            
     raise ValueError(f"All AI Cascade providers failed: {'; '.join(errors)}")
+
 
 # ─── PUBLIC API EXPORTS ───────────────────────────────
 
 async def parse_resume_to_json(raw_text: str) -> dict:
-    prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=raw_text)
+    """
+    Ensures the resume fits within Groq's 8K token limit so it never crashes.
+    """
+    print(f"[BATS] Extracted Resume Text Length: {len(raw_text)}")
+    
+    if len(raw_text.strip()) < 50:
+        print("[BATS] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
+        
     if GEMINI_API_KEY:
         try:
+            print("[BATS] Parsing Resume with Gemini (High Token Capacity)...")
+            prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=raw_text)
             return await _call_gemini(prompt)
-        except Exception: pass
+        except Exception as e:
+            print(f"[BATS] Gemini parsing failed: {e}. Falling back to Groq.")
+    
     try:
-        safe_text = raw_text[:15000]
-        return await _call_groq(format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text), force_json=True, max_tokens=6000)
-    except Exception:
-        return {"candidate_info": {"name": "Extraction Failed", "email": "Not Provided", "phone": "Not Provided", "links": []}, "executive_summary": "System exceeded memory limits.", "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []}, "experience_and_projects": [], "education_and_certifications": []}
+        print("[BATS] Parsing Resume with Groq...")
+        safe_text = raw_text[:12000] 
+        prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
+        return await _call_ai_cascade(prompt, force_json=True, max_tokens=2000)
+        
+    except Exception as e:
+        print(f"[BATS] FATAL Parsing Error (Token Limit Exceeded): {e}")
+        return {
+            "candidate_info": {"name": "Extraction Failed", "email": "Not Provided", "phone": "Not Provided", "links": []},
+            "executive_summary": "System exceeded memory limits or encountered unreadable formatting. Please enter manually.",
+            "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []},
+            "experience_and_projects": [{"name": "System Error", "role": "Not Provided", "duration": "Not Provided", "technologies_used": [], "key_achievements": []}],
+            "education_and_certifications": []
+        }
+
 
 async def evaluate_candidate(job_description: str, resume: str, transcript: str) -> dict:
-    # 100% RELIABLE PYTHON-LEVEL KILL SWITCH (Industry Standard)
-    # Bypasses the AI entirely if they cheated or remained silent.
-    word_count = len(transcript.split())
+    clean_transcript = transcript.replace("(No speech detected)", "").strip()
+    word_count = len(clean_transcript.split())
     is_breach = "[SYSTEM LOG]: SECURITY BREACH" in transcript
 
-    if is_breach or word_count < 15:
+    # Kill Switch set to 2 words so short intros don't crash
+    if is_breach or word_count < 2:
         print(f"[BATS] Kill Switch Activated! Breach: {is_breach}, Words: {word_count}")
-        reason = "Candidate triggered the Anti-Cheat Security Vault." if is_breach else "Candidate remained silent or failed to provide substantial answers."
+        reason = "Candidate triggered the Anti-Cheat Security Vault." if is_breach else "Candidate remained completely silent or ended the interview immediately."
         return {
             "candidate_overview": f"Session automatically rejected. {reason}",
             "scores": {
@@ -304,21 +381,27 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str)
 
     # If valid, proceed with normal LLM Evaluation
     prompt = format_prompt(EVALUATION_PROMPT, job_description=job_description, resume=resume, transcript=transcript)
-    result = await _call_ai_cascade(prompt, force_json=True)
+    result = await _call_ai_cascade(prompt, force_json=True, max_tokens=6000)
     return _validate_result(result)
+
 
 async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 10, interview_level: str = "L2"):
     prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=job_description, resume=resume, num_questions=num_questions, interview_level=interview_level)
     result = await _call_ai_cascade(prompt, force_json=True)
     return result.get("questions", [])
 
+
 async def generate_jd(position: str) -> str:
     prompt = format_prompt(JD_GENERATION_PROMPT, position=position)
     return await _call_groq_text(prompt)
 
-async def get_answer_acknowledgment(question: str, answer: str) -> str:
-    prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer)
+
+async def get_answer_acknowledgment(question: str, answer: str, next_question: str = None) -> dict:
+    """Uses JSON to output response text AND is_sufficient check."""
+    next_q_text = next_question if next_question else "Thank the candidate and conclude this section."
+    prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_q_text)
     try:
-        return await _call_groq_text(prompt)
+        return await _call_ai_cascade(prompt, force_json=True, max_tokens=1000)
     except Exception as e:
-        return "Thank you for sharing that context. Let's move on to the next question."
+        print(f"[BATS] Dynamic response failed: {e}")
+        return {"response_text": f"Thank you for that context. Let's move on. {next_q_text}", "is_sufficient": True}
