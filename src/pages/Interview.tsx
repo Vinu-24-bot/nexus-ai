@@ -140,7 +140,6 @@ export default function InterviewPage() {
 
   const isTerminatingRef = useRef(false);
 
-  // 🛡️ UX FIX: Dynamic Loading Statuses
   const [submitStatusIndex, setSubmitStatusIndex] = useState(0);
   const submitStatuses = [
     "Securely Uploading Encrypted Session...",
@@ -165,7 +164,6 @@ export default function InterviewPage() {
   const resume = state?.resume || fetchedData?.resume || "";
   const durationMinutes = state?.durationMinutes || fetchedData?.durationMinutes || 10;
   
-  // 🛡️ THE FIX: 6 Question Fallback Array for 10 Min interviews
   const rawQuestions = state?.questions || fetchedData?.questions || [];
   const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
     { id: 1, question: "Could you briefly describe your most impactful project and the core technologies used?", category: "technical", difficulty: "medium" },
@@ -178,7 +176,6 @@ export default function InterviewPage() {
 
   const voiceGender = state?.voiceGender || fetchedData?.voiceGender || "female";
   
-  // Only slice the array based on actual time remaining/duration calculation
   const calculatedQuestionTarget = durationMinutes === 10 ? 6 : durationMinutes === 15 ? 8 : 10;
   const finalQuestionsList = activeQuestions.slice(0, calculatedQuestionTarget);
 
@@ -195,7 +192,6 @@ export default function InterviewPage() {
           if (!res.ok) throw new Error("Link expired");
           const session = await res.json();
           
-          // Dynamic calculation for Backend Request
           const targetQCount = session.duration_minutes === 10 ? 6 : session.duration_minutes === 15 ? 8 : 10;
           
           const qRes = await fetch(`${API_URL}/generate-questions`, {
@@ -379,15 +375,6 @@ export default function InterviewPage() {
     });
   }, []);
 
-  const startMediaRecorder = useCallback((stream: MediaStream) => {
-    const mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-    chunksRef.current = [];
-    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-    mediaRecorderRef.current = mediaRecorder;
-    mediaRecorder.start(1000);
-    setIsRecording(true);
-  }, []);
-
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     setIsThinking(false);
@@ -560,7 +547,6 @@ export default function InterviewPage() {
   }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, finalQuestionsList, voiceGender, startSpeechRecognition]);
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
-    // 🛡️ THE FIX: Set Termination Ref TRUE instantly so exitFullscreen doesn't trigger Anti-Cheat
     isTerminatingRef.current = true;
     
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
@@ -591,10 +577,15 @@ export default function InterviewPage() {
     setIsSpeaking(false);
     setAiMessage("");
 
+    // 🛡️ THE SPECIFIC FIX: We are now passing the termination remarks directly to the backend
     if (sessionId) {
       fetch(`${API_URL}/sessions/${sessionId}/status`, { 
         method: "PATCH", headers: { "Content-Type": "application/json" }, 
-        body: JSON.stringify({ status: "completed" }), keepalive: true
+        body: JSON.stringify({ 
+            status: "completed",
+            remarks: forcedTerminationReason || "Completed normally"
+        }), 
+        keepalive: true
       }).catch(()=>{});
     }
 
@@ -681,7 +672,6 @@ export default function InterviewPage() {
       <div className="min-h-screen bg-background flex flex-col items-center justify-center space-y-6">
         <CandidateHeader isLive={false} />
         <Loader2 className="w-16 h-16 text-primary animate-spin mt-16" />
-        {/* 🛡️ THE FIX: Displaying dynamic status updates to make wait feel faster */}
         <h2 className="text-2xl font-bold">{submitStatuses[submitStatusIndex]}</h2>
         <p className="text-muted-foreground">Please do not close this tab. AI is compiling your results.</p>
       </div>

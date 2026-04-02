@@ -11,13 +11,13 @@ import subprocess
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.utils import formatdate
+from email.utils import formatdate, make_msgid
 from datetime import datetime
 from pathlib import Path
 from typing import List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -28,7 +28,7 @@ from models import Evaluation, InterviewSession, CandidateFeedback
 from schemas import (
     EvaluationRequest, EvaluationResponse, QuestionGenerationRequest,
     JDGenerationRequest, AcknowledgmentRequest, SelectionStatusRequest,
-    ResumeUploadResponse, SessionCreateRequest, SessionStatusUpdateRequest, FeedbackRequest
+    ResumeUploadResponse, SessionCreateRequest, FeedbackRequest
 )
 from ai_service import (
     evaluate_candidate, generate_interview_questions,
@@ -108,39 +108,37 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
-# 🛡️ THE FIX: Enterprise SMTP Delivery Engine
-# Added critical headers (Date, robust formatting) to help punch through corporate spam filters.
 def send_system_email(to_email: str, subject: str, body: str):
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
     if not sender_email or not sender_password:
-        print(f"[BATS EMAIL FAIL] Missing credentials for {to_email}.")
+        print(f"[BATS EMAIL FAIL] Missing credentials. Cannot send to {to_email}.")
         return
     
     msg = MIMEMultipart()
     msg['From'] = f"BATS ForgePro Recruitment <{sender_email}>"
     msg['To'] = to_email
     msg['Subject'] = subject
-    msg['Date'] = formatdate(localtime=True) # Helps bypass aggressive corporate spam filters
+    msg['Date'] = formatdate(localtime=True) 
+    msg['Message-ID'] = make_msgid() 
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        # Attempting standard SSL first
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15)
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=15)
+        server.ehlo()
+        server.starttls()
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS EMAIL SUCCESS] Delivered via Port 465 to: {to_email}")
+        print(f"[BATS EMAIL SUCCESS] Delivered via Port 587 to: {to_email}")
     except Exception as e1:
-        print(f"[BATS EMAIL WARNING] Port 465 failed: {e1}. Pivoting to TLS Port 587...")
+        print(f"[BATS EMAIL WARNING] Port 587 failed: {e1}. Pivoting to SSL Port 465...")
         try:
-            # Fallback to TLS which some corporate networks prefer
-            server = smtplib.SMTP('smtp.gmail.com', 587, timeout=15)
-            server.starttls()
+            server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15)
             server.login(sender_email, sender_password)
             server.sendmail(sender_email, to_email, msg.as_string())
             server.quit()
-            print(f"[BATS EMAIL SUCCESS] Delivered via Port 587 to: {to_email}")
+            print(f"[BATS EMAIL SUCCESS] Delivered via Port 465 to: {to_email}")
         except Exception as e2:
             print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}. Error: {e2}")
 
@@ -171,11 +169,9 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
-    # 🛡️ THE FIX: Candidate receives strictly ONE email with updated ForgePro branding
-    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
+    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre-screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
     background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
 
-    # Recruiter receives the creation alert with Dashboard Link
     if req.recruiter_email:
         dashboard_link = f"{frontend_url}/dashboard"
         recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\n\nYou will receive automated alerts when the candidate begins and completes the assessment.\n\nAccess your command center here: {dashboard_link}"
@@ -190,27 +186,42 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     return { "id": session.id, "candidate_name": session.candidate_name, "position": session.position, "job_description": session.job_description, "resume_text": session.resume_text, "interview_level": session.interview_level, "status": session.status }
 
 @app.patch("/api/sessions/{session_id}/status")
-async def update_session_status(session_id: str, req: SessionStatusUpdateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+async def update_session_status(session_id: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    req_data = await request.json()
+    status = req_data.get("status")
+    remarks = req_data.get("remarks", "")
+    
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session: raise HTTPException(status_code=404, detail="Session not found")
     
-    session.status = req.status
+    session.status = status
     db.commit()
 
-    # 🛡️ THE FIX: Recruiter automated tracking loop with direct Dashboard Links
     if session.recruiter_email:
         frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
         dashboard_link = f"{frontend_url}/dashboard"
         
-        if req.status == "started":
+        if status == "started":
             body = f"Alert: {session.candidate_name} has just joined the interview room and started their secure camera/screen-share.\n\nYou can monitor the active pipeline here: {dashboard_link}"
             background_tasks.add_task(send_system_email, session.recruiter_email, f"🟢 Started: {session.candidate_name}", body)
             
-        elif req.status == "completed":
-            body = f"Update: {session.candidate_name} has submitted or terminated their interview session.\n\nThe BATS AI is finalizing the video processing, anti-cheat logs, and technical evaluation.\n\nClick the link below to view the results, review termination logs (if any), and export the data directly from your dashboard:\n{dashboard_link}"
-            background_tasks.add_task(send_system_email, session.recruiter_email, f"✅ Session Concluded: {session.candidate_name}", body)
+        elif status == "completed":
+            is_cheat = "SECURITY BREACH" in remarks
+            is_leave = "left early" in remarks
+            
+            if is_cheat:
+                subject = f"🚨 SECURITY TERMINATION: {session.candidate_name}"
+                body = f"URGENT ALERT: The interview for {session.candidate_name} was automatically TERMINATED by the BATS Anti-Cheat System.\n\nReason: {remarks}\n\nClick the link below to view the incident logs and dashboard:\n{dashboard_link}"
+            elif is_leave:
+                subject = f"⚠️ INCOMPLETE: {session.candidate_name} Left Early"
+                body = f"Update: {session.candidate_name} manually exited the interview before completion.\n\nClick the link below to view their partial results on the dashboard:\n{dashboard_link}"
+            else:
+                subject = f"✅ Session Concluded: {session.candidate_name}"
+                body = f"Update: {session.candidate_name} has successfully submitted their interview session.\n\nThe BATS AI is finalizing the video processing and technical evaluation. Click the link below to view the results and export the data directly from your dashboard:\n{dashboard_link}"
+                
+            background_tasks.add_task(send_system_email, session.recruiter_email, subject, body)
 
-    return {"message": f"Status updated to {req.status}", "candidate": session.candidate_name}
+    return {"message": f"Status updated to {status}", "candidate": session.candidate_name}
 
 @app.post("/api/feedback")
 async def submit_feedback(req: FeedbackRequest, db: Session = Depends(get_db)):
