@@ -27,7 +27,7 @@ const fadeUp = {
 const REFRESH_INTERVAL = 15000;
 
 interface Feedback {
-  id: number;
+  id: number | string; // 🛡️ THE FIX: Safely accepts both strings and numbers
   candidate: string;
   rating: number;
   comments: string;
@@ -43,7 +43,7 @@ export default function DashboardPage() {
 
   const [activeTab, setActiveTab] = useState<"overview" | "feedback">("overview");
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
-  const [pinnedFeedbacks, setPinnedFeedbacks] = useState<number[]>([]);
+  const [pinnedFeedbacks, setPinnedFeedbacks] = useState<(number|string)[]>([]);
 
   const fetchData = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
@@ -100,7 +100,7 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchData, fetchFeedbacks]);
 
-  const togglePin = (id: number) => {
+  const togglePin = (id: number | string) => {
     setPinnedFeedbacks(prev => {
       const newPins = prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id];
       localStorage.setItem("bats_pinned_feedbacks", JSON.stringify(newPins));
@@ -108,9 +108,8 @@ export default function DashboardPage() {
     });
   };
 
-  // 🛡️ THE FIX: Optimistic UI updates & Event Bubbling protection
-  const deleteFeedback = async (id: number) => {
-    // Instantly remove from screen so it feels perfectly smooth and responsive
+  // 🛡️ THE FIX: Advanced X-Ray Error Logging
+  const deleteFeedback = async (id: number | string) => {
     setFeedbacks(prev => prev.filter(f => f.id !== id));
     
     try {
@@ -118,13 +117,14 @@ export default function DashboardPage() {
       if (res.ok) {
         toast.success("Feedback permanently deleted.");
       } else {
-        // If the server fails for some reason, silently fetch the real data back
+        // Reads EXACTLY what the server says and prints it
+        const errorText = await res.text();
         fetchFeedbacks(); 
-        toast.error("Server failed to delete feedback.");
+        toast.error(`Server Error ${res.status}: ${errorText}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       fetchFeedbacks();
-      toast.error("Network error while deleting feedback.");
+      toast.error(`Network Crash: ${err.message}`);
     }
   };
 
@@ -133,7 +133,10 @@ export default function DashboardPage() {
     const bPinned = pinnedFeedbacks.includes(b.id);
     if (aPinned && !bPinned) return -1;
     if (!aPinned && bPinned) return 1;
-    return b.id - a.id; 
+    // Safely sort assuming IDs are numeric or fallback to 0
+    const aId = typeof a.id === 'number' ? a.id : 0;
+    const bId = typeof b.id === 'number' ? b.id : 0;
+    return bId - aId; 
   });
 
   const displayStats = statsData || {
@@ -369,7 +372,6 @@ export default function DashboardPage() {
                             >
                               <Pin className="w-4 h-4" />
                             </button>
-                            {/* 🛡️ THE FIX: Added preventDefault and stopPropagation so it doesn't get blocked */}
                             <button 
                               onClick={(e) => {
                                 e.preventDefault();

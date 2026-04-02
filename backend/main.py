@@ -105,7 +105,7 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
-# 🛡️ THE PERFECT FIX: Unblockable Google Apps Script Webhook
+# 🛡️ Universal Google Webhook Engine
 def send_system_email(to_email: str, subject: str, body: str):
     gas_url = os.getenv("GOOGLE_SCRIPT_URL")
     if not gas_url:
@@ -119,7 +119,6 @@ def send_system_email(to_email: str, subject: str, body: str):
     }
 
     try:
-        # Standard HTTP POST on Port 443 - Render cannot block this, and corporate firewalls trust Google.
         with httpx.Client(timeout=15.0) as client:
             response = client.post(gas_url, json=payload)
             if response.status_code == 200:
@@ -156,11 +155,9 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
-    # Candidate receives ONLY ONE email (ForgePro branding)
     candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre-screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
     background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
 
-    # Recruiter gets the creation alert
     if req.recruiter_email:
         dashboard_link = f"{frontend_url}/dashboard"
         recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\n\nYou will receive automated alerts when the candidate begins and completes the assessment.\n\nAccess your command center here: {dashboard_link}"
@@ -186,7 +183,6 @@ async def update_session_status(session_id: str, request: Request, background_ta
     session.status = status
     db.commit()
 
-    # Recruiter ONLY tracking loop
     if session.recruiter_email:
         frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
         dashboard_link = f"{frontend_url}/dashboard"
@@ -413,10 +409,16 @@ async def get_all_feedback(db: Session = Depends(get_db)):
     feedbacks = db.query(CandidateFeedback).order_by(CandidateFeedback.id.desc()).all()
     return [{"id": f.id, "candidate": f.candidate_name, "rating": f.rating, "comments": f.comments} for f in feedbacks]
 
+# 🛡️ THE FIX: Crash-proof type handling for Delete Feedback
 @app.delete("/api/feedback/{feedback_id}")
-async def delete_feedback(feedback_id: int, db: Session = Depends(get_db)):
-    feedback = db.query(CandidateFeedback).filter(CandidateFeedback.id == feedback_id).first()
-    if feedback:
-        db.delete(feedback)
-        db.commit()
-    return {"message": "Feedback permanently erased"}
+async def delete_feedback(feedback_id: str, db: Session = Depends(get_db)):
+    try:
+        # Accepts string from frontend to prevent 422 crash, gracefully converts to Integer
+        search_id = int(feedback_id) if feedback_id.isdigit() else feedback_id
+        feedback = db.query(CandidateFeedback).filter(CandidateFeedback.id == search_id).first()
+        if feedback:
+            db.delete(feedback)
+            db.commit()
+        return {"message": "Feedback permanently erased"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database Lock or Error: {str(e)}")
