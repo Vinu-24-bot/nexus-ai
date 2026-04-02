@@ -1,0 +1,23 @@
+name: 🤖 BATS Keep-Alive Bot
+
+on:
+  schedule:
+    # Runs every 5 minutes, 24/7
+    - cron: "*/5 * * * *"
+  # Allows you to trigger the bot manually from the GitHub website if you want
+  workflow_dispatch: 
+
+jobs:
+  wake-up-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚀 Firing Ping to Render
+        run: |
+          echo "Pinging BATS Backend Health Endpoint..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://bats-ai-backend.onrender.com/api/health)
+          
+          if [ "$response" -eq 200 ]; then
+            echo "✅ SUCCESS: Backend is awake and returned 200 OK!"
+          else
+            echo "⚠️ WARNING: Backend returned status $response. It might be cold starting."
+          fi
