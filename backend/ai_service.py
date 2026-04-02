@@ -219,7 +219,7 @@ Raw Resume Text:
 {raw_text}
 """
 
-# ─── BULLETPROOF REST API CALLS (NO SDK CRASHES) ───
+# ─── BULLETPROOF REST API CALLS (WITH AUTO-RETRY) ───
 
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
@@ -243,11 +243,16 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
         if force_json: payload["response_format"] = {"type": "json_object"}
             
         url = "https://api.groq.com/openai/v1/chat/completions"
-        resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
-        resp.raise_for_status()
-        
-        if force_json: return json.loads(resp.json()["choices"][0]["message"]["content"])
-        return _parse_json_response(resp.json()["choices"][0]["message"]["content"])
+        # 🛡️ THE FIX: Auto-Retry Engine for 429 Too Many Requests
+        for attempt in range(2):
+            resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
+            if resp.status_code == 429 and attempt == 0:
+                print("[BATS] Groq 429 Rate Limit hit. Pausing 4 seconds and retrying...")
+                await asyncio.sleep(4)
+                continue
+            resp.raise_for_status()
+            if force_json: return json.loads(resp.json()["choices"][0]["message"]["content"])
+            return _parse_json_response(resp.json()["choices"][0]["message"]["content"])
 
 async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
@@ -256,22 +261,32 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
         payload["generationConfig"] = {"responseMimeType": "application/json"}
         
     async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
-        resp.raise_for_status()
-        content = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-        if force_json: return json.loads(content)
-        return _parse_json_response(content)
+        # 🛡️ THE FIX: Auto-Retry Engine for 429 Too Many Requests
+        for attempt in range(2):
+            resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
+            if resp.status_code == 429 and attempt == 0:
+                print("[BATS] Gemini 429 Rate Limit hit. Pausing 4 seconds and retrying...")
+                await asyncio.sleep(4)
+                continue
+            resp.raise_for_status()
+            content = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+            if force_json: return json.loads(content)
+            return _parse_json_response(content)
 
 async def _call_groq_text(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=30) as client:
         url = "https://api.groq.com/openai/v1/chat/completions"
-        resp = await client.post(
-            url, 
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, 
-            json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 1000}
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
+        for attempt in range(2):
+            resp = await client.post(
+                url, 
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, 
+                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 1000}
+            )
+            if resp.status_code == 429 and attempt == 0:
+                await asyncio.sleep(4)
+                continue
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"].strip()
 
 async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: int = 6000) -> dict:
     errors = []
@@ -297,7 +312,6 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     if len(raw_text.strip()) < 50:
         print("[BATS] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
         
-    # 🛡️ THE FIX: Hard-Truncate to 5000 to absolutely guarantee no memory limits are hit.
     safe_text = raw_text[:5000] 
 
     if GEMINI_API_KEY:
@@ -316,6 +330,17 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     except Exception as e:
         error_msg = str(e).replace('"', "'")
         print(f"[BATS] FATAL Parsing Error: {error_msg}")
+        
+        # 🛡️ THE EMERGENCY BYPASS: If API is 100% blocked, provide a Graceful Stand-In so the user is NEVER blocked from the interview.
+        if "429" in error_msg:
+            return {
+                "candidate_info": {"name": "Candidate (API Busy)", "email": "api-rate-limit@system", "phone": "N/A", "links": []},
+                "executive_summary": "The AI APIs (Groq/Gemini) are temporarily rate-limited due to rapid testing. The system has automatically bypassed the lock so you can proceed to the interview room.",
+                "core_skills": {"languages_and_frameworks": ["System Override Activated"], "cloud_and_infrastructure": [], "databases_and_tools": []},
+                "experience_and_projects": [{"name": "BATS API Bypass", "role": "System Fallback", "duration": "Current", "technologies_used": ["Retry Engine"], "key_achievements": ["Successfully bypassed API lock to allow candidate to continue."]}],
+                "education_and_certifications": []
+            }
+            
         return {
             "candidate_info": {"name": "Extraction Failed", "email": "Error", "phone": "Error", "links": []},
             "executive_summary": f"AI API ERROR: {error_msg}. Please check the server logs.",
