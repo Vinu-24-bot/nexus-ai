@@ -125,9 +125,9 @@ def send_system_email(to_email: str, subject: str, body: str):
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS EMAIL SUCCESS] Successfully delivered email to: {to_email}")
+        print(f"[BATS EMAIL SUCCESS] Successfully delivered tracking email to: {to_email}")
     except Exception as e:
-        print(f"[BATS EMAIL ERROR] Failed to send to {to_email}. Error: {e}")
+        print(f"[BATS EMAIL ERROR] Failed to send to {to_email}: {e}")
 
 @app.get("/")
 async def root():
@@ -383,8 +383,19 @@ async def compare_candidates(candidate_ids: List[str], db: Session = Depends(get
         recommended_action = f"Make an offer to {ranked[0]['candidateName']} based on superior technical alignment."
 
     return {"candidates": ranked, "total_compared": len(ranked), "enterprise_debrief_matrix": debrief_matrix, "recommended_action": recommended_action}
+
+# ─── THE NEW ENTERPRISE FEEDBACK ROUTES ───
+
 @app.get("/api/feedback")
 async def get_all_feedback(db: Session = Depends(get_db)):
-    # This fetches all feedback from the database so your dashboard can display it
+    # Explicitly fetching ID so the frontend can delete/pin accurately
     feedbacks = db.query(CandidateFeedback).order_by(CandidateFeedback.id.desc()).all()
-    return [{"candidate": f.candidate_name, "rating": f.rating, "comments": f.comments} for f in feedbacks]
+    return [{"id": f.id, "candidate": f.candidate_name, "rating": f.rating, "comments": f.comments} for f in feedbacks]
+
+@app.delete("/api/feedback/{feedback_id}")
+async def delete_feedback(feedback_id: int, db: Session = Depends(get_db)):
+    feedback = db.query(CandidateFeedback).filter(CandidateFeedback.id == feedback_id).first()
+    if feedback:
+        db.delete(feedback)
+        db.commit()
+    return {"message": "Feedback permanently erased"}
