@@ -9,10 +9,8 @@ import shutil
 import hashlib
 import subprocess
 import smtplib
-import httpx
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.utils import formatdate, make_msgid
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -109,78 +107,28 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
-# 🛡️ MODIFIED: Returns the exact status string so we can debug it live
-def send_system_email(to_email: str, subject: str, body: str) -> str:
+# 🛡️ THE FIX: Restored the exact, pure SMTP 465 code that you confirmed was working perfectly earlier today.
+def send_system_email(to_email: str, subject: str, body: str):
     sender_email = os.getenv("SENDER_EMAIL")
-    brevo_key = os.getenv("BREVO_API_KEY")
-    
-    if not sender_email:
-        return "ERROR: SENDER_EMAIL is completely missing from Render Environment Variables."
-
-    # ATTEMPT 1: Brevo REST API
-    if brevo_key:
-        try:
-            with httpx.Client(timeout=15) as client:
-                payload = {
-                    "sender": {"name": "BATS ForgePro", "email": sender_email},
-                    "to": [{"email": to_email}],
-                    "subject": subject,
-                    "textContent": body
-                }
-                headers = {
-                    "api-key": brevo_key,
-                    "Content-Type": "application/json",
-                    "accept": "application/json"
-                }
-                resp = client.post("https://api.brevo.com/v3/smtp/email", json=payload, headers=headers)
-                if resp.status_code in [200, 201, 202]:
-                    return f"SUCCESS: Delivered via Brevo API to {to_email}"
-                else:
-                    return f"BREVO API REJECTED: Status {resp.status_code} - {resp.text} (Check if your sender email is verified in Brevo)"
-        except Exception as e:
-            return f"BREVO API CRASHED: {str(e)}"
-
-    # ATTEMPT 2: Standard SMTP Fallback
     sender_password = os.getenv("SENDER_PASSWORD")
-    if not sender_password:
-        return "ERROR: No BREVO_API_KEY found, and no SENDER_PASSWORD found for SMTP fallback."
-
+    if not sender_email or not sender_password:
+        print(f"[BATS EMAIL FAIL] Missing SENDER_EMAIL or SENDER_PASSWORD in env.")
+        return
+    
     msg = MIMEMultipart()
-    msg['From'] = f"BATS ForgePro <{sender_email}>"
+    msg['From'] = f"BATS ForgePro Recruitment <{sender_email}>"
     msg['To'] = to_email
     msg['Subject'] = subject
-    msg['Date'] = formatdate(localtime=True) 
-    msg['Message-ID'] = make_msgid() 
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=15)
-        server.ehlo()
-        server.starttls()
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15)
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        return f"SUCCESS: Delivered via Local SMTP Port 587 to {to_email}"
-    except Exception as e1:
-        try:
-            server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15)
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, to_email, msg.as_string())
-            server.quit()
-            return f"SUCCESS: Delivered via Local SMTP Port 465 to {to_email}"
-        except Exception as e2:
-            return f"SMTP BLOCKED BY RENDER: Port 587 Error [{str(e1)}] | Port 465 Error [{str(e2)}]"
-
-# --- NEW DIAGNOSTIC ROUTE ---
-@app.get("/api/debug-email")
-async def debug_email(email: str):
-    """
-    Hit this endpoint in your browser to instantly see WHY emails are failing.
-    Example: https://bats-ai-backend.onrender.com/api/debug-email?email=vinay.k@bayareatechsol.com
-    """
-    result = send_system_email(email, "BATS Diagnostic Test", "If you receive this, the email system is fully operational.")
-    return {"diagnostic_result": result}
-
+        print(f"[BATS EMAIL SUCCESS] Successfully delivered email to: {to_email}")
+    except Exception as e:
+        print(f"[BATS EMAIL ERROR] Failed to send to {to_email}. Error: {e}")
 
 @app.get("/")
 async def root():
@@ -209,9 +157,11 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
-    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre-screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
+    # 🛡️ Candidate receives ONLY ONE EMAIL
+    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
     background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
 
+    # 🛡️ Recruiter gets tracking alerts
     if req.recruiter_email:
         dashboard_link = f"{frontend_url}/dashboard"
         recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\n\nYou will receive automated alerts when the candidate begins and completes the assessment.\n\nAccess your command center here: {dashboard_link}"
@@ -237,6 +187,7 @@ async def update_session_status(session_id: str, request: Request, background_ta
     session.status = status
     db.commit()
 
+    # 🛡️ Recruiter gets dynamically notified based on submission vs. termination
     if session.recruiter_email:
         frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
         dashboard_link = f"{frontend_url}/dashboard"
@@ -338,7 +289,7 @@ async def acknowledge_answer(req: AcknowledgmentRequest):
         return ack_data
     except Exception as e:
         print(f"[BATS] Acknowledge error: {e}")
-        return {"response_text": "Thank you for that context. Let's move on to the next question.", "is_sufficient": True}
+        return {"response_text": "Got it. Let's move on to the next question.", "is_sufficient": True}
 
 @app.post("/api/evaluate")
 async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db)):
