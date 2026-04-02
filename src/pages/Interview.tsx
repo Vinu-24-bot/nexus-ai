@@ -189,7 +189,13 @@ export default function InterviewPage() {
       const fetchSessionDetails = async () => {
         try {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
-          if (!res.ok) throw new Error("Link expired");
+          
+          // 🛡️ THE FIX: Dynamically read the 24-hr or Lockout error directly from the backend
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({ detail: "Invalid or expired session link." }));
+            throw new Error(errData.detail);
+          }
+          
           const session = await res.json();
           
           const targetQCount = session.duration_minutes === 10 ? 6 : session.duration_minutes === 15 ? 8 : 10;
@@ -208,8 +214,9 @@ export default function InterviewPage() {
             voiceGender: "female", 
             durationMinutes: session.duration_minutes || 10
           });
-        } catch (err) {
-          toast.error("Invalid or expired session link.");
+        } catch (err: any) {
+          // Displays the beautiful custom security message and routes them away
+          toast.error(err.message || "Invalid or expired session link.");
           navigate("/");
         } finally { setIsInitializing(false); }
       };

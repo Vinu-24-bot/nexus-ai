@@ -9,7 +9,7 @@ import shutil
 import hashlib
 import subprocess
 import httpx
-from datetime import datetime
+from datetime import datetime, timedelta  # 🛡️ THE FIX: Added timedelta for 24-hour calculation
 from pathlib import Path
 from typing import List
 
@@ -152,10 +152,7 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     db.commit()
     db.refresh(new_session)
     
-    # 🛡️ THE FIX: Hardcoded to Nexus AI Platform
     frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app")
-    
-    # Ensure there's no trailing slash that might mess up the URL structure
     frontend_url = frontend_url.rstrip('/')
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
@@ -169,10 +166,22 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     
     return {"message": "Session created and emails queued", "session_id": new_session.id}
 
+# 🛡️ THE FIX: Enterprise Gatekeeper Endpoint (Checks 24 hours & Single-Use Lock)
 @app.get("/api/sessions/{session_id}")
 async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
-    if not session: raise HTTPException(status_code=404, detail="Interview link not found or expired.")
+    
+    if not session: 
+        raise HTTPException(status_code=404, detail="This interview link does not exist.")
+    
+    # 1. The 24-Hour Expiration Kill Switch
+    if datetime.utcnow() - session.created_at > timedelta(hours=24):
+        raise HTTPException(status_code=403, detail="This interview link has expired (24-hour limit). Please contact your recruiter.")
+        
+    # 2. The One-Time Use Strict Lock
+    if session.status != "pending":
+        raise HTTPException(status_code=403, detail="This interview session has already been attempted or completed and is now permanently locked.")
+
     return { "id": session.id, "candidate_name": session.candidate_name, "position": session.position, "job_description": session.job_description, "resume_text": session.resume_text, "interview_level": session.interview_level, "status": session.status }
 
 @app.patch("/api/sessions/{session_id}/status")
@@ -188,7 +197,6 @@ async def update_session_status(session_id: str, request: Request, background_ta
     db.commit()
 
     if session.recruiter_email:
-        # 🛡️ THE FIX: Hardcoded to Nexus AI Platform
         frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app")
         frontend_url = frontend_url.rstrip('/')
         dashboard_link = f"{frontend_url}/dashboard"
@@ -415,7 +423,6 @@ async def get_all_feedback(db: Session = Depends(get_db)):
     feedbacks = db.query(CandidateFeedback).order_by(CandidateFeedback.id.desc()).all()
     return [{"id": f.id, "candidate": f.candidate_name, "rating": f.rating, "comments": f.comments} for f in feedbacks]
 
-# 🛡️ Crash-proof type handling for Delete Feedback remains
 @app.delete("/api/feedback/{feedback_id}")
 async def delete_feedback(feedback_id: str, db: Session = Depends(get_db)):
     try:
