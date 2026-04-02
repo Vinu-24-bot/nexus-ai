@@ -125,7 +125,6 @@ export default function InterviewPage() {
   const jobDescription = state?.jobDescription || fetchedData?.jobDescription || "";
   const resume = state?.resume || fetchedData?.resume || "";
   
-  // 🛡️ THE FIX: Bulletproof Fallback Questions if the AI array fails to load!
   const rawQuestions = state?.questions || fetchedData?.questions || [];
   const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
     { id: 1, question: "Could you describe your most impactful technical project and the specific technologies you used?", category: "technical", difficulty: "medium" },
@@ -312,7 +311,6 @@ export default function InterviewPage() {
     setIsRecording(true);
   }, []);
 
-  // 🧠 UPGRADE: Extended 8-Second "Take a breath" Window
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     setIsThinking(false);
@@ -352,7 +350,6 @@ export default function InterviewPage() {
       const tLower = allFinal.toLowerCase();
       const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to") || tLower.includes("i'm done") || tLower.includes("that's it");
       
-      // Auto-submits after 8 seconds of deep silence. Perfect human pacing.
       const waitTime = isSkipping ? 1500 : 8000; 
 
       silenceTimerRef.current = setTimeout(() => {
@@ -396,7 +393,6 @@ export default function InterviewPage() {
     startSpeechRecognition();
   }, [voiceGender, startSpeechRecognition]);
 
-  // 🧠 True Human "Alex AI" Conversational Bridge
   const handleAnswerSubmit = useCallback(async () => {
     if (!isRecording) return;
     setIsRecording(false);
@@ -461,13 +457,11 @@ export default function InterviewPage() {
     setAiMessage("");
 
     if (!isSufficient) {
-        // If answer was short, the AI asked a probing follow up. STAY ON SAME QUESTION.
         setIsRecording(true);
         startSpeechRecognition();
         return; 
     }
 
-    // Move to next formal question
     setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
     setAccumulatedTranscript(""); 
 
@@ -561,7 +555,6 @@ export default function InterviewPage() {
 
       setInterviewStep("feedback");
     } catch (err: any) {
-      // Graceful fallback if evaluation API timeouts, still goes to feedback
       setInterviewStep("feedback");
     }
   }, [answers, activeQuestions, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording]);
@@ -695,6 +688,8 @@ export default function InterviewPage() {
               <ul className="space-y-3 text-sm text-muted-foreground">
                 <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Full Screen Lock:</strong> You will be forced into Full Screen. Exiting full screen flags a security warning.</li>
                 <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Screen & Camera Enforced:</strong> You must share your entire screen. Switching tabs flags a security warning.</li>
+                {/* 🛡️ THE NEW BLUETOOTH INSTRUCTION */}
+                <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Bluetooth & Audio Setup:</strong> Connect your Bluetooth earphones or headsets NOW. Changing devices after the interview begins is prohibited.</li>
                 <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Keyboard Disabled (3-Strikes):</strong> Do not touch your keyboard to access AI tools. 3 strikes and you are terminated.</li>
                 <li className="flex items-start gap-3"><CheckCircle2 className="w-5 h-5 text-primary shrink-0" /> <strong>Hands-Free Flow:</strong> The AI will listen and wait for you to finish answering naturally.</li>
               </ul>

@@ -383,3 +383,8 @@ async def compare_candidates(candidate_ids: List[str], db: Session = Depends(get
         recommended_action = f"Make an offer to {ranked[0]['candidateName']} based on superior technical alignment."
 
     return {"candidates": ranked, "total_compared": len(ranked), "enterprise_debrief_matrix": debrief_matrix, "recommended_action": recommended_action}
+@app.get("/api/feedback")
+async def get_all_feedback(db: Session = Depends(get_db)):
+    # This fetches all feedback from the database so your dashboard can display it
+    feedbacks = db.query(CandidateFeedback).order_by(CandidateFeedback.id.desc()).all()
+    return [{"candidate": f.candidate_name, "rating": f.rating, "comments": f.comments} for f in feedbacks]
