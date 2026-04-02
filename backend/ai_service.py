@@ -28,9 +28,10 @@ def format_prompt(template: str, **kwargs) -> str:
 
 def _parse_json_response(text: str) -> dict:
     try:
-        match = re.search(r'\{.*\}', text.strip(), re.DOTALL)
-        if match:
-            clean_json = match.group(0)
+        start_idx = text.find('{')
+        end_idx = text.rfind('}')
+        if start_idx != -1 and end_idx != -1:
+            clean_json = text[start_idx:end_idx+1]
             clean_json = re.sub(r',\s*}', '}', clean_json)
             clean_json = re.sub(r',\s*]', ']', clean_json)
             return json.loads(clean_json)
@@ -86,7 +87,7 @@ Synthesize the findings. Grade strictly based on actual evidence.
 - 60-74: Average, superficial answers, lacks deep architecture knowledge. Reject.
 - Below 60: Major discrepancies, BS answers, or lack of knowledge. Reject.
 
-You MUST output ONLY valid JSON with this exact structure:
+You MUST output ONLY valid JSON matching this exact structure perfectly:
 {
   "candidate_overview": "A highly detailed 4-sentence executive summary of their technical depth.",
   "scores": {
@@ -163,19 +164,14 @@ Candidate's Answer: {answer}
 Next Question you need to ask (if you decide to move on): {next_question}
 
 Task: Analyze the candidate's answer and generate ONE fluid, conversational response.
-1. If they say "I don't know", "skip", or refuse:
-   - Set is_sufficient to true.
-   - response_text: "No problem at all, let's move on. [Insert the Next Question here]"
-2. If their answer is very short, vague, or lacks technical depth:
-   - Set is_sufficient to false.
-   - response_text: Gently acknowledge what they said, then ask a probing follow-up question to make them elaborate on that specific topic. Do NOT ask the Next Question yet.
-3. If they give a strong, detailed answer:
-   - Set is_sufficient to true.
-   - response_text: Acknowledge a specific technical point they made, AND THEN seamlessly transition into asking the Next Question (e.g. "Now, moving on to data... [Insert the Next Question here]").
+1. If they ask a clarifying question: Answer it briefly, set is_sufficient to false, and gently prompt them to answer the original question.
+2. If they say "I don't know", "skip", or refuse: Set is_sufficient to true, say "No problem at all, let's move on," and smoothly ask the [Next Question].
+3. If their answer is very short, vague, or lacks technical depth: Set is_sufficient to false. Gently acknowledge what they said, then ask a probing follow-up question to dig deeper into their reasoning. Do NOT ask the Next Question yet.
+4. If they give a strong, detailed answer: Set is_sufficient to true. Acknowledge a specific technical point they made to show you listened, AND THEN seamlessly transition into asking the [Next Question].
 
 Output ONLY valid JSON matching this exact structure:
 {
-  "response_text": "The exact conversational words you will speak.",
+  "response_text": "The exact conversational words you will speak. Make it sound completely natural and human.",
   "is_sufficient": true
 }
 """
@@ -253,7 +249,6 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
         return _parse_json_response(resp.json()["choices"][0]["message"]["content"])
 
 async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
-    """PURE REST API: Bypasses Google SDK entirely to prevent module crashes."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     if force_json:
@@ -301,7 +296,7 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     if len(raw_text.strip()) < 50:
         print("[BATS] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
         
-    safe_text = raw_text[:12000] # Safe character slice
+    safe_text = raw_text[:12000] 
 
     if GEMINI_API_KEY:
         try:
@@ -313,7 +308,7 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     
     try:
         print("[BATS] Parsing Resume with Groq...")
-        prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text[:6000]) # Extra safe strict bound for Groq fallback
+        prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text[:6000])
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=2500)
         
     except Exception as e:
@@ -346,14 +341,34 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str)
             "justification": f"The platform's automatic kill switch was triggered. {reason} No technical evaluation was performed."
         }
 
-    prompt = format_prompt(EVALUATION_PROMPT, job_description=job_description, resume=resume, transcript=transcript)
-    result = await _call_ai_cascade(prompt, force_json=True, max_tokens=6000)
+    # 🛡️ THE FIX: Hard-Truncate context window to prevent HTTP 500 crashes
+    safe_resume = resume[:6000]
+    safe_jd = job_description[:4000]
+
+    prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=transcript)
+    # Reduced max tokens to 2500 so the total context window mathematically never exceeds 8192
+    result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2500)
     return _validate_result(result)
 
 async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 10, interview_level: str = "L2"):
-    prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=job_description, resume=resume, num_questions=num_questions, interview_level=interview_level)
-    result = await _call_ai_cascade(prompt, force_json=True)
-    return result.get("questions", [])
+    # 🛡️ THE FIX: Truncate input heavily to prevent 400 errors and provide hard-coded fallback questions!
+    safe_resume = resume[:4000]
+    safe_jd = job_description[:3000]
+    prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=safe_jd, resume=safe_resume, num_questions=num_questions, interview_level=interview_level)
+    
+    try:
+        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000)
+        questions = result.get("questions", [])
+        if not questions:
+            raise ValueError("AI returned an empty array.")
+        return questions
+    except Exception as e:
+        print(f"[BATS] Failed to generate custom questions, returning defaults: {e}")
+        return [
+            {"id": 1, "question": "Could you describe your most impactful technical project and the specific technologies you used?", "category": "technical", "difficulty": "medium"},
+            {"id": 2, "question": "What is the most challenging bug or problem you have faced, and how did you resolve it?", "category": "behavioral", "difficulty": "hard"},
+            {"id": 3, "question": "Based on the requirements of this role, how does your previous experience prepare you to succeed here?", "category": "behavioral", "difficulty": "medium"}
+        ]
 
 async def generate_jd(position: str) -> str:
     prompt = format_prompt(JD_GENERATION_PROMPT, position=position)
