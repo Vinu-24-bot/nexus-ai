@@ -28,7 +28,7 @@ from models import Evaluation, InterviewSession, CandidateFeedback
 from schemas import (
     EvaluationRequest, EvaluationResponse, QuestionGenerationRequest,
     JDGenerationRequest, AcknowledgmentRequest, SelectionStatusRequest,
-    ResumeUploadResponse, SessionCreateRequest, FeedbackRequest
+    ResumeUploadResponse, SessionCreateRequest, SessionStatusUpdateRequest, FeedbackRequest
 )
 from ai_service import (
     evaluate_candidate, generate_interview_questions,
@@ -108,11 +108,13 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
+# 🛡️ THE FIX: Native Universal SMTP Engine (Sends to any domain without APIs)
 def send_system_email(to_email: str, subject: str, body: str):
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
+    
     if not sender_email or not sender_password:
-        print(f"[BATS EMAIL FAIL] Missing credentials. Cannot send to {to_email}.")
+        print(f"[BATS EMAIL FAIL] Missing SENDER_EMAIL or SENDER_PASSWORD in env.")
         return
     
     msg = MIMEMultipart()
@@ -124,23 +126,17 @@ def send_system_email(to_email: str, subject: str, body: str):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
+        # TLS on Port 587 is universally accepted by all email providers (Gmail, Outlook, Custom Domains)
         server = smtplib.SMTP('smtp.gmail.com', 587, timeout=15)
         server.ehlo()
         server.starttls()
+        server.ehlo()
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS EMAIL SUCCESS] Delivered via Port 587 to: {to_email}")
-    except Exception as e1:
-        print(f"[BATS EMAIL WARNING] Port 587 failed: {e1}. Pivoting to SSL Port 465...")
-        try:
-            server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15)
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, to_email, msg.as_string())
-            server.quit()
-            print(f"[BATS EMAIL SUCCESS] Delivered via Port 465 to: {to_email}")
-        except Exception as e2:
-            print(f"[BATS EMAIL ERROR] FATAL EMAIL FAILURE to {to_email}. Error: {e2}")
+        print(f"[BATS EMAIL SUCCESS] Successfully delivered email to: {to_email}")
+    except Exception as e:
+        print(f"[BATS EMAIL ERROR] Failed to send to {to_email}. Error: {e}")
 
 @app.get("/")
 async def root():
@@ -169,9 +165,11 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
+    # Candidate receives strictly ONE email
     candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre-screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
     background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
 
+    # Recruiter receives tracking loop
     if req.recruiter_email:
         dashboard_link = f"{frontend_url}/dashboard"
         recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\n\nYou will receive automated alerts when the candidate begins and completes the assessment.\n\nAccess your command center here: {dashboard_link}"

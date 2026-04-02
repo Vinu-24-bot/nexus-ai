@@ -156,22 +156,27 @@ Output ONLY valid JSON:
 
 JD_GENERATION_PROMPT = """Generate a detailed, professional Job Description for: {position}. Output plain text only."""
 
+# 🛡️ THE FIX: Redesigned the prompt to strictly enforce natural, human-like transitions without repetitive "Thanks".
 DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS, an elite, empathetic AI technical interviewer. 
-You are conducting a live voice interview (similar to a real human).
+You are conducting a live voice interview.
 
 Question you just asked: {question}
 Candidate's Answer: {answer}
-Next Question you need to ask (if you decide to move on): {next_question}
+Next Question you need to ask: {next_question}
 
 Task: Analyze the candidate's answer and generate ONE fluid, conversational response.
-1. If they ask a clarifying question: Answer it briefly, set is_sufficient to false, and gently prompt them to answer the original question.
-2. If they say "I don't know", "skip", or refuse: Set is_sufficient to true, say "No problem at all, let's move on," and smoothly ask the [Next Question].
-3. If their answer is very short, vague, or lacks technical depth: Set is_sufficient to false. Gently acknowledge what they said, then ask a probing follow-up question to dig deeper into their reasoning. Do NOT ask the Next Question yet.
-4. If they give a strong, detailed answer: Set is_sufficient to true. Acknowledge a specific technical point they made to show you listened, AND THEN seamlessly transition into asking the [Next Question].
+1. If they ask a clarifying question: Answer it, set is_sufficient to false, and prompt them to answer the original question.
+2. If their answer is very short or lacks depth: Set is_sufficient to false. Acknowledge what they said, then ask a probing follow-up question. Do NOT ask the Next Question yet.
+3. If they give a strong answer: Set is_sufficient to true. Acknowledge a specific point they made, AND THEN seamlessly transition into asking the Next Question.
+
+CRITICAL RULES FOR REALISM:
+- NEVER say "Thank you", "Thanks for your answer", or "Great". It sounds robotic and repetitive.
+- Use natural, casual human transitions like: "Got it.", "Understood.", "Interesting approach.", "Okay, moving on.", or just ask the next question directly.
+- If the candidate's answer implies they don't know (e.g., "I don't know", "skip", "not sure"), YOU MUST SET "is_sufficient": true. Do not ask follow-ups. Just say "No problem, let's pivot," and ask the Next Question.
 
 Output ONLY valid JSON matching this exact structure:
 {
-  "response_text": "The exact conversational words you will speak. Make it sound completely natural and human.",
+  "response_text": "The exact conversational words you will speak.",
   "is_sufficient": true
 }
 """
@@ -287,25 +292,20 @@ async def _call_groq_text(prompt: str) -> str:
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"].strip()
 
-# 🛡️ THE FIX: Smart Routing Cascade to manage Tokens
 async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: int = 6000, groq_model: str = "llama-3.3-70b-versatile", prioritize_gemini: bool = False) -> dict:
     errors = []
-    
-    # If parsing a resume, use Gemini first because it has 1 Million free TPM
     if prioritize_gemini and GEMINI_API_KEY:
         try:
             return await _call_gemini(prompt, force_json=force_json)
         except Exception as e:
             errors.append(f"Gemini Error: {e}")
 
-    # Fallback to Groq
     if GROQ_API_KEY:
         try:
             return await _call_groq(prompt, force_json, max_tokens=max_tokens, groq_model=groq_model)
         except Exception as e:
             errors.append(f"Groq Error: {e}")
             
-    # If not prioritized, try Gemini last
     if not prioritize_gemini and GEMINI_API_KEY:
         try:
             return await _call_gemini(prompt, force_json=force_json)
@@ -324,7 +324,6 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
 
     try:
-        # 🛡️ THE FIX: Drop max_tokens to 1500 to save quota, prioritize Gemini, and use 8B Groq model as backup
         print("[BATS] Parsing Resume with Smart Token Routing...")
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.1-8b-instant", prioritize_gemini=True)
         
@@ -332,7 +331,6 @@ async def parse_resume_to_json(raw_text: str) -> dict:
         error_msg = str(e).replace('"', "'")
         print(f"[BATS] FATAL Parsing Error: {error_msg}")
         
-        # We only show the fallback if they absolutely nuke the API limits completely
         if "429" in error_msg:
             return {
                 "candidate_info": {"name": "Candidate (API Busy)", "email": "api-rate-limit@system", "phone": "N/A", "links": []},
@@ -373,8 +371,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str)
     safe_jd = job_description[:4000]
 
     prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=transcript)
-    
-    # 🛡️ Evaluation uses the massive 70B model for accuracy, but limits output tokens to prevent 429
     result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
     return _validate_result(result)
 
@@ -412,4 +408,4 @@ async def get_answer_acknowledgment(question: str, answer: str, next_question: s
     try:
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=800, groq_model="llama-3.1-8b-instant")
     except Exception as e:
-        return {"response_text": f"Thank you for that context. Let's move on. {next_q_text}", "is_sufficient": True}
+        return {"response_text": f"Got it. Let's move on. {next_q_text}", "is_sufficient": True}

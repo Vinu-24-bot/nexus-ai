@@ -23,7 +23,7 @@ const CandidateHeader = ({ isLive }: { isLive: boolean }) => (
     <div className="container mx-auto px-6 h-16 flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Brain className="w-6 h-6 text-primary" />
-        <span className="font-display text-lg font-bold tracking-wider text-foreground">BATS GeniusHub</span>
+        <span className="font-display text-lg font-bold tracking-wider text-foreground">BATS ForgePro</span>
       </div>
       {isLive ? (
         <div className="flex items-center gap-2 text-xs font-bold text-destructive animate-pulse tracking-widest">
@@ -351,7 +351,7 @@ export default function InterviewPage() {
       totalTimerRef.current = setInterval(() => setTotalElapsed((t) => t + 1), 1000);
       
       setTimeout(async () => {
-        const introText = `Hello ${candidateName}, welcome to your interview for the ${position} role. I am your GeniusHub AI interviewer. Your screen and camera are securely shared. Please answer to the point. Only relevant, short, and crisp answers are required due to time boundations, otherwise your score will be decreased if you don't manage to answer all questions within the time frame alloted. Let's start by having you introduce yourself.`;
+        const introText = `Hello ${candidateName}, welcome to your interview for the ${position} role. I am your BATS ForgePro AI interviewer. Your screen and camera are securely shared. Please answer to the point. Only relevant, short, and crisp answers are required due to time boundations. Let's start by having you introduce yourself.`;
         await speakAndRecord(introText);
       }, 800);
     } catch (err) { toast.error("Failed to enter Full Screen. Please click again."); }
@@ -373,6 +373,15 @@ export default function InterviewPage() {
         recorder.stop();
       } else { resolve(new Blob()); }
     });
+  }, []);
+
+  const startMediaRecorder = useCallback((stream: MediaStream) => {
+    const mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+    chunksRef.current = [];
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    mediaRecorderRef.current = mediaRecorder;
+    mediaRecorder.start(1000);
+    setIsRecording(true);
   }, []);
 
   const startSpeechRecognition = useCallback(() => {
@@ -412,7 +421,7 @@ export default function InterviewPage() {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       
       const tLower = allFinal.toLowerCase();
-      const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to") || tLower.includes("i'm done") || tLower.includes("that's it");
+      const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to") || tLower.includes("i'm done") || tLower.includes("that's it") || tLower.includes("no idea") || tLower.includes("not sure");
       
       const waitTime = isSkipping ? 1500 : 8000; 
 
@@ -467,7 +476,10 @@ export default function InterviewPage() {
 
     const hasAnswered = newTranscriptChunk.trim().length > 2;
     const tLower = newTranscriptChunk.toLowerCase();
+    
     const wantsRepeat = tLower.includes("repeat") || tLower.includes("pardon") || (tLower.length < 25 && tLower.includes("sorry"));
+    // 🛡️ THE FIX: Frontend Skip Detection
+    const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("can't recall") || tLower.includes("don't want to") || tLower.includes("not sure") || tLower.includes("no idea");
 
     if (wantsRepeat && !introPhase && currentQuestion) {
       setIsSpeaking(true);
@@ -490,12 +502,16 @@ export default function InterviewPage() {
     
     let nextIndex = introPhase ? 0 : currentQ + 1;
     let nextQData = finalQuestionsList[nextIndex];
-    let nextQText = nextQData ? nextQData.question : "Thank the candidate, we have finished all the technical questions.";
+    let nextQText = nextQData ? nextQData.question : "Okay, that concludes all the technical questions.";
 
     let dynamicResponse = "Got it. Let's move on.";
     let isSufficient = true;
 
-    if (hasAnswered) {
+    // 🛡️ THE FIX: Skip the AI entirely if they say "I don't know" to prevent infinite loops!
+    if (isSkipping && !introPhase) {
+        dynamicResponse = "Okay, no worries. Let's move on to the next one. " + nextQText;
+        isSufficient = true;
+    } else if (hasAnswered) {
         try {
             const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
@@ -506,10 +522,10 @@ export default function InterviewPage() {
                 })
             });
             const ackData = await ackRes.json();
-            dynamicResponse = ackData.response_text || ackData.acknowledgment || ("Thank you. " + nextQText);
+            dynamicResponse = ackData.response_text || ackData.acknowledgment || ("Okay. " + nextQText);
             isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
         } catch (err) {
-            dynamicResponse = "Thank you for that explanation. " + nextQText;
+            dynamicResponse = "Understood. " + nextQText;
         }
     } else {
         dynamicResponse = "I didn't quite catch that, but let's move forward anyway. " + nextQText;
@@ -577,7 +593,6 @@ export default function InterviewPage() {
     setIsSpeaking(false);
     setAiMessage("");
 
-    // 🛡️ THE SPECIFIC FIX: We are now passing the termination remarks directly to the backend
     if (sessionId) {
       fetch(`${API_URL}/sessions/${sessionId}/status`, { 
         method: "PATCH", headers: { "Content-Type": "application/json" }, 
@@ -698,7 +713,7 @@ export default function InterviewPage() {
             </p>
             {!feedbackSubmitted && !isCheat ? (
               <div className="glass rounded-xl p-8 text-left space-y-6 mt-8">
-                <h3 className="text-xl font-semibold text-center">How was your GeniusHub interview experience?</h3>
+                <h3 className="text-xl font-semibold text-center">How was your ForgePro interview experience?</h3>
                 <div className="flex justify-center gap-2">
                   {[1,2,3,4,5].map((star) => (
                     <Star key={star} onClick={() => setRating(star)} className={`w-10 h-10 cursor-pointer transition-colors ${rating >= star ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground"}`} />
@@ -798,7 +813,7 @@ export default function InterviewPage() {
           
           {aiMessage && isSpeaking && (
             <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-4 border-l-4 border-nexus-amber">
-              <div className="flex items-center gap-2 mb-2"><Volume2 className="w-4 h-4 text-nexus-amber animate-pulse" /><span className="text-xs font-semibold text-nexus-amber uppercase tracking-wider">GeniusHub Interviewer</span></div>
+              <div className="flex items-center gap-2 mb-2"><Volume2 className="w-4 h-4 text-nexus-amber animate-pulse" /><span className="text-xs font-semibold text-nexus-amber uppercase tracking-wider">ForgePro Interviewer</span></div>
               <p className="text-sm text-foreground leading-relaxed">{aiMessage}</p>
             </motion.div>
           )}
