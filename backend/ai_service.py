@@ -219,7 +219,7 @@ Raw Resume Text:
 {raw_text}
 """
 
-# ─── BULLETPROOF REST API CALLS (WITH AUTO-RETRY) ───
+# ─── EXPONENTIAL BACKOFF API CALLS ───
 
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
@@ -233,7 +233,7 @@ async def transcribe_audio(file_path: str) -> str:
             return resp.text
 
 async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000) -> dict:
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=90) as client:
         payload = {
             "model": "llama-3.3-70b-versatile", 
             "messages": [{"role": "user", "content": prompt}], 
@@ -243,12 +243,14 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
         if force_json: payload["response_format"] = {"type": "json_object"}
             
         url = "https://api.groq.com/openai/v1/chat/completions"
-        # 🛡️ THE FIX: Auto-Retry Engine for 429 Too Many Requests
-        for attempt in range(2):
+        
+        # 🛡️ THE FIX: Smart 3-tier Exponential Backoff for Groq
+        for attempt in range(3):
             resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
-            if resp.status_code == 429 and attempt == 0:
-                print("[BATS] Groq 429 Rate Limit hit. Pausing 4 seconds and retrying...")
-                await asyncio.sleep(4)
+            if resp.status_code == 429 and attempt < 2:
+                wait_time = (attempt + 1) * 5  # Waits 5s, then 10s
+                print(f"[BATS] Groq 429 Limit hit. Holding breath for {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
                 continue
             resp.raise_for_status()
             if force_json: return json.loads(resp.json()["choices"][0]["message"]["content"])
@@ -260,13 +262,14 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
     if force_json:
         payload["generationConfig"] = {"responseMimeType": "application/json"}
         
-    async with httpx.AsyncClient(timeout=60) as client:
-        # 🛡️ THE FIX: Auto-Retry Engine for 429 Too Many Requests
-        for attempt in range(2):
+    async with httpx.AsyncClient(timeout=90) as client:
+        # 🛡️ THE FIX: Smart 3-tier Exponential Backoff for Gemini
+        for attempt in range(3):
             resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
-            if resp.status_code == 429 and attempt == 0:
-                print("[BATS] Gemini 429 Rate Limit hit. Pausing 4 seconds and retrying...")
-                await asyncio.sleep(4)
+            if resp.status_code == 429 and attempt < 2:
+                wait_time = (attempt + 1) * 5  # Waits 5s, then 10s
+                print(f"[BATS] Gemini 429 Limit hit. Holding breath for {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
                 continue
             resp.raise_for_status()
             content = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -274,16 +277,16 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
             return _parse_json_response(content)
 
 async def _call_groq_text(prompt: str) -> str:
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         url = "https://api.groq.com/openai/v1/chat/completions"
-        for attempt in range(2):
+        for attempt in range(3):
             resp = await client.post(
                 url, 
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, 
                 json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 1000}
             )
-            if resp.status_code == 429 and attempt == 0:
-                await asyncio.sleep(4)
+            if resp.status_code == 429 and attempt < 2:
+                await asyncio.sleep(5)
                 continue
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"].strip()
@@ -331,7 +334,6 @@ async def parse_resume_to_json(raw_text: str) -> dict:
         error_msg = str(e).replace('"', "'")
         print(f"[BATS] FATAL Parsing Error: {error_msg}")
         
-        # 🛡️ THE EMERGENCY BYPASS: If API is 100% blocked, provide a Graceful Stand-In so the user is NEVER blocked from the interview.
         if "429" in error_msg:
             return {
                 "candidate_info": {"name": "Candidate (API Busy)", "email": "api-rate-limit@system", "phone": "N/A", "links": []},
