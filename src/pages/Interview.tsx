@@ -75,7 +75,6 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
   });
 }
 
-// 🛡️ THE FIX: Enterprise Audio Mixer (Combines Mic + AI System Audio into one recording)
 const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | null) => {
   try {
     const ctx = new window.AudioContext();
@@ -141,25 +140,50 @@ export default function InterviewPage() {
 
   const isTerminatingRef = useRef(false);
 
+  // 🛡️ UX FIX: Dynamic Loading Statuses
+  const [submitStatusIndex, setSubmitStatusIndex] = useState(0);
+  const submitStatuses = [
+    "Securely Uploading Encrypted Session...",
+    "Transcribing Audio to Text...",
+    "AI Analyzing Technical Depth & Alignment...",
+    "Cross-referencing Answers with Job Description...",
+    "Finalizing Enterprise Report..."
+  ];
+
+  useEffect(() => {
+    if (interviewStep === "submitting") {
+      const interval = setInterval(() => {
+        setSubmitStatusIndex(prev => Math.min(prev + 1, submitStatuses.length - 1));
+      }, 8000);
+      return () => clearInterval(interval);
+    }
+  }, [interviewStep]);
+
   const candidateName = state?.candidateName || fetchedData?.candidateName || "";
   const position = state?.position || fetchedData?.position || "";
   const jobDescription = state?.jobDescription || fetchedData?.jobDescription || "";
   const resume = state?.resume || fetchedData?.resume || "";
+  const durationMinutes = state?.durationMinutes || fetchedData?.durationMinutes || 10;
   
+  // 🛡️ THE FIX: 6 Question Fallback Array for 10 Min interviews
   const rawQuestions = state?.questions || fetchedData?.questions || [];
   const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
-    { id: 1, question: "Could you describe your most impactful technical project and the specific technologies you used?", category: "technical", difficulty: "medium" },
-    { id: 2, question: "What is the most challenging bug or problem you have faced, and how did you resolve it?", category: "behavioral", difficulty: "hard" },
-    { id: 3, question: "Based on the requirements of this role, how does your previous experience prepare you to succeed here?", category: "behavioral", difficulty: "medium" }
+    { id: 1, question: "Could you briefly describe your most impactful project and the core technologies used?", category: "technical", difficulty: "medium" },
+    { id: 2, question: "What is the most challenging bug you've faced recently, and how did you resolve it?", category: "behavioral", difficulty: "hard" },
+    { id: 3, question: "How does your specific experience align with the core requirements of this role?", category: "behavioral", difficulty: "medium" },
+    { id: 4, question: "Can you explain a time you had to optimize a system or process for better performance?", category: "technical", difficulty: "hard" },
+    { id: 5, question: "How do you handle disagreements on technical decisions within a team?", category: "behavioral", difficulty: "medium" },
+    { id: 6, question: "Where do you see your technical skills adding the most immediate value to our team?", category: "situational", difficulty: "medium" }
   ];
 
   const voiceGender = state?.voiceGender || fetchedData?.voiceGender || "female";
   
-  // 🛡️ THE FIX: Hard defaults to 10 Minutes if not specified otherwise
-  const durationMinutes = state?.durationMinutes || fetchedData?.durationMinutes || 10;
-  
-  const totalQuestions = activeQuestions.length;
-  const currentQuestion = introPhase ? null : (activeQuestions[currentQ] || null);
+  // Only slice the array based on actual time remaining/duration calculation
+  const calculatedQuestionTarget = durationMinutes === 10 ? 6 : durationMinutes === 15 ? 8 : 10;
+  const finalQuestionsList = activeQuestions.slice(0, calculatedQuestionTarget);
+
+  const totalQuestions = finalQuestionsList.length;
+  const currentQuestion = introPhase ? null : (finalQuestionsList[currentQ] || null);
   const progress = totalQuestions > 0 ? (Math.max(0, currentQ) / totalQuestions) * 100 : 0;
   const timeRemaining = (durationMinutes * 60) - totalElapsed;
 
@@ -170,9 +194,13 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Link expired");
           const session = await res.json();
+          
+          // Dynamic calculation for Backend Request
+          const targetQCount = session.duration_minutes === 10 ? 6 : session.duration_minutes === 15 ? 8 : 10;
+          
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: 8, interview_level: session.interview_level || "L2 (Mid-Level)" })
+            body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: targetQCount, interview_level: session.interview_level || "L2 (Mid-Level)" })
           });
           const qData = await qRes.json();
           setFetchedData({ 
@@ -182,7 +210,7 @@ export default function InterviewPage() {
             resume: session.resume_text, 
             questions: qData.questions, 
             voiceGender: "female", 
-            durationMinutes: session.duration_minutes || 10 // Guaranteed 10 min fallback sync
+            durationMinutes: session.duration_minutes || 10
           });
         } catch (err) {
           toast.error("Invalid or expired session link.");
@@ -245,7 +273,6 @@ export default function InterviewPage() {
       if (allowedKeys.includes(e.key) || isTerminatingRef.current) {
         return; 
       }
-
       e.preventDefault(); 
       handleSecurityViolation("Keyboard usage is disabled");
     };
@@ -273,18 +300,14 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation]);
 
-  // 🛡️ THE FIX: Strict Permissions Enforcer 
   const requestPermissions = async () => {
     try {
       const avStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: "user" }, audio: true });
-      
-      // Requesting Audio alongside the Screen
       const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "monitor" }, audio: true });
       
       const videoTrack = screenStream.getVideoTracks()[0];
       const settings = videoTrack.getSettings();
       
-      // Rule 1: Must be Entire Screen
       if (settings.displaySurface && settings.displaySurface !== "monitor") {
         avStream.getTracks().forEach(t => t.stop());
         screenStream.getTracks().forEach(t => t.stop());
@@ -292,7 +315,6 @@ export default function InterviewPage() {
         return; 
       }
 
-      // Rule 2: MUST share System Audio
       if (screenStream.getAudioTracks().length === 0) {
         avStream.getTracks().forEach(t => t.stop());
         screenStream.getTracks().forEach(t => t.stop());
@@ -322,7 +344,6 @@ export default function InterviewPage() {
         fetch(`${API_URL}/sessions/${sessionId}/status`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "started" }), keepalive: true }).catch(()=>{});
       }
       
-      // 🛡️ THE FIX: Master Recording Stream combining Camera + Mixed Audio
       const combinedStream = new MediaStream();
       streamRef.current?.getVideoTracks().forEach(track => combinedStream.addTrack(track));
       const mixedAudio = mixAudioStreams(streamRef.current, screenStreamRef.current);
@@ -331,10 +352,8 @@ export default function InterviewPage() {
       }
 
       startFullRecording(combinedStream);
-      
       totalTimerRef.current = setInterval(() => setTotalElapsed((t) => t + 1), 1000);
       
-      // 🛡️ THE FIX: Added strict time-boundation instructions to AI Intro
       setTimeout(async () => {
         const introText = `Hello ${candidateName}, welcome to your interview for the ${position} role. I am your GeniusHub AI interviewer. Your screen and camera are securely shared. Please answer to the point. Only relevant, short, and crisp answers are required due to time boundations, otherwise your score will be decreased if you don't manage to answer all questions within the time frame alloted. Let's start by having you introduce yourself.`;
         await speakAndRecord(introText);
@@ -483,7 +502,7 @@ export default function InterviewPage() {
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
     
     let nextIndex = introPhase ? 0 : currentQ + 1;
-    let nextQData = activeQuestions[nextIndex];
+    let nextQData = finalQuestionsList[nextIndex];
     let nextQText = nextQData ? nextQData.question : "Thank the candidate, we have finished all the technical questions.";
 
     let dynamicResponse = "Got it. Let's move on.";
@@ -538,13 +557,18 @@ export default function InterviewPage() {
     } else {
       finalizeInterviewAndUpload();
     }
-  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, activeQuestions, voiceGender, startSpeechRecognition]);
+  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, finalQuestionsList, voiceGender, startSpeechRecognition]);
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
+    // 🛡️ THE FIX: Set Termination Ref TRUE instantly so exitFullscreen doesn't trigger Anti-Cheat
+    isTerminatingRef.current = true;
+    
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
     const fullBlob = await stopFullRecording();
 
-    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(()=>{});
+    }
     if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
     if (videoRef.current) videoRef.current.srcObject = null;
@@ -585,7 +609,7 @@ export default function InterviewPage() {
 
       let fullTranscript = questionAnswers.map((a, i) => {
         if (a.questionId === 0) return `Introduction:\nCandidate: ${a.transcript}`;
-        const q = activeQuestions.find((q) => q.id === a.questionId);
+        const q = finalQuestionsList.find((q) => q.id === a.questionId);
         return `Q${i} [${q?.difficulty || "Medium"}]: ${q?.question || "Unknown"}\nA${i}: ${a.transcript}`;
       }).join("\n\n");
 
@@ -615,7 +639,7 @@ export default function InterviewPage() {
     } catch (err: any) {
       setInterviewStep("feedback");
     }
-  }, [answers, activeQuestions, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording]);
+  }, [answers, finalQuestionsList, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording]);
 
   const handleForceEndInterview = async (isEarlyLeave = false, reason = "") => {
     if (isTerminatingRef.current) return;
@@ -657,8 +681,9 @@ export default function InterviewPage() {
       <div className="min-h-screen bg-background flex flex-col items-center justify-center space-y-6">
         <CandidateHeader isLive={false} />
         <Loader2 className="w-16 h-16 text-primary animate-spin mt-16" />
-        <h2 className="text-2xl font-bold">Evaluating Session...</h2>
-        <p className="text-muted-foreground">Please do not close this tab. AI is calculating your results.</p>
+        {/* 🛡️ THE FIX: Displaying dynamic status updates to make wait feel faster */}
+        <h2 className="text-2xl font-bold">{submitStatuses[submitStatusIndex]}</h2>
+        <p className="text-muted-foreground">Please do not close this tab. AI is compiling your results.</p>
       </div>
     );
   }

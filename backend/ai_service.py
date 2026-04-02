@@ -28,10 +28,9 @@ def format_prompt(template: str, **kwargs) -> str:
 
 def _parse_json_response(text: str) -> dict:
     try:
-        start_idx = text.find('{')
-        end_idx = text.rfind('}')
-        if start_idx != -1 and end_idx != -1:
-            clean_json = text[start_idx:end_idx+1]
+        match = re.search(r'\{.*\}', text.strip(), re.DOTALL)
+        if match:
+            clean_json = match.group(0)
             clean_json = re.sub(r',\s*}', '}', clean_json)
             clean_json = re.sub(r',\s*]', ']', clean_json)
             return json.loads(clean_json)
@@ -123,7 +122,7 @@ You MUST output ONLY valid JSON matching this exact structure perfectly:
 """
 
 QUESTION_GENERATION_PROMPT = """You are "BATS", an elite AI technical interviewer.
-Analyze BOTH the Job Description AND the Candidate's Resume to generate {num_questions} highly unique, targeted questions.
+Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY {num_questions} highly unique, targeted questions.
 
 The target difficulty level is: {interview_level}.
 
@@ -134,6 +133,7 @@ RULES:
 4. At least 25% must be JD-specific technical questions.
 5. Force the candidate to explain the "HOW" and "WHY" behind their exact resume claims.
 6. Ensure no questions repeat for this candidate.
+7. 🛡️ CRITICAL TIME CONSTRAINT: This is a fast-paced interview. Questions MUST be direct, highly relevant, and designed so the candidate can provide crisp, concise answers within 60-90 seconds. Do not ask overly broad questions that require 5 minutes to answer.
 
 Output ONLY valid JSON:
 {
@@ -341,17 +341,14 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str)
             "justification": f"The platform's automatic kill switch was triggered. {reason} No technical evaluation was performed."
         }
 
-    # 🛡️ THE FIX: Hard-Truncate context window to prevent HTTP 500 crashes
     safe_resume = resume[:6000]
     safe_jd = job_description[:4000]
 
     prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=transcript)
-    # Reduced max tokens to 2500 so the total context window mathematically never exceeds 8192
     result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2500)
     return _validate_result(result)
 
 async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 10, interview_level: str = "L2"):
-    # 🛡️ THE FIX: Truncate input heavily to prevent 400 errors and provide hard-coded fallback questions!
     safe_resume = resume[:4000]
     safe_jd = job_description[:3000]
     prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=safe_jd, resume=safe_resume, num_questions=num_questions, interview_level=interview_level)
@@ -364,10 +361,16 @@ async def generate_interview_questions(job_description: str, resume: str, num_qu
         return questions
     except Exception as e:
         print(f"[BATS] Failed to generate custom questions, returning defaults: {e}")
+        # 🛡️ THE FIX: Dynamic array of fallbacks will be handled strictly by frontend map length, providing a rich buffer here
         return [
-            {"id": 1, "question": "Could you describe your most impactful technical project and the specific technologies you used?", "category": "technical", "difficulty": "medium"},
-            {"id": 2, "question": "What is the most challenging bug or problem you have faced, and how did you resolve it?", "category": "behavioral", "difficulty": "hard"},
-            {"id": 3, "question": "Based on the requirements of this role, how does your previous experience prepare you to succeed here?", "category": "behavioral", "difficulty": "medium"}
+            {"id": 1, "question": "Could you briefly describe your most impactful project and the core technologies used?", "category": "technical", "difficulty": "medium"},
+            {"id": 2, "question": "What is the most challenging bug you've faced recently, and how did you resolve it?", "category": "behavioral", "difficulty": "hard"},
+            {"id": 3, "question": "How does your specific experience align with the core requirements of this role?", "category": "behavioral", "difficulty": "medium"},
+            {"id": 4, "question": "Can you explain a time you had to optimize a system or process for better performance?", "category": "technical", "difficulty": "hard"},
+            {"id": 5, "question": "How do you handle disagreements on technical decisions within a team?", "category": "behavioral", "difficulty": "medium"},
+            {"id": 6, "question": "Where do you see your technical skills adding the most immediate value to our team?", "category": "situational", "difficulty": "medium"},
+            {"id": 7, "question": "Tell me about a time you had to learn a new technology quickly to deliver a project.", "category": "situational", "difficulty": "hard"},
+            {"id": 8, "question": "How do you ensure the code you write is maintainable and scalable?", "category": "technical", "difficulty": "medium"}
         ]
 
 async def generate_jd(position: str) -> str:
