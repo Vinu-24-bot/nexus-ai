@@ -12,7 +12,7 @@ import {
   MessageSquare, Trash2, Pin, Star, LayoutDashboard
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner"; // Added for feedback notifications
+import { toast } from "sonner";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api";
 
@@ -41,7 +41,6 @@ export default function DashboardPage() {
   const [statsData, setStatsData] = useState<any>(null);
   const [debriefMatrix, setDebriefMatrix] = useState<any>(null);
 
-  // ─── NEW STATE FOR FEEDBACK CONTROL CENTER ───
   const [activeTab, setActiveTab] = useState<"overview" | "feedback">("overview");
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
   const [pinnedFeedbacks, setPinnedFeedbacks] = useState<number[]>([]);
@@ -74,7 +73,6 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // ─── NEW FUNCTION: Fetch Feedbacks independently ───
   const fetchFeedbacks = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/feedback`);
@@ -88,7 +86,6 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    // Load pinned statuses from browser memory
     const savedPins = localStorage.getItem("bats_pinned_feedbacks");
     if (savedPins) setPinnedFeedbacks(JSON.parse(savedPins));
 
@@ -103,7 +100,6 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [fetchData, fetchFeedbacks]);
 
-  // ─── FEEDBACK CONTROL ACTIONS ───
   const togglePin = (id: number) => {
     setPinnedFeedbacks(prev => {
       const newPins = prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id];
@@ -112,19 +108,26 @@ export default function DashboardPage() {
     });
   };
 
+  // 🛡️ THE FIX: Optimistic UI updates & Event Bubbling protection
   const deleteFeedback = async (id: number) => {
+    // Instantly remove from screen so it feels perfectly smooth and responsive
+    setFeedbacks(prev => prev.filter(f => f.id !== id));
+    
     try {
       const res = await fetch(`${API_URL}/feedback/${id}`, { method: "DELETE" });
       if (res.ok) {
-        setFeedbacks(prev => prev.filter(f => f.id !== id));
         toast.success("Feedback permanently deleted.");
+      } else {
+        // If the server fails for some reason, silently fetch the real data back
+        fetchFeedbacks(); 
+        toast.error("Server failed to delete feedback.");
       }
     } catch (err) {
-      toast.error("Failed to delete feedback.");
+      fetchFeedbacks();
+      toast.error("Network error while deleting feedback.");
     }
   };
 
-  // Sort feedbacks: Pinned items always float to the top
   const sortedFeedbacks = [...feedbacks].sort((a, b) => {
     const aPinned = pinnedFeedbacks.includes(a.id);
     const bPinned = pinnedFeedbacks.includes(b.id);
@@ -147,7 +150,6 @@ export default function DashboardPage() {
       <div className="container mx-auto px-6 pt-24 max-w-6xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
           
-          {/* Header Section */}
           <motion.div variants={fadeUp} custom={0} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">Enterprise Dashboard</h1>
@@ -169,7 +171,6 @@ export default function DashboardPage() {
             </div>
           </motion.div>
 
-          {/* ─── ENTERPRISE TAB NAVIGATION ─── */}
           <div className="flex items-center gap-4 border-b border-border/50 pb-4 mt-6">
             <button 
               onClick={() => setActiveTab("overview")}
@@ -191,7 +192,6 @@ export default function DashboardPage() {
           </div>
 
           <AnimatePresence mode="wait">
-            {/* ─── TAB 1: OVERVIEW & ANALYTICS (Your Original Code) ─── */}
             {activeTab === "overview" && (
               <motion.div key="overview" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8">
                 
@@ -332,7 +332,6 @@ export default function DashboardPage() {
               </motion.div>
             )}
 
-            {/* ─── TAB 2: CANDIDATE FEEDBACK CENTER ─── */}
             {activeTab === "feedback" && (
               <motion.div key="feedback" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
                 {sortedFeedbacks.length === 0 ? (
@@ -358,17 +357,25 @@ export default function DashboardPage() {
                             </div>
                           </div>
                           
-                          {/* Control Buttons */}
                           <div className="flex items-center gap-2">
                             <button 
-                              onClick={() => togglePin(feedback.id)} 
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                togglePin(feedback.id);
+                              }} 
                               title="Pin this feedback"
                               className={`p-2 rounded-md transition-colors ${isPinned ? 'bg-yellow-500/20 text-yellow-500 hover:bg-yellow-500/30' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                             >
                               <Pin className="w-4 h-4" />
                             </button>
+                            {/* 🛡️ THE FIX: Added preventDefault and stopPropagation so it doesn't get blocked */}
                             <button 
-                              onClick={() => deleteFeedback(feedback.id)} 
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                deleteFeedback(feedback.id);
+                              }} 
                               title="Delete permanently"
                               className="p-2 rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
                             >
