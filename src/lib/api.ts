@@ -12,21 +12,45 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 // Track backend status
 let backendOnline: boolean | null = null;
 let lastHealthCheck = 0;
-const HEALTH_CHECK_INTERVAL = 30000; // 30s
+const HEALTH_CHECK_INTERVAL = 30000; // 30s cache
 
-export async function checkBackendHealth(): Promise<boolean> {
+// 🛡️ THE FIX: Enterprise Polling Engine to handle Render's 50-second wake-up delay
+export async function checkBackendHealth(forceWakeup = false): Promise<boolean> {
   const now = Date.now();
-  if (backendOnline !== null && now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
+  
+  // Return cached true if checked recently, unless forcing a wake up
+  if (!forceWakeup && backendOnline !== null && now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
     return backendOnline;
   }
-  try {
-    const res = await fetch(`${API_BASE}/`, { signal: AbortSignal.timeout(3000) });
-    backendOnline = res.ok;
-  } catch {
-    backendOnline = false;
+
+  const maxRetries = 8; // 8 attempts
+  const delayBetweenRetries = 5000; // 5 seconds (Total ~40 seconds of patience)
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      // 🛡️ THE FIX: Replaced the strict 3s timeout with a patient 10s timeout per ping
+      const res = await fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(10000) });
+      if (res.ok) {
+        backendOnline = true;
+        lastHealthCheck = Date.now();
+        console.log("[BATS] Backend is awake and online!");
+        return true;
+      }
+    } catch (err) {
+      console.warn(`[BATS] Backend asleep/starting up. Attempt ${i + 1}/${maxRetries}... Waiting...`);
+    }
+    
+    // If it's not the last attempt, wait 5 seconds before trying again
+    if (i < maxRetries - 1) {
+      await new Promise(resolve => setTimeout(resolve, delayBetweenRetries));
+    }
   }
-  lastHealthCheck = now;
-  return backendOnline;
+
+  // Only fail if it completely ignores 8 consecutive pings over 40 seconds
+  console.error("[BATS] Backend failed to wake up after maximum polling attempts.");
+  backendOnline = false;
+  lastHealthCheck = Date.now();
+  return false;
 }
 
 export function getBackendStatus(): boolean | null {
@@ -90,7 +114,7 @@ export async function getAcknowledgment(question: string, answer: string): Promi
     });
     if (!res.ok) return "Thank you. Let's continue.";
     const data = await res.json();
-    return data.acknowledgment;
+    return data.response_text || data.acknowledgment || "Thank you. Let's continue.";
   } catch {
     return "Thank you for your answer. Let's move on.";
   }
@@ -98,7 +122,8 @@ export async function getAcknowledgment(question: string, answer: string): Promi
 
 export async function submitEvaluation(payload: EvaluationPayload) {
   try {
-    const online = await checkBackendHealth();
+    // 🛡️ THE FIX: Force a patient health check before submitting to ensure we don't crash
+    const online = await checkBackendHealth(true); 
     if (!online) throw new Error("Backend offline");
 
     const res = await fetch(`${API_BASE}/api/evaluate`, {
