@@ -8,9 +8,7 @@ import json
 import shutil
 import hashlib
 import subprocess
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import httpx
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -107,28 +105,29 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
-# 🛡️ THE FIX: Restored the exact, pure SMTP 465 code that you confirmed was working perfectly earlier today.
+# 🛡️ THE PERFECT FIX: Unblockable Google Apps Script Webhook
 def send_system_email(to_email: str, subject: str, body: str):
-    sender_email = os.getenv("SENDER_EMAIL")
-    sender_password = os.getenv("SENDER_PASSWORD")
-    if not sender_email or not sender_password:
-        print(f"[BATS EMAIL FAIL] Missing SENDER_EMAIL or SENDER_PASSWORD in env.")
+    gas_url = os.getenv("GOOGLE_SCRIPT_URL")
+    if not gas_url:
+        print(f"[BATS EMAIL FATAL] Missing GOOGLE_SCRIPT_URL. Cannot send to {to_email}.")
         return
-    
-    msg = MIMEMultipart()
-    msg['From'] = f"BATS ForgePro Recruitment <{sender_email}>"
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
+
+    payload = {
+        "to": to_email,
+        "subject": subject,
+        "body": body
+    }
 
     try:
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=15)
-        server.login(sender_email, sender_password)
-        server.sendmail(sender_email, to_email, msg.as_string())
-        server.quit()
-        print(f"[BATS EMAIL SUCCESS] Successfully delivered email to: {to_email}")
+        # Standard HTTP POST on Port 443 - Render cannot block this, and corporate firewalls trust Google.
+        with httpx.Client(timeout=15.0) as client:
+            response = client.post(gas_url, json=payload)
+            if response.status_code == 200:
+                print(f"[BATS EMAIL SUCCESS] Delivered via Google Webhook to: {to_email}")
+            else:
+                print(f"[BATS EMAIL WARNING] Google Webhook returned: {response.status_code} - {response.text}")
     except Exception as e:
-        print(f"[BATS EMAIL ERROR] Failed to send to {to_email}. Error: {e}")
+        print(f"[BATS EMAIL CRASH] Webhook Request failed: {e}")
 
 @app.get("/")
 async def root():
@@ -157,11 +156,11 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
-    # 🛡️ Candidate receives ONLY ONE EMAIL
-    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
+    # Candidate receives ONLY ONE email (ForgePro branding)
+    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre-screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
     background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
 
-    # 🛡️ Recruiter gets tracking alerts
+    # Recruiter gets the creation alert
     if req.recruiter_email:
         dashboard_link = f"{frontend_url}/dashboard"
         recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\n\nYou will receive automated alerts when the candidate begins and completes the assessment.\n\nAccess your command center here: {dashboard_link}"
@@ -187,7 +186,7 @@ async def update_session_status(session_id: str, request: Request, background_ta
     session.status = status
     db.commit()
 
-    # 🛡️ Recruiter gets dynamically notified based on submission vs. termination
+    # Recruiter ONLY tracking loop
     if session.recruiter_email:
         frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
         dashboard_link = f"{frontend_url}/dashboard"
