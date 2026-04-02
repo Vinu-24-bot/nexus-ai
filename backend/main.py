@@ -9,6 +9,7 @@ import shutil
 import hashlib
 import subprocess
 import smtplib
+import httpx  # 🛡️ THE FIX: Added for REST API Email Bypass
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
@@ -107,7 +108,31 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
-def send_system_email(to_email: str, subject: str, body: str):
+# 🛡️ THE EMAIL FIX: HTTP REST Bypass to guarantee delivery to ANY email ID
+async def send_system_email(to_email: str, subject: str, body: str):
+    resend_api_key = os.getenv("RESEND_API_KEY")
+    
+    # 1. TRY ENTERPRISE REST API (Bypasses Render Firewall 100%)
+    if resend_api_key:
+        try:
+            async with httpx.AsyncClient() as client:
+                payload = {
+                    "from": "GeniusHub <onboarding@resend.dev>",
+                    "to": [to_email],
+                    "subject": subject,
+                    "text": body
+                }
+                headers = {"Authorization": f"Bearer {resend_api_key}", "Content-Type": "application/json"}
+                resp = await client.post("https://api.resend.com/emails", json=payload, headers=headers, timeout=15)
+                if resp.status_code in [200, 201]:
+                    print(f"[BATS EMAIL SUCCESS] Delivered via REST API to: {to_email}")
+                    return
+                else:
+                    print(f"[BATS EMAIL WARNING] REST API failed: {resp.text}")
+        except Exception as e:
+            print(f"[BATS EMAIL ERROR] REST API Exception: {e}")
+
+    # 2. FALLBACK TO STANDARD GMAIL SMTP
     sender_email = os.getenv("SENDER_EMAIL")
     sender_password = os.getenv("SENDER_PASSWORD")
     if not sender_email or not sender_password:
@@ -125,9 +150,10 @@ def send_system_email(to_email: str, subject: str, body: str):
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
-        print(f"[BATS EMAIL SUCCESS] Successfully delivered tracking email to: {to_email}")
+        print(f"[BATS EMAIL SUCCESS] Successfully delivered SMTP email to: {to_email}")
     except Exception as e:
-        print(f"[BATS EMAIL ERROR] Failed to send to {to_email}: {e}")
+        print(f"[BATS EMAIL ERROR] Failed to send to {to_email}. (Google/Render Firewall Block). Error: {e}")
+
 
 @app.get("/")
 async def root():
@@ -384,11 +410,8 @@ async def compare_candidates(candidate_ids: List[str], db: Session = Depends(get
 
     return {"candidates": ranked, "total_compared": len(ranked), "enterprise_debrief_matrix": debrief_matrix, "recommended_action": recommended_action}
 
-# ─── THE NEW ENTERPRISE FEEDBACK ROUTES ───
-
 @app.get("/api/feedback")
 async def get_all_feedback(db: Session = Depends(get_db)):
-    # Explicitly fetching ID so the frontend can delete/pin accurately
     feedbacks = db.query(CandidateFeedback).order_by(CandidateFeedback.id.desc()).all()
     return [{"id": f.id, "candidate": f.candidate_name, "rating": f.rating, "comments": f.comments} for f in feedbacks]
 

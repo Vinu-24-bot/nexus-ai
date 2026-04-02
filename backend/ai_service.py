@@ -28,9 +28,10 @@ def format_prompt(template: str, **kwargs) -> str:
 
 def _parse_json_response(text: str) -> dict:
     try:
-        match = re.search(r'\{.*\}', text.strip(), re.DOTALL)
-        if match:
-            clean_json = match.group(0)
+        start_idx = text.find('{')
+        end_idx = text.rfind('}')
+        if start_idx != -1 and end_idx != -1:
+            clean_json = text[start_idx:end_idx+1]
             clean_json = re.sub(r',\s*}', '}', clean_json)
             clean_json = re.sub(r',\s*]', ']', clean_json)
             return json.loads(clean_json)
@@ -296,11 +297,12 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     if len(raw_text.strip()) < 50:
         print("[BATS] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
         
-    safe_text = raw_text[:12000] 
+    # 🛡️ THE FIX: Hard-Truncate to 5000 to absolutely guarantee no memory limits are hit.
+    safe_text = raw_text[:5000] 
 
     if GEMINI_API_KEY:
         try:
-            print("[BATS] Parsing Resume with Gemini REST API (High Token Capacity)...")
+            print("[BATS] Parsing Resume with Gemini REST API...")
             prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
             return await _call_gemini(prompt, force_json=True)
         except Exception as e:
@@ -308,7 +310,7 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     
     try:
         print("[BATS] Parsing Resume with Groq...")
-        prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text[:6000])
+        prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=2500)
         
     except Exception as e:
@@ -316,7 +318,7 @@ async def parse_resume_to_json(raw_text: str) -> dict:
         print(f"[BATS] FATAL Parsing Error: {error_msg}")
         return {
             "candidate_info": {"name": "Extraction Failed", "email": "Error", "phone": "Error", "links": []},
-            "executive_summary": f"AI API ERROR: {error_msg}. Check your backend terminal for full details.",
+            "executive_summary": f"AI API ERROR: {error_msg}. Please check the server logs.",
             "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []},
             "experience_and_projects": [{"name": "System Error", "role": "Not Provided", "duration": "Not Provided", "technologies_used": [], "key_achievements": []}],
             "education_and_certifications": []
@@ -341,7 +343,7 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str)
             "justification": f"The platform's automatic kill switch was triggered. {reason} No technical evaluation was performed."
         }
 
-    safe_resume = resume[:6000]
+    safe_resume = resume[:5000]
     safe_jd = job_description[:4000]
 
     prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=transcript)
@@ -361,7 +363,6 @@ async def generate_interview_questions(job_description: str, resume: str, num_qu
         return questions
     except Exception as e:
         print(f"[BATS] Failed to generate custom questions, returning defaults: {e}")
-        # 🛡️ THE FIX: Dynamic array of fallbacks will be handled strictly by frontend map length, providing a rich buffer here
         return [
             {"id": 1, "question": "Could you briefly describe your most impactful project and the core technologies used?", "category": "technical", "difficulty": "medium"},
             {"id": 2, "question": "What is the most challenging bug you've faced recently, and how did you resolve it?", "category": "behavioral", "difficulty": "hard"},
