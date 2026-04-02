@@ -152,7 +152,11 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     db.commit()
     db.refresh(new_session)
     
-    frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
+    # 🛡️ THE FIX: Hardcoded to Nexus AI Platform
+    frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app")
+    
+    # Ensure there's no trailing slash that might mess up the URL structure
+    frontend_url = frontend_url.rstrip('/')
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
     candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre-screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
@@ -184,7 +188,9 @@ async def update_session_status(session_id: str, request: Request, background_ta
     db.commit()
 
     if session.recruiter_email:
-        frontend_url = os.getenv("FRONTEND_URL", "https://resume-bats.vercel.app")
+        # 🛡️ THE FIX: Hardcoded to Nexus AI Platform
+        frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app")
+        frontend_url = frontend_url.rstrip('/')
         dashboard_link = f"{frontend_url}/dashboard"
         
         if status == "started":
@@ -409,11 +415,10 @@ async def get_all_feedback(db: Session = Depends(get_db)):
     feedbacks = db.query(CandidateFeedback).order_by(CandidateFeedback.id.desc()).all()
     return [{"id": f.id, "candidate": f.candidate_name, "rating": f.rating, "comments": f.comments} for f in feedbacks]
 
-# 🛡️ THE FIX: Crash-proof type handling for Delete Feedback
+# 🛡️ Crash-proof type handling for Delete Feedback remains
 @app.delete("/api/feedback/{feedback_id}")
 async def delete_feedback(feedback_id: str, db: Session = Depends(get_db)):
     try:
-        # Accepts string from frontend to prevent 422 crash, gracefully converts to Integer
         search_id = int(feedback_id) if feedback_id.isdigit() else feedback_id
         feedback = db.query(CandidateFeedback).filter(CandidateFeedback.id == search_id).first()
         if feedback:
