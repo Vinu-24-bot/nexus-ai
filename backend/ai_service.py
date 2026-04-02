@@ -2,8 +2,7 @@
 BATS AI Evaluation Service - True Hybrid Enterprise Grade
 1. Groq (Whisper) -> Audio Extraction
 2. Google Gemini 2.0 Flash (1M Context) -> Deep Semantic Resume Parsing (Super Extractor)
-3. Groq (Llama 3.3) -> Real-time Interview Generation
-4. MoE Cascade -> Final Master Evaluation (Cross-Verification Detective)
+3. Groq (Llama 3.1 & 3.3) -> Real-time Interview Generation & MoE Cascade
 """
 
 import os
@@ -219,7 +218,7 @@ Raw Resume Text:
 {raw_text}
 """
 
-# ─── EXPONENTIAL BACKOFF API CALLS ───
+# ─── BULLETPROOF REST API CALLS (SMART TOKEN ROUTING) ───
 
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
@@ -232,10 +231,10 @@ async def transcribe_audio(file_path: str) -> str:
             resp.raise_for_status()
             return resp.text
 
-async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000) -> dict:
-    async with httpx.AsyncClient(timeout=90) as client:
+async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000, groq_model: str = "llama-3.3-70b-versatile") -> dict:
+    async with httpx.AsyncClient(timeout=60) as client:
         payload = {
-            "model": "llama-3.3-70b-versatile", 
+            "model": groq_model, 
             "messages": [{"role": "user", "content": prompt}], 
             "temperature": 0.2, 
             "max_tokens": max_tokens
@@ -243,13 +242,11 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
         if force_json: payload["response_format"] = {"type": "json_object"}
             
         url = "https://api.groq.com/openai/v1/chat/completions"
-        
-        # 🛡️ THE FIX: Smart 3-tier Exponential Backoff for Groq
         for attempt in range(3):
             resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
             if resp.status_code == 429 and attempt < 2:
-                wait_time = (attempt + 1) * 5  # Waits 5s, then 10s
-                print(f"[BATS] Groq 429 Limit hit. Holding breath for {wait_time} seconds...")
+                wait_time = (attempt + 1) * 5
+                print(f"[BATS] Groq 429 Limit hit on {groq_model}. Holding breath for {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
                 continue
             resp.raise_for_status()
@@ -262,12 +259,11 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
     if force_json:
         payload["generationConfig"] = {"responseMimeType": "application/json"}
         
-    async with httpx.AsyncClient(timeout=90) as client:
-        # 🛡️ THE FIX: Smart 3-tier Exponential Backoff for Gemini
+    async with httpx.AsyncClient(timeout=60) as client:
         for attempt in range(3):
             resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
             if resp.status_code == 429 and attempt < 2:
-                wait_time = (attempt + 1) * 5  # Waits 5s, then 10s
+                wait_time = (attempt + 1) * 5
                 print(f"[BATS] Gemini 429 Limit hit. Holding breath for {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
                 continue
@@ -277,7 +273,7 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
             return _parse_json_response(content)
 
 async def _call_groq_text(prompt: str) -> str:
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=30) as client:
         url = "https://api.groq.com/openai/v1/chat/completions"
         for attempt in range(3):
             resp = await client.post(
@@ -291,15 +287,26 @@ async def _call_groq_text(prompt: str) -> str:
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"].strip()
 
-async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: int = 6000) -> dict:
+# 🛡️ THE FIX: Smart Routing Cascade to manage Tokens
+async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: int = 6000, groq_model: str = "llama-3.3-70b-versatile", prioritize_gemini: bool = False) -> dict:
     errors = []
+    
+    # If parsing a resume, use Gemini first because it has 1 Million free TPM
+    if prioritize_gemini and GEMINI_API_KEY:
+        try:
+            return await _call_gemini(prompt, force_json=force_json)
+        except Exception as e:
+            errors.append(f"Gemini Error: {e}")
+
+    # Fallback to Groq
     if GROQ_API_KEY:
         try:
-            return await _call_groq(prompt, force_json, max_tokens=max_tokens)
+            return await _call_groq(prompt, force_json, max_tokens=max_tokens, groq_model=groq_model)
         except Exception as e:
             errors.append(f"Groq Error: {e}")
             
-    if GEMINI_API_KEY:
+    # If not prioritized, try Gemini last
+    if not prioritize_gemini and GEMINI_API_KEY:
         try:
             return await _call_gemini(prompt, force_json=force_json)
         except Exception as e:
@@ -310,30 +317,22 @@ async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: in
 # ─── PUBLIC API EXPORTS ───────────────────────────────
 
 async def parse_resume_to_json(raw_text: str) -> dict:
-    print(f"[BATS] Extracted Resume Text Length: {len(raw_text)}")
-
     if len(raw_text.strip()) < 50:
         print("[BATS] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
         
     safe_text = raw_text[:5000] 
+    prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
 
-    if GEMINI_API_KEY:
-        try:
-            print("[BATS] Parsing Resume with Gemini REST API...")
-            prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
-            return await _call_gemini(prompt, force_json=True)
-        except Exception as e:
-            print(f"[BATS] Gemini REST parsing failed: {e}. Falling back to Groq.")
-    
     try:
-        print("[BATS] Parsing Resume with Groq...")
-        prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
-        return await _call_ai_cascade(prompt, force_json=True, max_tokens=2500)
+        # 🛡️ THE FIX: Drop max_tokens to 1500 to save quota, prioritize Gemini, and use 8B Groq model as backup
+        print("[BATS] Parsing Resume with Smart Token Routing...")
+        return await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.1-8b-instant", prioritize_gemini=True)
         
     except Exception as e:
         error_msg = str(e).replace('"', "'")
         print(f"[BATS] FATAL Parsing Error: {error_msg}")
         
+        # We only show the fallback if they absolutely nuke the API limits completely
         if "429" in error_msg:
             return {
                 "candidate_info": {"name": "Candidate (API Busy)", "email": "api-rate-limit@system", "phone": "N/A", "links": []},
@@ -374,7 +373,9 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str)
     safe_jd = job_description[:4000]
 
     prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=transcript)
-    result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2500)
+    
+    # 🛡️ Evaluation uses the massive 70B model for accuracy, but limits output tokens to prevent 429
+    result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
     return _validate_result(result)
 
 async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 10, interview_level: str = "L2"):
@@ -383,7 +384,7 @@ async def generate_interview_questions(job_description: str, resume: str, num_qu
     prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=safe_jd, resume=safe_resume, num_questions=num_questions, interview_level=interview_level)
     
     try:
-        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000)
+        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.3-70b-versatile")
         questions = result.get("questions", [])
         if not questions:
             raise ValueError("AI returned an empty array.")
@@ -409,6 +410,6 @@ async def get_answer_acknowledgment(question: str, answer: str, next_question: s
     next_q_text = next_question if next_question else "Thank the candidate and conclude this section."
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_q_text)
     try:
-        return await _call_ai_cascade(prompt, force_json=True, max_tokens=1000)
+        return await _call_ai_cascade(prompt, force_json=True, max_tokens=800, groq_model="llama-3.1-8b-instant")
     except Exception as e:
         return {"response_text": f"Thank you for that context. Let's move on. {next_q_text}", "is_sufficient": True}
