@@ -9,7 +9,7 @@ import shutil
 import hashlib
 import subprocess
 import httpx
-from datetime import datetime, timedelta  # 🛡️ THE FIX: Added timedelta for 24-hour calculation
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
@@ -166,7 +166,6 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     
     return {"message": "Session created and emails queued", "session_id": new_session.id}
 
-# 🛡️ THE FIX: Enterprise Gatekeeper Endpoint (Checks 24 hours & Single-Use Lock)
 @app.get("/api/sessions/{session_id}")
 async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
@@ -174,11 +173,9 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     if not session: 
         raise HTTPException(status_code=404, detail="This interview link does not exist.")
     
-    # 1. The 24-Hour Expiration Kill Switch
     if datetime.utcnow() - session.created_at > timedelta(hours=24):
         raise HTTPException(status_code=403, detail="This interview link has expired (24-hour limit). Please contact your recruiter.")
         
-    # 2. The One-Time Use Strict Lock
     if session.status != "pending":
         raise HTTPException(status_code=403, detail="This interview session has already been attempted or completed and is now permanently locked.")
 

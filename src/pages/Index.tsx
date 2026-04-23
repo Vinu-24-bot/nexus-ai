@@ -74,7 +74,7 @@ export default function LandingPage() {
           >
             <motion.div variants={fadeUp} custom={0} className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium">
               <Zap className="w-3.5 h-3.5" />
-              BATS Nexus AI Platform
+              BATS ForgePro Platform
             </motion.div>
 
             <motion.h1
@@ -144,7 +144,7 @@ export default function LandingPage() {
                 animate={{ rotate: 360 }}
                 transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
                 src="/comp-logo.PNG"
-                alt="BATS Nexus AI Logo"
+                alt="BATS ForgePro Logo"
                 className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_25px_rgba(0,240,255,0.4)]"
               />
             </motion.div>
@@ -241,7 +241,7 @@ export default function LandingPage() {
         <div className="container mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Brain className="w-5 h-5 text-primary" />
-            <span className="font-display text-sm font-bold tracking-wider text-foreground">BATS Nexus AI</span>
+            <span className="font-display text-sm font-bold tracking-wider text-foreground">BATS ForgePro</span>
           </div>
           <p className="text-xs text-muted-foreground">© 2026 BATS AI. All rights reserved.</p>
         </div>
