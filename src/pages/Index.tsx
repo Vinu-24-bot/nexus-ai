@@ -77,22 +77,24 @@ export default function LandingPage() {
               BATS ForgePro Platform
             </motion.div>
 
+            {/* 🛡️ THE FIX: New Professional Header */}
             <motion.h1
               variants={fadeUp}
               custom={1}
               className="text-5xl sm:text-6xl lg:text-7xl font-display font-bold text-foreground leading-tight glow-text-cyan"
             >
-              Hire Smarter
+              Accelerate Tech Hiring
               <br />
-              <span className="text-primary">With BATS</span>
+              <span className="text-primary">With BATS ForgePro</span>
             </motion.h1>
 
+            {/* 🛡️ THE FIX: New Predictive Insights Tagline */}
             <motion.p
               variants={fadeUp}
               custom={2}
               className="text-lg text-muted-foreground max-w-xl mx-auto lg:mx-0"
             >
-              The elite AI-powered interview evaluator that delivers unbiased, data-driven hiring decisions in seconds.
+              Shape Top Tech Talent With Predictive Insights
             </motion.p>
 
             <motion.div variants={fadeUp} custom={3} className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-4">
