@@ -2,7 +2,6 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { ArrowRight, Brain, Shield, Zap, BarChart3, Target, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import HeroScene from "@/components/HeroScene";
 import Navbar from "@/components/Navbar";
 
 const features = [
@@ -58,24 +57,30 @@ export default function LandingPage() {
     <div className="min-h-screen bg-background">
       <Navbar />
 
-      {/* Hero */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-        <HeroScene />
-        <div className="relative z-10 container mx-auto px-6 text-center">
+      {/* Hero Section with Split Layout */}
+      <section className="relative min-h-screen flex items-center pt-20 overflow-hidden">
+        
+        {/* Ambient Background Glows */}
+        <div className="absolute top-1/4 left-0 w-[500px] h-[500px] bg-primary/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-nexus-blue/10 rounded-full blur-[150px] pointer-events-none" />
+
+        <div className="relative z-10 container mx-auto px-6 flex flex-col lg:flex-row items-center justify-between gap-16">
+          
+          {/* Left Content - Text & CTAs */}
           <motion.div
             initial="hidden"
             animate="visible"
-            className="max-w-3xl mx-auto space-y-6"
+            className="flex-1 space-y-8 text-center lg:text-left pt-10 lg:pt-0"
           >
             <motion.div variants={fadeUp} custom={0} className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium">
               <Zap className="w-3.5 h-3.5" />
-              AI Executive Recruiter
+              BATS Nexus AI Platform
             </motion.div>
 
             <motion.h1
               variants={fadeUp}
               custom={1}
-              className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-display font-bold text-foreground leading-tight glow-text-cyan"
+              className="text-5xl sm:text-6xl lg:text-7xl font-display font-bold text-foreground leading-tight glow-text-cyan"
             >
               Hire Smarter
               <br />
@@ -85,25 +90,66 @@ export default function LandingPage() {
             <motion.p
               variants={fadeUp}
               custom={2}
-              className="text-lg text-muted-foreground max-w-xl mx-auto"
+              className="text-lg text-muted-foreground max-w-xl mx-auto lg:mx-0"
             >
               The elite AI-powered interview evaluator that delivers unbiased, data-driven hiring decisions in seconds.
             </motion.p>
 
-            <motion.div variants={fadeUp} custom={3} className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+            <motion.div variants={fadeUp} custom={3} className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-4">
               <Link to="/evaluate">
-                <Button className="h-12 px-8 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan">
+                <Button className="h-14 px-8 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan">
                   Start Evaluating
-                  <ArrowRight className="ml-2 w-4 h-4" />
+                  <ArrowRight className="ml-2 w-5 h-5" />
                 </Button>
               </Link>
               <Link to="/dashboard">
-                <Button variant="outline" className="h-12 px-8 text-base font-semibold border-border text-foreground hover:bg-muted">
+                <Button variant="outline" className="h-14 px-8 text-base font-semibold border-border text-foreground hover:bg-muted">
                   View Dashboard
                 </Button>
               </Link>
             </motion.div>
           </motion.div>
+
+          {/* Right Content - Fascinating Logo Animation */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 1.2, ease: "easeOut" }}
+            className="flex-1 relative w-full max-w-[400px] lg:max-w-[550px] aspect-square flex items-center justify-center"
+          >
+            {/* Outer Tech Ring */}
+            <motion.div
+              animate={{ rotate: -360 }}
+              transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
+              className="absolute inset-4 rounded-full border-[1.5px] border-primary/20 border-dashed opacity-50"
+            />
+            {/* Inner Tech Ring */}
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
+              className="absolute inset-16 rounded-full border border-nexus-green/30 border-dotted opacity-50"
+            />
+
+            {/* Core Logo Container */}
+            <motion.div
+              animate={{ y: [-15, 15, -15] }}
+              transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+              className="relative w-3/4 h-3/4 flex items-center justify-center"
+            >
+              {/* Multi-color ambient aura matching the logo */}
+              <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-blue-500/20 via-orange-500/20 to-green-500/20 blur-[60px]" />
+              
+              {/* Spinning Logo Image */}
+              <motion.img
+                animate={{ rotate: 360 }}
+                transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
+                src="/comp-logo.PNG"
+                alt="BATS Nexus AI Logo"
+                className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_25px_rgba(0,240,255,0.4)]"
+              />
+            </motion.div>
+          </motion.div>
+
         </div>
 
         {/* Gradient fade at bottom */}
@@ -195,7 +241,7 @@ export default function LandingPage() {
         <div className="container mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Brain className="w-5 h-5 text-primary" />
-            <span className="font-display text-sm font-bold tracking-wider text-foreground">BATS</span>
+            <span className="font-display text-sm font-bold tracking-wider text-foreground">BATS Nexus AI</span>
           </div>
           <p className="text-xs text-muted-foreground">© 2026 BATS AI. All rights reserved.</p>
         </div>
