@@ -1,5 +1,5 @@
 """
-BATS AI Evaluation Service - True Hybrid Enterprise Grade
+BATS ForgePro AI Evaluation Service - True Hybrid Enterprise Grade
 1. Groq (Whisper) -> Audio Extraction
 2. Google Gemini 2.0 Flash (1M Context) -> Deep Semantic Resume Parsing (Super Extractor)
 3. Groq (Llama 3.1 & 3.3) -> Real-time Interview Generation & MoE Cascade
@@ -53,7 +53,7 @@ def _validate_result(result: dict) -> dict:
 
 # ─── ENTERPRISE PROMPTS ──────────────────────────────────────
 
-EVALUATION_PROMPT = """You are "BATS", an elite AI Executive Recruiter System used by Tier-1 tech companies.
+EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Job Description, the Candidate's Deeply Parsed Resume, and the actual Live Interview Transcript.
 
 *** ZERO-TOLERANCE KILL SWITCH (CRITICAL) ***
@@ -121,7 +121,7 @@ You MUST output ONLY valid JSON matching this exact structure perfectly:
 {transcript}
 """
 
-QUESTION_GENERATION_PROMPT = """You are "BATS", an elite AI technical interviewer.
+QUESTION_GENERATION_PROMPT = """You are "BATS ForgePro", an elite AI technical interviewer.
 Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY {num_questions} highly unique, targeted questions.
 
 The target difficulty level is: {interview_level}.
@@ -156,8 +156,7 @@ Output ONLY valid JSON:
 
 JD_GENERATION_PROMPT = """Generate a detailed, professional Job Description for: {position}. Output plain text only."""
 
-# 🛡️ THE FIX: Redesigned the prompt to strictly enforce natural, human-like transitions without repetitive "Thanks".
-DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS, an elite, empathetic AI technical interviewer. 
+DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite, empathetic AI technical interviewer. 
 You are conducting a live voice interview.
 
 Question you just asked: {question}
@@ -181,12 +180,17 @@ Output ONLY valid JSON matching this exact structure:
 }
 """
 
-RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies. 
+# 🛡️ THE FIX: Upgraded parser prompt to act as an OCR-Reconstructor for messy files
+RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies (BATS ForgePro). 
 Your job is to read unstructured, messy resume text and meticulously extract EVERYTHING into a "Liquid JSON Schema".
+
+*** GOD MODE PARSING ACTIVATED ***
+The text provided may be fragmented, missing spaces, or contain OCR/binary artifacts (e.g., column layouts smashed together or separated by '|'). 
+You must use spatial reasoning to reconstruct broken words, align columns, and piece together fractured sentences before extraction.
 
 CRITICAL EXTRACTION RULES:
 1. NEVER output `null`. If data is missing, use "Not Provided" or an empty array `[]`.
-2. NO GENERIC SUMMARIES. For 'key_achievements', you MUST extract the candidate's EXACT numbers, metrics, scale, and highly specific technical outcomes.
+2. NO GENERIC SUMMARIES. For 'key_achievements', you MUST extract the candidate's EXACT numbers, metrics, scale, and highly specific technical outcomes. Reconstruct fragmented metric sentences.
 3. Extract ALL contact info, including GitHub, LinkedIn, or Portfolio URLs.
 4. Extract EVERY SINGLE Project and Company. Extract the EXACT technologies used.
 
@@ -318,18 +322,23 @@ async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: in
 
 async def parse_resume_to_json(raw_text: str) -> dict:
     if len(raw_text.strip()) < 50:
-        print("[BATS] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
+        print("[BATS ForgePro] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
         
-    safe_text = raw_text[:5000] 
+    # 🛡️ THE FIX: God-Mode Binary Cleaner Fallback
+    # Strips out completely unreadable binary characters that crash LLMs, while preserving standard text and structural spaces.
+    safe_text = re.sub(r'[^\x20-\x7E\n\r\t\|]', ' ', raw_text) 
+    safe_text = re.sub(r'\s{3,}', ' | ', safe_text) # Preserve massive gaps as column delimiters
+    safe_text = safe_text[:6000] # Increased context window to ensure we grab everything
+    
     prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
 
     try:
-        print("[BATS] Parsing Resume with Smart Token Routing...")
+        print("[BATS ForgePro] Parsing Resume with Smart Token Routing...")
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.1-8b-instant", prioritize_gemini=True)
         
     except Exception as e:
         error_msg = str(e).replace('"', "'")
-        print(f"[BATS] FATAL Parsing Error: {error_msg}")
+        print(f"[BATS ForgePro] FATAL Parsing Error: {error_msg}")
         
         if "429" in error_msg:
             return {
@@ -386,7 +395,7 @@ async def generate_interview_questions(job_description: str, resume: str, num_qu
             raise ValueError("AI returned an empty array.")
         return questions
     except Exception as e:
-        print(f"[BATS] Failed to generate custom questions, returning defaults: {e}")
+        print(f"[BATS ForgePro] Failed to generate custom questions, returning defaults: {e}")
         return [
             {"id": 1, "question": "Could you briefly describe your most impactful project and the core technologies used?", "category": "technical", "difficulty": "medium"},
             {"id": 2, "question": "What is the most challenging bug you've faced recently, and how did you resolve it?", "category": "behavioral", "difficulty": "hard"},
