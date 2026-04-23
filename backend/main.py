@@ -214,7 +214,7 @@ async def update_session_status(session_id: str, request: Request, background_ta
                 body = f"Update: {session.candidate_name} manually exited the interview before completion.\n\nClick the link below to view their partial results on the dashboard:\n{dashboard_link}"
             else:
                 subject = f"✅ Session Concluded: {session.candidate_name}"
-                body = f"Update: {session.candidate_name} has successfully submitted their interview session.\n\nThe BATS AI is finalizing the video processing and technical evaluation. Click the link below to view the results and export the data directly from your dashboard:\n{dashboard_link}"
+                body = f"Update: {session.candidate_name} has successfully submitted their interview session.\n\nBATS ForgePro is finalizing the video processing and technical evaluation. Click the link below to view the results and export the data directly from your dashboard:\n{dashboard_link}"
                 
             background_tasks.add_task(send_system_email, session.recruiter_email, subject, body)
 

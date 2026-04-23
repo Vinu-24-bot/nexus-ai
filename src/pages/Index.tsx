@@ -77,7 +77,6 @@ export default function LandingPage() {
               BATS ForgePro Platform
             </motion.div>
 
-            {/* 🛡️ THE FIX: New Professional Header */}
             <motion.h1
               variants={fadeUp}
               custom={1}
@@ -88,7 +87,6 @@ export default function LandingPage() {
               <span className="text-primary">With BATS ForgePro</span>
             </motion.h1>
 
-            {/* 🛡️ THE FIX: New Predictive Insights Tagline */}
             <motion.p
               variants={fadeUp}
               custom={2}
@@ -245,7 +243,7 @@ export default function LandingPage() {
             <Brain className="w-5 h-5 text-primary" />
             <span className="font-display text-sm font-bold tracking-wider text-foreground">BATS ForgePro</span>
           </div>
-          <p className="text-xs text-muted-foreground">© 2026 BATS AI. All rights reserved.</p>
+          <p className="text-xs text-muted-foreground">© 2026 BATS ForgePro. All rights reserved.</p>
         </div>
       </footer>
     </div>
