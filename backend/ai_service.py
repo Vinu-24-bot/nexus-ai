@@ -2,7 +2,7 @@
 BATS ForgePro AI Evaluation Service - True Hybrid Enterprise Grade
 1. Groq (Whisper) -> Audio Extraction
 2. Google Gemini 2.0 Flash (1M Context) -> Deep Semantic Resume Parsing (Super Extractor)
-3. Groq (Llama 3.1 & 3.3) -> Real-time Interview Generation & MoE Cascade
+3. Groq (Llama 3.1 & 3.3) -> Real-time Interview Generation & Semantic MoE Cascade
 """
 
 import os
@@ -37,7 +37,7 @@ def _parse_json_response(text: str) -> dict:
         else:
             raise ValueError("No JSON brackets found in AI response.")
     except Exception as e:
-        print(f"[BATS] Critical JSON Parsing Error: {e}\nRaw Text snippet: {text[:300]}...")
+        print(f"[BATS ForgePro] Critical JSON Parsing Error: {e}\nRaw Text snippet: {text[:300]}...")
         raise ValueError("AI generated invalid or truncated JSON.")
 
 def _validate_result(result: dict) -> dict:
@@ -51,44 +51,44 @@ def _validate_result(result: dict) -> dict:
             raise ValueError(f"Missing required field: {field}")
     return result
 
-# ─── ENTERPRISE PROMPTS ──────────────────────────────────────
+# ─── ENTERPRISE PROMPTS (UPGRADED SEMANTIC ENGINE) ───────────
 
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Job Description, the Candidate's Deeply Parsed Resume, and the actual Live Interview Transcript.
 
 *** ZERO-TOLERANCE KILL SWITCH (CRITICAL) ***
 If the [INTERVIEW_TRANSCRIPT] contains the phrase "[SYSTEM LOG]" (indicating a security breach/cheat):
-1. You MUST set ALL scores (technical_proficiency, relevance_to_jd, communication, confidence_level, overall_score) to EXACTLY 0.
+1. You MUST set ALL scores to EXACTLY 0.
 2. You MUST set hiring_recommendation to "Reject".
 3. You MUST state the security breach in the justification. 
-DO NOT evaluate the candidate's resume if this kill switch is triggered.
 
 CRITICAL ENTERPRISE RULES:
-1. FAIRNESS DOCTRINE: You MUST NOT penalize the candidate's "Technical Proficiency" or "Overall Score" for broken English, grammatical errors, or fumbling. Judge them PURELY on the technical accuracy and logic of their answers. 
-2. CONFIDENCE SCORE (0-100): Analyze the transcript for filler words ("um", "uh", "like"), sudden pauses, or incomplete sentences. Generate a separate Confidence Score based purely on these speech patterns.
-3. RUTHLESS TECHNICAL STANDARD: If the candidate provides generic, high-level, or superficial answers without specific technical implementation details, you MUST assign a Technical Score below 50. Do not inflate scores out of politeness.
+1. LATENT SEMANTIC RECOGNITION (The 2+2=4 Rule): Candidates have wildly different communication styles and backgrounds. You MUST look past textbook definitions and evaluate the underlying logical truth of their answers. If a candidate describes a concept using a unique analogy, informal language, or an unconventional but mathematically/logically sound approach, REWARD THEM FULLY. Never penalize a correct concept just because it lacks standard corporate jargon.
+2. FAIRNESS DOCTRINE: You MUST NOT penalize the candidate's "Technical Proficiency" for broken English, grammatical errors, or verbal fumbling. Judge them PURELY on technical accuracy.
+3. CONFIDENCE SCORE (0-100): Analyze the transcript for filler words ("um", "uh", "like"), sudden pauses, or incomplete sentences. Generate a separate Confidence Score based purely on speech patterns.
+4. RUTHLESS TECHNICAL STANDARD: If the candidate provides generic, high-level, or superficial answers without specific technical implementation details, you MUST assign a Technical Score below 50. Do not inflate scores out of politeness.
 
-You MUST use the following "Mixture of Experts" framework to grade the candidate (UNLESS the Kill Switch is activated):
+You MUST use the following "Mixture of Experts" framework:
 
-Step 1: THE ADVOCATE (Alignment & Strengths)
-Find every piece of evidence in the transcript that proves the candidate possesses the skills listed in the JD.
+Step 1: THE ADVOCATE (Semantic Alignment)
+Find every piece of evidence in the transcript that proves the candidate possesses the skills listed in the JD, regardless of how they phrased it.
 
-Step 2: THE DETECTIVE (Cross-Verification - CRITICAL)
-Compare what they *said* in the transcript against the exact metrics and massive projects they *claimed* on their resume. Identify any discrepancies or exaggerations.
+Step 2: THE DETECTIVE (Cross-Verification)
+Compare what they *said* in the transcript against the exact metrics and projects they *claimed* on their resume. Identify any discrepancies.
 
-Step 3: THE SKEPTIC (Weaknesses & Red Flags)
-Where did they struggle? Were their technical explanations shallow? Did they dodge the core of the question?
+Step 3: THE SKEPTIC (Weaknesses)
+Where did their logic break down? Were their technical explanations shallow? 
 
 Step 4: THE JUDGE (Your Output)
-Synthesize the findings. Grade strictly based on actual evidence.
+Synthesize the findings.
 - 90-100: Exceptional, undeniable proof of expertise. Strong Hire.
 - 75-89: Solid, capable, minor gaps. Lean Hire / Strong Hire.
-- 60-74: Average, superficial answers, lacks deep architecture knowledge. Reject.
-- Below 60: Major discrepancies, BS answers, or lack of knowledge. Reject.
+- 60-74: Average, superficial answers, lacks deep knowledge. Reject.
+- Below 60: Major discrepancies or lack of knowledge. Reject.
 
 You MUST output ONLY valid JSON matching this exact structure perfectly:
 {
-  "candidate_overview": "A highly detailed 4-sentence executive summary of their technical depth.",
+  "candidate_overview": "A highly detailed 4-sentence executive summary of their technical depth and semantic reasoning skills.",
   "scores": {
     "technical_proficiency": 0,
     "relevance_to_jd": 0,
@@ -108,7 +108,7 @@ You MUST output ONLY valid JSON matching this exact structure perfectly:
   "red_flags_or_weaknesses": ["Specific technical gap or discrepancy 1", "Specific weakness 2"],
   "dynamic_follow_up_questions": ["Hard follow-up question based on a vague answer"],
   "hiring_recommendation": "Strong Hire | Lean Hire | Reject",
-  "justification": "A highly detailed 2-paragraph explanation explicitly citing moments from the interview transcript to justify the score."
+  "justification": "A highly detailed 2-paragraph explanation explicitly citing the candidate's semantic logic from the interview transcript to justify the score."
 }
 
 [JOB_DESCRIPTION]
@@ -121,26 +121,25 @@ You MUST output ONLY valid JSON matching this exact structure perfectly:
 {transcript}
 """
 
-QUESTION_GENERATION_PROMPT = """You are "BATS ForgePro", an elite AI technical interviewer.
+QUESTION_GENERATION_PROMPT = """You are "BATS ForgePro", an elite, human-like AI technical interviewer.
 Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY {num_questions} highly unique, targeted questions.
 
 The target difficulty level is: {interview_level}.
 
 RULES:
-1. If the level is L1 (Junior), focus on fundamentals and basic resume projects.
-2. If the level is L3/L4 (Senior/Architect), ask brutal system design, scalability, and deep architectural questions.
-3. At least 40% MUST directly challenge specific projects, architectures, or metrics from their resume.
-4. At least 25% must be JD-specific technical questions.
-5. Force the candidate to explain the "HOW" and "WHY" behind their exact resume claims.
+1. HUMAN-LIKE PRE-SCREENING: Questions must be conversational, punchy, and sound like they are coming from a real Senior Engineer. Strictly keep questions under 2 sentences. 
+2. HYPER-PERSONALIZATION: Do not ask robotic trivia ("What is Kubernetes?"). Instead, ask contextual questions based on their resume ("I noticed you used Kubernetes on the Nexus project to scale traffic. What was the hardest part of configuring those clusters?").
+3. If the level is L1 (Junior), focus on fundamentals and basic resume projects.
+4. If the level is L3/L4 (Senior/Architect), ask brutal system design, scalability, and deep architectural questions.
+5. At least 40% MUST directly challenge specific projects, architectures, or metrics from their resume.
 6. Ensure no questions repeat for this candidate.
-7. 🛡️ CRITICAL TIME CONSTRAINT: This is a fast-paced interview. Questions MUST be direct, highly relevant, and designed so the candidate can provide crisp, concise answers within 60-90 seconds. Do not ask overly broad questions that require 5 minutes to answer.
 
 Output ONLY valid JSON:
 {
   "questions": [
     {
       "id": 1,
-      "question": "The highly specific interview question text",
+      "question": "The conversational, highly specific interview question text",
       "category": "technical | behavioral | situational",
       "difficulty": "easy | medium | hard"
     }
@@ -164,14 +163,13 @@ Candidate's Answer: {answer}
 Next Question you need to ask: {next_question}
 
 Task: Analyze the candidate's answer and generate ONE fluid, conversational response.
-1. If they ask a clarifying question: Answer it, set is_sufficient to false, and prompt them to answer the original question.
-2. If their answer is very short or lacks depth: Set is_sufficient to false. Acknowledge what they said, then ask a probing follow-up question. Do NOT ask the Next Question yet.
-3. If they give a strong answer: Set is_sufficient to true. Acknowledge a specific point they made, AND THEN seamlessly transition into asking the Next Question.
 
-CRITICAL RULES FOR REALISM:
-- NEVER say "Thank you", "Thanks for your answer", or "Great". It sounds robotic and repetitive.
-- Use natural, casual human transitions like: "Got it.", "Understood.", "Interesting approach.", "Okay, moving on.", or just ask the next question directly.
-- If the candidate's answer implies they don't know (e.g., "I don't know", "skip", "not sure"), YOU MUST SET "is_sufficient": true. Do not ask follow-ups. Just say "No problem, let's pivot," and ask the Next Question.
+CRITICAL ENTERPRISE RULES:
+1. SEMANTIC EMPATHY: Candidates may answer questions using unexpected analogies, informal language, or unconventional phrasing. If their core logic or semantic meaning is correct, validate it naturally (e.g., "That makes sense, taking a unique angle on it..."). Do not correct them just because they didn't use textbook jargon.
+2. RAMBLE CONTROL: If the candidate goes off-topic or gives an overly long answer, gently but firmly steer them back to the point or transition to the next question.
+3. ADAPTIVE LENGTH: If their answer is very short or lacks depth, set is_sufficient to false. Acknowledge what they said, then ask a probing follow-up question to dig deeper. Do NOT ask the Next Question yet.
+4. NATURAL TRANSITIONS: NEVER say "Thank you", "Thanks for your answer", or "Great". Use natural, casual human transitions like: "Got it.", "Understood.", "Interesting approach.", or "Okay, moving on."
+5. If the candidate's answer implies they don't know (e.g., "I don't know", "skip", "not sure"), YOU MUST SET "is_sufficient": true. Do not ask follow-ups. Just say "No problem, let's pivot," and ask the Next Question.
 
 Output ONLY valid JSON matching this exact structure:
 {
@@ -180,7 +178,6 @@ Output ONLY valid JSON matching this exact structure:
 }
 """
 
-# 🛡️ THE FIX: Upgraded parser prompt to act as an OCR-Reconstructor for messy files
 RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies (BATS ForgePro). 
 Your job is to read unstructured, messy resume text and meticulously extract EVERYTHING into a "Liquid JSON Schema".
 
@@ -255,7 +252,7 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
             resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
             if resp.status_code == 429 and attempt < 2:
                 wait_time = (attempt + 1) * 5
-                print(f"[BATS] Groq 429 Limit hit on {groq_model}. Holding breath for {wait_time} seconds...")
+                print(f"[BATS ForgePro] Groq 429 Limit hit on {groq_model}. Holding breath for {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
                 continue
             resp.raise_for_status()
@@ -273,7 +270,7 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
             resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
             if resp.status_code == 429 and attempt < 2:
                 wait_time = (attempt + 1) * 5
-                print(f"[BATS] Gemini 429 Limit hit. Holding breath for {wait_time} seconds...")
+                print(f"[BATS ForgePro] Gemini 429 Limit hit. Holding breath for {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
                 continue
             resp.raise_for_status()
@@ -324,11 +321,9 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     if len(raw_text.strip()) < 50:
         print("[BATS ForgePro] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
         
-    # 🛡️ THE FIX: God-Mode Binary Cleaner Fallback
-    # Strips out completely unreadable binary characters that crash LLMs, while preserving standard text and structural spaces.
     safe_text = re.sub(r'[^\x20-\x7E\n\r\t\|]', ' ', raw_text) 
-    safe_text = re.sub(r'\s{3,}', ' | ', safe_text) # Preserve massive gaps as column delimiters
-    safe_text = safe_text[:6000] # Increased context window to ensure we grab everything
+    safe_text = re.sub(r'\s{3,}', ' | ', safe_text) 
+    safe_text = safe_text[:6000] 
     
     prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
 
