@@ -1,8 +1,8 @@
 import { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
-  Brain, FileText, Briefcase, User, Loader2, Sparkles, Upload, X, CheckCircle2,
-  Wifi, WifiOff, Mail, Copy, Send
+  FileText, Briefcase, User, Loader2, Sparkles, Upload, X, CheckCircle2,
+  WifiOff, Mail, Copy, Send
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -196,17 +196,39 @@ export default function EvaluatePage() {
         <motion.div initial="hidden" animate="visible" className="space-y-8">
           
           {/* Header */}
-          <motion.div variants={fadeUp} custom={0} className="text-center space-y-3">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium mb-4">
-              <Brain className="w-3.5 h-3.5" />
-              BATS ForgePro Async Interview
-            </div>
+          <motion.div variants={fadeUp} custom={0} className="text-center mb-4">
             <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
-              Generate Interview Link
+              Start ForgePro Interview
             </h1>
-            <p className="text-muted-foreground max-w-xl mx-auto">
-              Generate a unique, secure link for your candidate. BATS ForgePro will conduct the interview asynchronously and email you the results.
-            </p>
+          </motion.div>
+
+          {/* How It Works Restored & Enhanced */}
+          <motion.div variants={fadeUp} custom={0.2} className="glass rounded-xl p-6 border-primary/20 relative overflow-hidden mb-6">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
+            <h3 className="text-xs font-bold text-primary uppercase tracking-widest mb-6 text-center flex items-center justify-center gap-2">
+              <Sparkles className="w-3.5 h-3.5" /> Async Vault Workflow
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-6 sm:gap-4 relative">
+              {/* Connecting line for desktop */}
+              <div className="hidden sm:block absolute top-4 left-[10%] right-[10%] h-[1px] bg-border/50 -z-10" />
+              {[
+                { step: "1", title: "Target Profile", desc: "Upload resume & set JD" },
+                { step: "2", title: "Generate Link", desc: "Creates secure 24h vault" },
+                { step: "3", title: "Auto-Invite", desc: "Candidate receives email" },
+                { step: "4", title: "AI Interview", desc: "Live anti-cheat monitoring" },
+                { step: "5", title: "Deep Debrief", desc: "Full analytics & scoring" },
+              ].map((s) => (
+                <div key={s.step} className="flex flex-col items-center text-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-background border border-primary/30 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(0,240,255,0.15)]">
+                    <span className="text-xs font-bold text-primary">{s.step}</span>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{s.title}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1 px-2">{s.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </motion.div>
 
           {/* Backend Status (Only shows errors now) */}
@@ -309,7 +331,14 @@ export default function EvaluatePage() {
               {/* Interview Level */}
               <motion.div variants={fadeUp} custom={2} className="space-y-3">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <Brain className="w-4 h-4 text-primary" /> Target Interview Level
+                  <motion.img 
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+                    src="/comp-logo.PNG" 
+                    alt="ForgePro" 
+                    className="w-4 h-4 object-contain drop-shadow-[0_0_5px_rgba(0,240,255,0.5)]"
+                  /> 
+                  Target Interview Level
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {LEVEL_OPTIONS.map((opt) => (
