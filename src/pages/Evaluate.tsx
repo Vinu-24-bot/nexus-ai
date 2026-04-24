@@ -206,7 +206,14 @@ export default function EvaluatePage() {
           <motion.div variants={fadeUp} custom={0.2} className="glass rounded-xl p-6 border-primary/20 relative overflow-hidden mb-6">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
             <h3 className="text-xs font-bold text-primary uppercase tracking-widest mb-6 text-center flex items-center justify-center gap-2">
-              <Sparkles className="w-3.5 h-3.5" /> Async Vault Workflow
+              <motion.img 
+                animate={{ rotate: 360 }}
+                transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+                src="/comp-logo.PNG" 
+                alt="ForgePro" 
+                className="w-3.5 h-3.5 object-contain drop-shadow-[0_0_5px_rgba(0,240,255,0.5)]"
+              /> 
+              How It Works
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-6 sm:gap-4 relative">
               {/* Connecting line for desktop */}
