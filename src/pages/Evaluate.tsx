@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   FileText, Briefcase, User, Loader2, Sparkles, Upload, X, CheckCircle2,
-  WifiOff, Mail, Copy, Send, Clock, Mic, MessageSquare
+  WifiOff, Mail, Copy, Send, Clock, Mic, MessageSquare, RotateCcw, Building2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -74,9 +74,10 @@ export default function EvaluatePage() {
   const [isExtractingResume, setIsExtractingResume] = useState(false);
   
   // State Fields
+  const [talentAssociateName, setTalentAssociateName] = useState("");
+  const [talentAssociateEmail, setTalentAssociateEmail] = useState("");
   const [candidateName, setCandidateName] = useState("");
   const [candidateEmail, setCandidateEmail] = useState("");
-  const [recruiterEmail, setRecruiterEmail] = useState("");
   const [position, setPosition] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [resume, setResume] = useState("");
@@ -97,7 +98,6 @@ export default function EvaluatePage() {
   const handleGenerateJD = async () => {
     let targetPosition = position.trim();
     
-    // 🛡️ If left blank, generate a random role and update the position field
     if (!targetPosition) {
       targetPosition = RANDOM_ROLES[Math.floor(Math.random() * RANDOM_ROLES.length)];
       setPosition(targetPosition);
@@ -134,7 +134,6 @@ export default function EvaluatePage() {
     const targetRole = position.trim() || "Software Engineer";
     setIsGeneratingQuestions(true);
     
-    // Simulated instant generation for the transcript box
     setTimeout(() => {
       setTranscriptQuestions(`1. Can you walk me through your most complex project as a ${targetRole}?\n2. What is the most challenging technical bug you've solved recently, and how did you approach it?\n3. How do you ensure code quality and maintainability in your deployments?\n4. Describe a time you disagreed with a senior engineer on an architectural decision.\n5. Where do you see your technical skills adding the most immediate value to our team?`);
       setIsGeneratingQuestions(false);
@@ -187,6 +186,11 @@ export default function EvaluatePage() {
   const clearUploadedResume = () => {
     setResumeFileName("");
     setResume("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const clearJD = () => {
+    setJobDescription("");
   };
 
   const handleGenerateLink = async () => {
@@ -203,7 +207,8 @@ export default function EvaluatePage() {
         body: JSON.stringify({
           candidate_name: candidateName,
           candidate_email: candidateEmail,
-          recruiter_email: recruiterEmail,
+          recruiter_email: talentAssociateEmail,
+          talent_associate_name: talentAssociateName,
           position,
           job_description: jobDescription,
           resume_text: resume,
@@ -254,8 +259,8 @@ export default function EvaluatePage() {
             </h1>
           </motion.div>
 
-          {/* How It Works Restored & Enhanced */}
-          <motion.div variants={fadeUp} custom={0.2} className="glass rounded-xl p-6 border-primary/20 relative overflow-hidden mb-6">
+          {/* How It Works */}
+          <motion.div variants={fadeUp} custom={0.2} className="glass rounded-xl p-6 border-primary/20 relative overflow-hidden mb-6 shadow-sm">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
             <h3 className="text-xs font-bold text-primary uppercase tracking-widest mb-6 text-center flex items-center justify-center gap-2">
               <motion.img 
@@ -268,7 +273,6 @@ export default function EvaluatePage() {
               How It Works
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-6 sm:gap-4 relative">
-              {/* Connecting line for desktop */}
               <div className="hidden sm:block absolute top-4 left-[10%] right-[10%] h-[1px] bg-border/50 -z-10" />
               {[
                 { step: "1", title: "Target Profile", desc: "Upload resume & set JD" },
@@ -332,236 +336,293 @@ export default function EvaluatePage() {
             /* Form UI */
             <div className="space-y-6">
               
-              {/* Row 1: Candidate Name & Position */}
-              <motion.div variants={fadeUp} custom={1} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <User className="w-4 h-4 text-primary" /> Candidate Name *
-                  </label>
-                  <Input
-                    placeholder="e.g., Alex Chen"
-                    value={candidateName}
-                    onChange={(e) => setCandidateName(e.target.value)}
-                    className="bg-card border-border"
-                  />
+              {/* Core Info Container */}
+              <motion.div variants={fadeUp} custom={1} className="glass p-6 rounded-xl border border-primary/10 space-y-6 shadow-sm">
+                
+                {/* Row 1: Talent Associate Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Building2 className="w-4 h-4 text-accent" /> Talent Associate Name <span className="text-[10px] text-muted-foreground font-normal ml-1">(Optional)</span>
+                    </label>
+                    <Input
+                      placeholder="e.g., Sarah Jenkins"
+                      value={talentAssociateName}
+                      onChange={(e) => setTalentAssociateName(e.target.value)}
+                      className="bg-background border-border"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Mail className="w-4 h-4 text-accent" /> Talent Associate Email <span className="text-[10px] text-muted-foreground font-normal ml-1">(Optional)</span>
+                    </label>
+                    <Input
+                      type="email"
+                      placeholder="sarah@company.com"
+                      value={talentAssociateEmail}
+                      onChange={(e) => setTalentAssociateEmail(e.target.value)}
+                      className="bg-background border-border"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <Briefcase className="w-4 h-4 text-accent" /> Position / Role *
-                  </label>
-                  <Input
-                    placeholder="e.g., React Developer, Data Scientist"
-                    value={position}
-                    onChange={(e) => setPosition(e.target.value)}
-                    className="bg-card border-border"
-                  />
+
+                <div className="h-[1px] w-full bg-border/50" />
+
+                {/* Row 2: Candidate Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <User className="w-4 h-4 text-primary" /> Candidate Name *
+                    </label>
+                    <Input
+                      placeholder="e.g., Alex Chen"
+                      value={candidateName}
+                      onChange={(e) => setCandidateName(e.target.value)}
+                      className="bg-background border-border focus-visible:ring-primary"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Mail className="w-4 h-4 text-primary" /> Candidate Email *
+                    </label>
+                    <Input
+                      type="email"
+                      placeholder="candidate@example.com"
+                      value={candidateEmail}
+                      onChange={(e) => setCandidateEmail(e.target.value)}
+                      className="bg-background border-border focus-visible:ring-primary"
+                    />
+                  </div>
+                </div>
+
+                {/* Row 3: Role & Level */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Briefcase className="w-4 h-4 text-primary" /> Position / Role *
+                    </label>
+                    <Input
+                      placeholder="e.g., React Developer, Data Scientist"
+                      value={position}
+                      onChange={(e) => setPosition(e.target.value)}
+                      className="bg-background border-border focus-visible:ring-primary"
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <motion.img 
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+                        src="/comp-logo.PNG" 
+                        alt="ForgePro" 
+                        className="w-4 h-4 object-contain drop-shadow-[0_0_5px_rgba(0,240,255,0.5)]"
+                      /> 
+                      Target Interview Level
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {LEVEL_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setSelectedLevel(opt)}
+                          className={`py-2 rounded-xl border text-center transition-all ${
+                            selectedLevel.value === opt.value
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:border-primary/30"
+                          }`}
+                        >
+                          <span className="block text-xs font-medium">{opt.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </motion.div>
 
-              {/* Row 2: Emails */}
-              <motion.div variants={fadeUp} custom={1.5} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <Mail className="w-4 h-4 text-primary" /> Candidate Email *
-                  </label>
-                  <Input
-                    type="email"
-                    placeholder="candidate@example.com"
-                    value={candidateEmail}
-                    onChange={(e) => setCandidateEmail(e.target.value)}
-                    className="bg-card border-border"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <Mail className="w-4 h-4 text-accent" /> Recruiter Email (Optional)
-                  </label>
-                  <Input
-                    type="email"
-                    placeholder="you@company.com"
-                    value={recruiterEmail}
-                    onChange={(e) => setRecruiterEmail(e.target.value)}
-                    className="bg-card border-border"
-                  />
-                  <p className="text-[10px] text-muted-foreground ml-1">Receive an alert when they finish.</p>
+              {/* Settings Container */}
+              <motion.div variants={fadeUp} custom={2} className="glass p-6 rounded-xl border border-primary/10 space-y-6 shadow-sm">
+                
+                {/* Row 4: Duration & Voices */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Clock className="w-4 h-4 text-primary" />
+                      Interview Duration
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {DURATION_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setDurationMinutes(opt)}
+                          className={`py-2.5 rounded-xl border text-center transition-all ${
+                            durationMinutes.value === opt.value
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border text-muted-foreground hover:border-primary/30"
+                          }`}
+                        >
+                          <span className="block text-xs font-medium">{opt.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Mic className="w-4 h-4 text-primary" />
+                      ForgePro Voices
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {VOICE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setVoiceType(opt)}
+                          className={`py-2.5 rounded-xl border text-center transition-all ${
+                            voiceType.value === opt.value
+                              ? "border-primary bg-primary/10 text-primary shadow-[0_0_10px_rgba(0,240,255,0.1)]"
+                              : "border-border text-muted-foreground hover:border-primary/30"
+                          }`}
+                        >
+                          <span className="block text-[11px] font-medium">{opt.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </motion.div>
 
-              {/* Row 3: Target Level & Duration */}
-              <motion.div variants={fadeUp} custom={2} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Documents Container */}
+              <motion.div variants={fadeUp} custom={3} className="glass p-6 rounded-xl border border-primary/10 space-y-6 shadow-sm">
+                
+                {/* Row 5: JD */}
                 <div className="space-y-3">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <motion.img 
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
-                      src="/comp-logo.PNG" 
-                      alt="ForgePro" 
-                      className="w-4 h-4 object-contain drop-shadow-[0_0_5px_rgba(0,240,255,0.5)]"
-                    /> 
-                    Target Interview Level
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {LEVEL_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => setSelectedLevel(opt)}
-                        className={`py-2 rounded-xl border text-center transition-all ${
-                          selectedLevel.value === opt.value
-                            ? "border-primary bg-primary/10 text-primary"
-                            : "border-border text-muted-foreground hover:border-primary/30"
-                        }`}
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <FileText className="w-4 h-4 text-primary" /> Job Description *
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button" variant="ghost" size="sm"
+                        onClick={clearJD}
+                        className="text-xs h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                       >
-                        <span className="block text-xs font-medium">{opt.label}</span>
-                      </button>
-                    ))}
+                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Reset
+                      </Button>
+                      <Button
+                        type="button" variant="outline" size="sm"
+                        onClick={handleGenerateJD}
+                        disabled={isGeneratingJD}
+                        className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
+                      >
+                        {isGeneratingJD ? (
+                          <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Generating...</span>
+                        ) : (
+                          <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Auto-Generate JD</span>
+                        )}
+                      </Button>
+                    </div>
                   </div>
+                  <Textarea
+                    placeholder="Paste the job description here, or click 'Auto-Generate JD' to let AI write one for you..."
+                    value={jobDescription}
+                    onChange={(e) => setJobDescription(e.target.value)}
+                    className="bg-background border-border min-h-[140px] resize-none focus-visible:ring-primary"
+                  />
                 </div>
 
+                <div className="h-[1px] w-full bg-border/50" />
+
+                {/* Row 6: Resume */}
                 <div className="space-y-3">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <Clock className="w-4 h-4 text-accent" />
-                    Interview Duration
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {DURATION_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => setDurationMinutes(opt)}
-                        className={`py-2 rounded-xl border text-center transition-all ${
-                          durationMinutes.value === opt.value
-                            ? "border-accent bg-accent/10 text-accent"
-                            : "border-border text-muted-foreground hover:border-accent/30"
-                        }`}
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <FileText className="w-4 h-4 text-primary" /> Candidate Resume *
+                    </label>
+                    <input ref={fileInputRef} type="file" accept=".pdf,.txt,.doc,.docx,.md" onChange={handleResumeUpload} className="hidden" />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button" variant="ghost" size="sm"
+                        onClick={clearUploadedResume}
+                        className="text-xs h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                       >
-                        <span className="block text-xs font-medium">{opt.label}</span>
+                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Reset
+                      </Button>
+                      <Button
+                        type="button" variant="outline" size="sm"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isExtractingResume}
+                        className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
+                      >
+                        {isExtractingResume ? (
+                          <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Extracting...</span>
+                        ) : (
+                          <span className="flex items-center gap-1.5"><Upload className="w-3 h-3" /> Upload Resume (PDF/TXT)</span>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {resumeFileName && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20">
+                      <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+                      <span className="text-xs text-primary font-medium truncate">{resumeFileName}</span>
+                      <button onClick={clearUploadedResume} className="ml-auto shrink-0">
+                        <X className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
                       </button>
-                    ))}
+                    </div>
+                  )}
+                  <Textarea
+                    placeholder="Paste resume content here, or upload a file above..."
+                    value={resume}
+                    onChange={(e) => setResume(e.target.value)}
+                    className="bg-background border-border min-h-[120px] resize-none focus-visible:ring-primary"
+                  />
+                </div>
+
+                <div className="h-[1px] w-full bg-border/50" />
+
+                {/* Row 7: ForgePro Transcript (Optional) */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <MessageSquare className="w-4 h-4 text-accent" /> 
+                      ForgePro Transcript <span className="text-[10px] text-muted-foreground font-normal ml-1">(Optional)</span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button" variant="ghost" size="sm"
+                        onClick={() => setTranscriptQuestions("")}
+                        className="text-xs h-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Reset
+                      </Button>
+                      <Button
+                        type="button" variant="outline" size="sm"
+                        onClick={handleGenerateTranscript}
+                        disabled={isGeneratingQuestions}
+                        className="text-xs h-8 border-accent/30 text-accent hover:bg-accent/10"
+                      >
+                        {isGeneratingQuestions ? (
+                          <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Generating...</span>
+                        ) : (
+                          <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Auto-Generate Questions</span>
+                        )}
+                      </Button>
+                    </div>
                   </div>
+                  <Textarea
+                    placeholder="Paste mandatory questions you want the AI to ask, or click 'Auto-Generate' to get a customized question bank..."
+                    value={transcriptQuestions}
+                    onChange={(e) => setTranscriptQuestions(e.target.value)}
+                    className="bg-background border-border min-h-[120px] resize-none focus-visible:ring-accent"
+                  />
                 </div>
-              </motion.div>
-
-              {/* Row 4: ForgePro Voices */}
-              <motion.div variants={fadeUp} custom={2.5} className="space-y-3">
-                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <Mic className="w-4 h-4 text-primary" />
-                  ForgePro Voices
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {VOICE_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => setVoiceType(opt)}
-                      className={`py-2.5 rounded-xl border text-center transition-all ${
-                        voiceType.value === opt.value
-                          ? "border-primary bg-primary/10 text-primary shadow-[0_0_10px_rgba(0,240,255,0.1)]"
-                          : "border-border text-muted-foreground hover:border-primary/30"
-                      }`}
-                    >
-                      <span className="block text-xs font-medium">{opt.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-
-              {/* Row 5: JD */}
-              <motion.div variants={fadeUp} custom={3} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <FileText className="w-4 h-4 text-primary" /> Job Description *
-                  </label>
-                  <Button
-                    type="button" variant="outline" size="sm"
-                    onClick={handleGenerateJD}
-                    disabled={isGeneratingJD}
-                    className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
-                  >
-                    {isGeneratingJD ? (
-                      <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Generating...</span>
-                    ) : (
-                      <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Auto-Generate JD</span>
-                    )}
-                  </Button>
-                </div>
-                <Textarea
-                  placeholder="Paste the job description here, or click 'Auto-Generate JD' to let AI write one for you..."
-                  value={jobDescription}
-                  onChange={(e) => setJobDescription(e.target.value)}
-                  className="bg-card border-border min-h-[140px] resize-none"
-                />
-              </motion.div>
-
-              {/* Row 6: Resume */}
-              <motion.div variants={fadeUp} custom={4} className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <FileText className="w-4 h-4 text-primary" /> Candidate Resume *
-                  </label>
-                  <input ref={fileInputRef} type="file" accept=".pdf,.txt,.doc,.docx,.md" onChange={handleResumeUpload} className="hidden" />
-                  <Button
-                    type="button" variant="outline" size="sm"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isExtractingResume}
-                    className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
-                  >
-                    {isExtractingResume ? (
-                      <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Extracting...</span>
-                    ) : (
-                      <span className="flex items-center gap-1.5"><Upload className="w-3 h-3" /> Upload Resume (PDF/TXT)</span>
-                    )}
-                  </Button>
-                </div>
-
-                {resumeFileName && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20">
-                    <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
-                    <span className="text-xs text-primary font-medium truncate">{resumeFileName}</span>
-                    <button onClick={clearUploadedResume} className="ml-auto shrink-0">
-                      <X className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
-                    </button>
-                  </div>
-                )}
-                <Textarea
-                  placeholder="Paste resume content here, or upload a file above..."
-                  value={resume}
-                  onChange={(e) => setResume(e.target.value)}
-                  className="bg-card border-border min-h-[120px] resize-none"
-                />
-              </motion.div>
-
-              {/* Row 7: ForgePro Transcript (Optional) */}
-              <motion.div variants={fadeUp} custom={4.5} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <MessageSquare className="w-4 h-4 text-accent" /> 
-                    ForgePro Transcript <span className="text-[10px] text-muted-foreground font-normal ml-1">(Optional)</span>
-                  </label>
-                  <Button
-                    type="button" variant="outline" size="sm"
-                    onClick={handleGenerateTranscript}
-                    disabled={isGeneratingQuestions}
-                    className="text-xs h-8 border-accent/30 text-accent hover:bg-accent/10"
-                  >
-                    {isGeneratingQuestions ? (
-                      <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Generating...</span>
-                    ) : (
-                      <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Auto-Generate Questions</span>
-                    )}
-                  </Button>
-                </div>
-                <Textarea
-                  placeholder="Paste mandatory questions you want the AI to ask, or click 'Auto-Generate' to get a customized question bank..."
-                  value={transcriptQuestions}
-                  onChange={(e) => setTranscriptQuestions(e.target.value)}
-                  className="bg-card border-border min-h-[120px] resize-none focus-visible:ring-accent"
-                />
               </motion.div>
 
               {/* Submit Button */}
-              <motion.div variants={fadeUp} custom={5}>
+              <motion.div variants={fadeUp} custom={4}>
                 <Button
                   onClick={handleGenerateLink}
                   disabled={!isValid || isGenerating || backendStatus === false}
-                  className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40 mt-4"
+                  className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40"
                 >
                   {isGenerating ? (
                     <span className="flex items-center gap-3">
