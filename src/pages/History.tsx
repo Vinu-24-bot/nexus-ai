@@ -7,7 +7,7 @@ import RecommendationBadge from "@/components/RecommendationBadge";
 import { Link } from "react-router-dom";
 import {
   ArrowRight, Calendar, User, Loader2, RefreshCw, Search,
-  Filter, Download, SortAsc, SortDesc, Hash, Trash2, FileText,
+  Filter, Download, SortAsc, SortDesc, Hash, Trash2, FileText, Sparkles
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -182,63 +182,88 @@ export default function HistoryPage() {
           </motion.div>
 
           {/* Search & Filters */}
-          <motion.div variants={fadeUp} custom={0.5} className="glass rounded-xl p-4 space-y-3 shadow-sm border border-primary/10">
-            <div className="flex gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by name, position, or ID (e.g. BATS-Alex_React...)..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 bg-background border-border focus-visible:ring-primary"
-                />
-              </div>
+          <motion.div variants={fadeUp} custom={0.5} className="glass rounded-xl p-5 space-y-5 shadow-sm border border-primary/10">
+            {/* Search Bar */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by name, position, or ID (e.g. BATS-Alex_React...)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 bg-background border-border focus-visible:ring-primary h-11"
+              />
             </div>
-            <div className="flex flex-wrap gap-2 items-center text-xs">
-              <Filter className="w-3.5 h-3.5 text-muted-foreground" />
-              {/* 🛡️ THE FIX: Added 'hold' and 'doubtful' to the filter options */}
-              {(["all", "pending", "selected", "rejected", "hold", "doubtful"] as FilterStatus[]).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setFilterStatus(s)}
-                  className={`px-2.5 py-1 rounded-full border transition-colors ${
-                    filterStatus === s
-                      ? "border-primary bg-primary/10 text-primary shadow-[0_0_10px_rgba(0,240,255,0.15)]"
-                      : "border-border text-muted-foreground hover:border-primary/30"
-                  }`}
-                >
-                  {s === "all" ? "All Statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
-                </button>
-              ))}
-              <span className="text-muted-foreground">|</span>
-              {(["all", "Strong Hire", "Lean Hire", "Reject"] as FilterRec[]).map((r) => (
-                <button
-                  key={r}
-                  onClick={() => setFilterRec(r)}
-                  className={`px-2.5 py-1 rounded-full border transition-colors ${
-                    filterRec === r
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:border-primary/30"
-                  }`}
-                >
-                  {r === "all" ? "All Recs" : r}
-                </button>
-              ))}
-              <span className="text-muted-foreground">|</span>
-              {(["date", "score", "name"] as SortField[]).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => toggleSort(f)}
-                  className={`px-2.5 py-1 rounded-full border flex items-center gap-1 transition-colors ${
-                    sortField === f
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border text-muted-foreground hover:border-primary/30"
-                  }`}
-                >
-                  {sortField === f && <SortIcon className="w-3 h-3" />}
-                  {f.charAt(0).toUpperCase() + f.slice(1)}
-                </button>
-              ))}
+
+            {/* 🛡️ THE FIX: Structured, Clearly Labeled Filter Columns */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2 border-t border-border/50">
+              
+              {/* Column 1: Recruiter Status */}
+              <div className="space-y-3">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <Filter className="w-3.5 h-3.5" /> Recruiter Status
+                </label>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {(["all", "pending", "selected", "rejected", "hold", "doubtful"] as FilterStatus[]).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setFilterStatus(s)}
+                      className={`px-3 py-1.5 rounded-md border transition-colors ${
+                        filterStatus === s
+                          ? "border-primary bg-primary/10 text-primary shadow-[0_0_10px_rgba(0,240,255,0.15)] font-medium"
+                          : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:bg-muted/50"
+                      }`}
+                    >
+                      {s === "all" ? "All Statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Column 2: ForgePro Recommendation */}
+              <div className="space-y-3">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" /> ForgePro Recommendation
+                </label>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {(["all", "Strong Hire", "Lean Hire", "Reject"] as FilterRec[]).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setFilterRec(r)}
+                      className={`px-3 py-1.5 rounded-md border transition-colors ${
+                        filterRec === r
+                          ? "border-accent bg-accent/10 text-accent shadow-[0_0_10px_rgba(139,92,246,0.15)] font-medium"
+                          : "border-border bg-background text-muted-foreground hover:border-accent/30 hover:bg-muted/50"
+                      }`}
+                    >
+                      {r === "all" ? "All Recs" : r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Column 3: Sort Order */}
+              <div className="space-y-3">
+                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <SortAsc className="w-3.5 h-3.5" /> Sort Results By
+                </label>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {(["date", "score", "name"] as SortField[]).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => toggleSort(f)}
+                      className={`px-3 py-1.5 rounded-md border flex items-center gap-1.5 transition-colors ${
+                        sortField === f
+                          ? "border-foreground bg-foreground/10 text-foreground font-medium"
+                          : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:bg-muted/50"
+                      }`}
+                    >
+                      {f.charAt(0).toUpperCase() + f.slice(1)}
+                      {sortField === f && <SortIcon className="w-3 h-3" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
             </div>
           </motion.div>
 
@@ -284,7 +309,6 @@ export default function HistoryPage() {
                             <Hash className="w-2.5 h-2.5" />
                             {result.id}
                           </span>
-                          {/* 🛡️ THE FIX: Render dynamic status colors in History list */}
                           {result.selection_status && result.selection_status !== "pending" && (
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${getStatusStyles(result.selection_status)}`}>
                               {result.selection_status}
