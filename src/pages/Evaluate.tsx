@@ -343,7 +343,7 @@ export default function EvaluatePage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <Building2 className="w-4 h-4 text-accent" /> Talent Associate Name <span className="text-[10px] text-muted-foreground font-normal ml-1">(Optional)</span>
+                      <Building2 className="w-4 h-4 text-accent" /> Talent Associate Name
                     </label>
                     <Input
                       placeholder="e.g., Sarah Jenkins"
@@ -354,7 +354,7 @@ export default function EvaluatePage() {
                   </div>
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <Mail className="w-4 h-4 text-accent" /> Talent Associate Email <span className="text-[10px] text-muted-foreground font-normal ml-1">(Optional)</span>
+                      <Mail className="w-4 h-4 text-accent" /> Talent Associate Email
                     </label>
                     <Input
                       type="email"
@@ -622,7 +622,7 @@ export default function EvaluatePage() {
                 <Button
                   onClick={handleGenerateLink}
                   disabled={!isValid || isGenerating || backendStatus === false}
-                  className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40"
+                  className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40 mt-4"
                 >
                   {isGenerating ? (
                     <span className="flex items-center gap-3">
