@@ -54,7 +54,7 @@ const fadeUp = {
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background transition-colors duration-300">
       <Navbar />
 
       {/* Hero Section with Split Layout */}
@@ -77,10 +77,11 @@ export default function LandingPage() {
               BATS ForgePro Platform
             </motion.div>
 
+            {/* Adjusted Font Size for a Cleaner Enterprise Look */}
             <motion.h1
               variants={fadeUp}
               custom={1}
-              className="text-5xl sm:text-6xl lg:text-7xl font-display font-bold text-foreground leading-tight glow-text-cyan"
+              className="text-4xl sm:text-5xl lg:text-6xl font-display font-bold text-foreground leading-tight glow-text-cyan"
             >
               Accelerate Tech Hiring
               <br />
@@ -117,34 +118,27 @@ export default function LandingPage() {
             transition={{ duration: 1.2, ease: "easeOut" }}
             className="flex-1 relative w-full max-w-[400px] lg:max-w-[550px] aspect-square flex items-center justify-center"
           >
-            {/* Outer Tech Ring */}
             <motion.div
               animate={{ rotate: -360 }}
               transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
               className="absolute inset-4 rounded-full border-[1.5px] border-primary/20 border-dashed opacity-50"
             />
-            {/* Inner Tech Ring */}
             <motion.div
               animate={{ rotate: 360 }}
               transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
               className="absolute inset-16 rounded-full border border-nexus-green/30 border-dotted opacity-50"
             />
-
-            {/* Core Logo Container */}
             <motion.div
               animate={{ y: [-15, 15, -15] }}
               transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
               className="relative w-3/4 h-3/4 flex items-center justify-center"
             >
-              {/* Multi-color ambient aura matching the logo */}
               <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-blue-500/20 via-orange-500/20 to-green-500/20 blur-[60px]" />
-              
-              {/* Spinning Logo Image */}
               <motion.img
                 animate={{ rotate: 360 }}
                 transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
                 src="/comp-logo.PNG"
-                alt="BATS ForgePro Logo"
+                alt="ForgePro Logo"
                 className="w-full h-full object-contain relative z-10 drop-shadow-[0_0_25px_rgba(0,240,255,0.4)]"
               />
             </motion.div>
@@ -152,7 +146,6 @@ export default function LandingPage() {
 
         </div>
 
-        {/* Gradient fade at bottom */}
         <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
       </section>
 
@@ -237,11 +230,17 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border py-8">
+      <footer className="border-t border-border py-8 bg-background transition-colors duration-300">
         <div className="container mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Brain className="w-5 h-5 text-primary" />
-            <span className="font-display text-sm font-bold tracking-wider text-foreground">BATS ForgePro</span>
+          <div className="flex items-center gap-3">
+            <motion.img 
+              animate={{ rotate: 360 }}
+              transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+              src="/comp-logo.PNG" 
+              alt="Logo" 
+              className="w-5 h-5 object-contain"
+            />
+            <span className="font-display text-sm font-bold tracking-wider text-foreground">ForgePro</span>
           </div>
           <p className="text-xs text-muted-foreground">© 2026 BATS ForgePro. All rights reserved.</p>
         </div>
