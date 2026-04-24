@@ -209,21 +209,13 @@ export default function EvaluatePage() {
             </p>
           </motion.div>
 
-          {/* Backend Status */}
+          {/* Backend Status (Only shows errors now) */}
           <motion.div variants={fadeUp} custom={0.3}>
             {backendStatus === false && (
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
                 <WifiOff className="w-4 h-4 text-destructive shrink-0" />
                 <p className="text-xs text-destructive">
                   <strong>Backend offline</strong> — Cannot generate links or send emails. Please start the backend server.
-                </p>
-              </div>
-            )}
-            {backendStatus === true && (
-              <div className="rounded-xl p-3 bg-primary/5 border border-primary/20 flex items-center gap-3">
-                <Wifi className="w-4 h-4 text-primary shrink-0" />
-                <p className="text-xs text-primary">
-                  <strong>Backend connected</strong> — Webhooks active. Ready to generate and email links.
                 </p>
               </div>
             )}

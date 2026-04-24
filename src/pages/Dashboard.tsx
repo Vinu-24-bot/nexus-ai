@@ -159,12 +159,11 @@ export default function DashboardPage() {
               <p className="text-muted-foreground mt-1 text-sm md:text-base">Real-time AI pipeline analytics and hiring metrics.</p>
             </div>
             <div className="flex items-center gap-3">
-              {backendOnline !== null && (
-                <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ${
-                  backendOnline ? "bg-primary/10 text-primary border-primary/20" : "bg-destructive/10 text-destructive border-destructive/20"
-                }`}>
-                  {backendOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
-                  {backendOnline ? "System Online" : "Local Mode"}
+              {/* Only show warning if backend is explicitly offline */}
+              {backendOnline === false && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border bg-destructive/10 text-destructive border-destructive/20">
+                  <WifiOff className="w-3.5 h-3.5" />
+                  Local Mode
                 </div>
               )}
               <Button variant="outline" size="sm" onClick={() => { fetchData(true); fetchFeedbacks(); }} disabled={refreshing} className="h-8">

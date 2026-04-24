@@ -227,21 +227,13 @@ export default function UploadAnalysisPage() {
             </p>
           </motion.div>
 
-          {/* Backend Status Banner */}
+          {/* Backend Status Banner (Only shows errors now) */}
           <motion.div variants={fadeUp} custom={0.3}>
             {backendStatus === false && (
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
                 <WifiOff className="w-4 h-4 text-destructive shrink-0" />
                 <p className="text-xs text-destructive">
                   <strong>Backend offline</strong> — BATS will evaluate locally using smart keyword analysis. Start backend for AI-powered deep analysis.
-                </p>
-              </div>
-            )}
-            {backendStatus === true && (
-              <div className="rounded-xl p-3 bg-primary/5 border border-primary/20 flex items-center gap-3">
-                <Wifi className="w-4 h-4 text-primary shrink-0" />
-                <p className="text-xs text-primary">
-                  <strong>Backend connected</strong> — AI-powered evaluation is active.
                 </p>
               </div>
             )}
