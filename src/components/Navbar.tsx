@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 const navItems = [
   { path: "/", label: "Home", icon: Home },
-  { path: "/evaluate", label: "Interview", icon: Mic },
+  { path: "/evaluate", label: "Initial Screening", icon: Mic },
   { path: "/upload-analysis", label: "Upload", icon: Upload },
   { path: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { path: "/history", label: "History", icon: FileText },
