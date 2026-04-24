@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   FileText, Briefcase, User, Loader2, Sparkles, Upload, X, CheckCircle2,
-  WifiOff, Mail, Copy, Send
+  WifiOff, Mail, Copy, Send, Clock, Mic, MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +31,31 @@ const LEVEL_OPTIONS = [
   { label: "L4 (Lead/Architect)", value: "L4" },
 ];
 
+const DURATION_OPTIONS = [
+  { label: "10 Minutes", value: 10 },
+  { label: "15 Minutes", value: 15 },
+  { label: "30 Minutes", value: 30 },
+];
+
+const VOICE_OPTIONS = [
+  { label: "Indian Accent", value: "indian_female" },
+  { label: "Female (US)", value: "female" },
+  { label: "Male (US)", value: "male" },
+];
+
+const RANDOM_ROLES = [
+  "Cloud Security Architect",
+  "Blockchain Smart Contract Developer",
+  "Senior DevOps Engineer",
+  "Data Scientist (NLP)",
+  "Full Stack React Native Engineer",
+  "Cybersecurity Analyst",
+  "Product Manager (AI Tools)",
+  "Backend Golang Developer",
+  "Site Reliability Engineer",
+  "Machine Learning Engineer"
+];
+
 const JD_TEMPLATES: Record<string, string> = {
   "react developer": `Job Title: React Developer\n\nJob Summary:\nWe are looking for a skilled React Developer to build and maintain high-performance web applications using React.js and modern JavaScript ecosystem.\n\nKey Responsibilities:\n- Build responsive, reusable UI components using React.js\n- Implement state management solutions (Redux, Context API, Zustand)\n- Write clean, maintainable, and well-tested code with Jest/RTL\n- Collaborate with backend engineers on RESTful APIs and GraphQL\n- Optimize applications for maximum speed and scalability\n- Participate in code reviews and mentor junior developers\n- Translate UI/UX designs into high-quality code\n\nRequired Skills & Qualifications:\n- 2+ years of hands-on React.js development experience\n- Strong proficiency in JavaScript/TypeScript, HTML5, CSS3\n- Deep understanding of React hooks, component lifecycle, virtual DOM\n- Experience with build tools (Webpack, Vite, Babel)\n- Familiarity with RESTful APIs and async programming\n- Git version control proficiency\n- Understanding of responsive design and cross-browser compatibility\n\nPreferred Skills:\n- Next.js or Remix framework experience\n- Testing experience (Jest, React Testing Library, Cypress)\n- CI/CD pipeline experience\n- Tailwind CSS or CSS-in-JS solutions\n\nExperience Level: Mid-Level (2-4 years)`,
   "full stack developer": `Job Title: Full Stack Developer\n\nJob Summary:\nSeeking a versatile Full Stack Developer proficient in both frontend and backend technologies to build end-to-end web applications.\n\nKey Responsibilities:\n- Design and develop full-stack web applications\n- Build scalable RESTful APIs and microservices\n- Develop responsive frontend interfaces with modern frameworks\n- Manage relational and NoSQL databases\n- Deploy and maintain cloud infrastructure\n- Write unit/integration tests\n- Ensure application security and performance\n\nRequired Skills:\n- 3+ years full-stack development experience\n- Frontend: React/Vue/Angular, HTML5, CSS3, JavaScript/TypeScript\n- Backend: Node.js/Python/Java with Express/FastAPI/Spring\n- Database: PostgreSQL, MongoDB, Redis\n- RESTful API design and implementation\n- Git, Docker basics, Linux command line\n\nPreferred Skills:\n- Cloud platforms (AWS/GCP/Azure)\n- Kubernetes, CI/CD pipelines\n- GraphQL\n- System design fundamentals\n\nExperience Level: Mid to Senior (3-6 years)`,
@@ -45,6 +70,7 @@ export default function EvaluatePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingJD, setIsGeneratingJD] = useState(false);
+  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
   const [isExtractingResume, setIsExtractingResume] = useState(false);
   
   // State Fields
@@ -55,7 +81,11 @@ export default function EvaluatePage() {
   const [jobDescription, setJobDescription] = useState("");
   const [resume, setResume] = useState("");
   const [resumeFileName, setResumeFileName] = useState("");
+  
   const [selectedLevel, setSelectedLevel] = useState(LEVEL_OPTIONS[1]);
+  const [durationMinutes, setDurationMinutes] = useState(DURATION_OPTIONS[0]); // Default 10 Mins
+  const [voiceType, setVoiceType] = useState(VOICE_OPTIONS[0]); // Default Indian
+  const [transcriptQuestions, setTranscriptQuestions] = useState("");
   
   const [backendStatus, setBackendStatus] = useState<boolean | null>(null);
   const [generatedLink, setGeneratedLink] = useState("");
@@ -65,31 +95,51 @@ export default function EvaluatePage() {
   });
 
   const handleGenerateJD = async () => {
-    if (!position) { toast.error("Enter the position title first"); return; }
+    let targetPosition = position.trim();
+    
+    // 🛡️ If left blank, generate a random role and update the position field
+    if (!targetPosition) {
+      targetPosition = RANDOM_ROLES[Math.floor(Math.random() * RANDOM_ROLES.length)];
+      setPosition(targetPosition);
+      toast.success(`No role entered. Randomly selected: ${targetPosition}`);
+    }
+
     setIsGeneratingJD(true);
 
-    const posLower = position.toLowerCase().trim();
+    const posLower = targetPosition.toLowerCase();
     const templateKey = Object.keys(JD_TEMPLATES).find(
       (k) => posLower.includes(k) || k.includes(posLower)
     );
     if (templateKey) {
       setJobDescription(JD_TEMPLATES[templateKey]);
-      toast.success(`JD generated for "${position}"!`);
+      toast.success(`JD generated for "${targetPosition}"!`);
       setIsGeneratingJD(false);
       return;
     }
 
     try {
-      const jd = await generateJD(position);
+      const jd = await generateJD(targetPosition);
       setJobDescription(jd);
       toast.success("JD generated by AI!");
     } catch {
-      const localJD = generateLocalJD(position);
+      const localJD = generateLocalJD(targetPosition);
       setJobDescription(localJD);
-      toast.success("JD generated locally (backend unavailable — using template)");
+      toast.success("JD generated locally (backend unavailable)");
     } finally {
       setIsGeneratingJD(false);
     }
+  };
+
+  const handleGenerateTranscript = () => {
+    const targetRole = position.trim() || "Software Engineer";
+    setIsGeneratingQuestions(true);
+    
+    // Simulated instant generation for the transcript box
+    setTimeout(() => {
+      setTranscriptQuestions(`1. Can you walk me through your most complex project as a ${targetRole}?\n2. What is the most challenging technical bug you've solved recently, and how did you approach it?\n3. How do you ensure code quality and maintainability in your deployments?\n4. Describe a time you disagreed with a senior engineer on an architectural decision.\n5. Where do you see your technical skills adding the most immediate value to our team?`);
+      setIsGeneratingQuestions(false);
+      toast.success("Transcript questions generated!");
+    }, 800);
   };
 
   const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -157,7 +207,10 @@ export default function EvaluatePage() {
           position,
           job_description: jobDescription,
           resume_text: resume,
-          interview_level: selectedLevel.label
+          interview_level: selectedLevel.label,
+          duration_minutes: durationMinutes.value,
+          voice_type: voiceType.value,
+          custom_transcript: transcriptQuestions
         })
       });
 
@@ -168,7 +221,6 @@ export default function EvaluatePage() {
 
       const data = await res.json();
       
-      // Determine the correct frontend URL for the copyable link
       const frontendUrl = window.location.origin;
       setGeneratedLink(`${frontendUrl}/interview/${data.session_id}`);
       
@@ -238,7 +290,7 @@ export default function EvaluatePage() {
             </div>
           </motion.div>
 
-          {/* Backend Status (Only shows errors now) */}
+          {/* Backend Status */}
           <motion.div variants={fadeUp} custom={0.3}>
             {backendStatus === false && (
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
@@ -335,26 +387,73 @@ export default function EvaluatePage() {
                 </div>
               </motion.div>
 
-              {/* Interview Level */}
-              <motion.div variants={fadeUp} custom={2} className="space-y-3">
+              {/* Row 3: Target Level & Duration */}
+              <motion.div variants={fadeUp} custom={2} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <motion.img 
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+                      src="/comp-logo.PNG" 
+                      alt="ForgePro" 
+                      className="w-4 h-4 object-contain drop-shadow-[0_0_5px_rgba(0,240,255,0.5)]"
+                    /> 
+                    Target Interview Level
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {LEVEL_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setSelectedLevel(opt)}
+                        className={`py-2 rounded-xl border text-center transition-all ${
+                          selectedLevel.value === opt.value
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground hover:border-primary/30"
+                        }`}
+                      >
+                        <span className="block text-xs font-medium">{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Clock className="w-4 h-4 text-accent" />
+                    Interview Duration
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {DURATION_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setDurationMinutes(opt)}
+                        className={`py-2 rounded-xl border text-center transition-all ${
+                          durationMinutes.value === opt.value
+                            ? "border-accent bg-accent/10 text-accent"
+                            : "border-border text-muted-foreground hover:border-accent/30"
+                        }`}
+                      >
+                        <span className="block text-xs font-medium">{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </motion.div>
+
+              {/* Row 4: ForgePro Voices */}
+              <motion.div variants={fadeUp} custom={2.5} className="space-y-3">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                  <motion.img 
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
-                    src="/comp-logo.PNG" 
-                    alt="ForgePro" 
-                    className="w-4 h-4 object-contain drop-shadow-[0_0_5px_rgba(0,240,255,0.5)]"
-                  /> 
-                  Target Interview Level
+                  <Mic className="w-4 h-4 text-primary" />
+                  ForgePro Voices
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {LEVEL_OPTIONS.map((opt) => (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {VOICE_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}
-                      onClick={() => setSelectedLevel(opt)}
-                      className={`py-2 rounded-xl border text-center transition-all ${
-                        selectedLevel.value === opt.value
-                          ? "border-primary bg-primary/10 text-primary"
+                      onClick={() => setVoiceType(opt)}
+                      className={`py-2.5 rounded-xl border text-center transition-all ${
+                        voiceType.value === opt.value
+                          ? "border-primary bg-primary/10 text-primary shadow-[0_0_10px_rgba(0,240,255,0.1)]"
                           : "border-border text-muted-foreground hover:border-primary/30"
                       }`}
                     >
@@ -364,7 +463,7 @@ export default function EvaluatePage() {
                 </div>
               </motion.div>
 
-              {/* JD */}
+              {/* Row 5: JD */}
               <motion.div variants={fadeUp} custom={3} className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -373,7 +472,7 @@ export default function EvaluatePage() {
                   <Button
                     type="button" variant="outline" size="sm"
                     onClick={handleGenerateJD}
-                    disabled={isGeneratingJD || !position}
+                    disabled={isGeneratingJD}
                     className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/10"
                   >
                     {isGeneratingJD ? (
@@ -384,14 +483,14 @@ export default function EvaluatePage() {
                   </Button>
                 </div>
                 <Textarea
-                  placeholder="Paste the job description here, or click 'Auto-Generate JD' above..."
+                  placeholder="Paste the job description here, or click 'Auto-Generate JD' to let AI write one for you..."
                   value={jobDescription}
                   onChange={(e) => setJobDescription(e.target.value)}
                   className="bg-card border-border min-h-[140px] resize-none"
                 />
               </motion.div>
 
-              {/* Resume */}
+              {/* Row 6: Resume */}
               <motion.div variants={fadeUp} custom={4} className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -429,12 +528,40 @@ export default function EvaluatePage() {
                 />
               </motion.div>
 
+              {/* Row 7: ForgePro Transcript (Optional) */}
+              <motion.div variants={fadeUp} custom={4.5} className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <MessageSquare className="w-4 h-4 text-accent" /> 
+                    ForgePro Transcript <span className="text-[10px] text-muted-foreground font-normal ml-1">(Optional)</span>
+                  </label>
+                  <Button
+                    type="button" variant="outline" size="sm"
+                    onClick={handleGenerateTranscript}
+                    disabled={isGeneratingQuestions}
+                    className="text-xs h-8 border-accent/30 text-accent hover:bg-accent/10"
+                  >
+                    {isGeneratingQuestions ? (
+                      <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Generating...</span>
+                    ) : (
+                      <span className="flex items-center gap-1.5"><Sparkles className="w-3 h-3" /> Auto-Generate Questions</span>
+                    )}
+                  </Button>
+                </div>
+                <Textarea
+                  placeholder="Paste mandatory questions you want the AI to ask, or click 'Auto-Generate' to get a customized question bank..."
+                  value={transcriptQuestions}
+                  onChange={(e) => setTranscriptQuestions(e.target.value)}
+                  className="bg-card border-border min-h-[120px] resize-none focus-visible:ring-accent"
+                />
+              </motion.div>
+
               {/* Submit Button */}
               <motion.div variants={fadeUp} custom={5}>
                 <Button
                   onClick={handleGenerateLink}
                   disabled={!isValid || isGenerating || backendStatus === false}
-                  className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40"
+                  className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40 mt-4"
                 >
                   {isGenerating ? (
                     <span className="flex items-center gap-3">
