@@ -24,8 +24,25 @@ const fadeUp = {
 const REFRESH_INTERVAL = 15000;
 
 type SortField = "date" | "score" | "name";
-type FilterStatus = "all" | "pending" | "selected" | "rejected";
+type FilterStatus = "all" | "pending" | "selected" | "rejected" | "hold" | "doubtful";
 type FilterRec = "all" | "Strong Hire" | "Lean Hire" | "Reject";
+
+// 🛡️ THE FIX: Enterprise Status Styles (Added Hold & Doubtful) for History list
+const getStatusStyles = (status: string) => {
+  const s = (status || "").toLowerCase();
+  if (s.includes("strong hire") || s.includes("selected") || s === "hire") {
+    return "bg-green-500/10 text-green-500 border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.15)]";
+  } else if (s.includes("lean hire")) {
+    return "bg-emerald-500/10 text-emerald-500 border-emerald-500/30";
+  } else if (s.includes("reject")) {
+    return "bg-destructive/10 text-destructive border-destructive/30";
+  } else if (s.includes("hold")) {
+    return "bg-blue-500/10 text-blue-500 border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.15)]";
+  } else if (s.includes("doubtful")) {
+    return "bg-orange-500/10 text-orange-500 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]";
+  }
+  return "text-yellow-500 bg-yellow-500/10 border-yellow-500/30";
+};
 
 export default function HistoryPage() {
   const [results, setResults] = useState<EvaluationResult[]>([]);
@@ -152,20 +169,20 @@ export default function HistoryPage() {
               </p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleExportCSV} className="text-xs">
+              <Button variant="outline" size="sm" onClick={handleExportCSV} className="text-xs text-muted-foreground hover:text-foreground">
                 <FileText className="w-3.5 h-3.5 mr-1.5" /> Export CSV
               </Button>
-              <Button variant="outline" size="sm" onClick={handleExportAll} className="text-xs">
+              <Button variant="outline" size="sm" onClick={handleExportAll} className="text-xs text-muted-foreground hover:text-foreground">
                 <Download className="w-3.5 h-3.5 mr-1.5" /> Export JSON
               </Button>
-              <Button variant="outline" size="sm" onClick={() => fetchData(true)} disabled={refreshing} className="text-xs">
+              <Button variant="outline" size="sm" onClick={() => fetchData(true)} disabled={refreshing} className="text-xs text-muted-foreground hover:text-foreground">
                 <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${refreshing ? "animate-spin" : ""}`} /> Refresh
               </Button>
             </div>
           </motion.div>
 
           {/* Search & Filters */}
-          <motion.div variants={fadeUp} custom={0.5} className="glass rounded-xl p-4 space-y-3">
+          <motion.div variants={fadeUp} custom={0.5} className="glass rounded-xl p-4 space-y-3 shadow-sm border border-primary/10">
             <div className="flex gap-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -173,23 +190,24 @@ export default function HistoryPage() {
                   placeholder="Search by name, position, or ID (e.g. BATS-Alex_React...)..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 bg-card border-border"
+                  className="pl-9 bg-background border-border focus-visible:ring-primary"
                 />
               </div>
             </div>
             <div className="flex flex-wrap gap-2 items-center text-xs">
               <Filter className="w-3.5 h-3.5 text-muted-foreground" />
-              {(["all", "pending", "selected", "rejected"] as FilterStatus[]).map((s) => (
+              {/* 🛡️ THE FIX: Added 'hold' and 'doubtful' to the filter options */}
+              {(["all", "pending", "selected", "rejected", "hold", "doubtful"] as FilterStatus[]).map((s) => (
                 <button
                   key={s}
                   onClick={() => setFilterStatus(s)}
                   className={`px-2.5 py-1 rounded-full border transition-colors ${
                     filterStatus === s
-                      ? "border-primary bg-primary/10 text-primary"
+                      ? "border-primary bg-primary/10 text-primary shadow-[0_0_10px_rgba(0,240,255,0.15)]"
                       : "border-border text-muted-foreground hover:border-primary/30"
                   }`}
                 >
-                  {s === "all" ? "All Status" : s.charAt(0).toUpperCase() + s.slice(1)}
+                  {s === "all" ? "All Statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
                 </button>
               ))}
               <span className="text-muted-foreground">|</span>
@@ -229,7 +247,7 @@ export default function HistoryPage() {
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
             </div>
           ) : filtered.length === 0 ? (
-            <div className="glass rounded-xl p-8 text-center">
+            <div className="glass rounded-xl p-8 text-center border border-dashed border-border/50">
               <p className="text-muted-foreground">
                 {results.length === 0
                   ? "No evaluations yet. Complete an interview to see history."
@@ -237,8 +255,8 @@ export default function HistoryPage() {
               </p>
               {results.length === 0 && (
                 <div className="flex gap-3 justify-center mt-3">
-                  <Link to="/evaluate" className="text-primary text-sm hover:underline">Start an Interview →</Link>
-                  <Link to="/upload-analysis" className="text-accent text-sm hover:underline">Upload & Analyze →</Link>
+                  <Link to="/evaluate" className="text-primary text-sm hover:underline font-medium">Start an Interview →</Link>
+                  <Link to="/upload-analysis" className="text-accent text-sm hover:underline font-medium">Upload & Analyze →</Link>
                 </div>
               )}
             </div>
@@ -246,12 +264,12 @@ export default function HistoryPage() {
             <motion.div variants={fadeUp} custom={1} className="space-y-3">
               {filtered.map((result, i) => (
                 <motion.div key={result.id} variants={fadeUp} custom={2 + i * 0.1}>
-                  <div className="glass rounded-xl p-5 flex items-center justify-between gap-4 hover:border-primary/30 transition-all group">
+                  <div className="glass rounded-xl p-5 flex items-center justify-between gap-4 hover:border-primary/40 transition-all group shadow-sm">
                     <Link
                       to={`/result/${result.id}`}
                       className="flex items-center gap-4 min-w-0 flex-1"
                     >
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
                         <User className="w-5 h-5 text-primary" />
                       </div>
                       <div className="min-w-0">
@@ -262,15 +280,14 @@ export default function HistoryPage() {
                             <Calendar className="w-3 h-3" />
                             {result.date}
                           </span>
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground/70 font-mono">
+                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground/70 font-mono border border-border/50 px-1.5 py-0.5 rounded">
                             <Hash className="w-2.5 h-2.5" />
                             {result.id}
                           </span>
+                          {/* 🛡️ THE FIX: Render dynamic status colors in History list */}
                           {result.selection_status && result.selection_status !== "pending" && (
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                              result.selection_status === "selected" ? "text-primary bg-primary/10" : "text-destructive bg-destructive/10"
-                            }`}>
-                              {result.selection_status.toUpperCase()}
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${getStatusStyles(result.selection_status)}`}>
+                              {result.selection_status}
                             </span>
                           )}
                         </div>
