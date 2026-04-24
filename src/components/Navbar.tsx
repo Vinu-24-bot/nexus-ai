@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Brain, BarChart3, FileText, Home, Mic, Upload } from "lucide-react";
+import { BarChart3, FileText, Home, Mic, Upload, Moon, Sun, Monitor } from "lucide-react";
+import { useEffect, useState } from "react";
 
 const navItems = [
   { path: "/", label: "Home", icon: Home },
@@ -12,25 +13,54 @@ const navItems = [
 
 export default function Navbar() {
   const location = useLocation();
+  const [theme, setTheme] = useState<"dark" | "light" | "slate">("dark");
+
+  // Load theme from local storage on mount and apply to the document
+  useEffect(() => {
+    const savedTheme = (localStorage.getItem("forgepro_theme") as "dark" | "light" | "slate") || "dark";
+    setTheme(savedTheme);
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove("theme-light", "theme-slate");
+    
+    if (theme === "light") {
+      root.classList.add("theme-light");
+    } else if (theme === "slate") {
+      root.classList.add("theme-slate");
+    }
+    
+    localStorage.setItem("forgepro_theme", theme);
+  }, [theme]);
 
   return (
     <motion.nav
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.5 }}
-      className="fixed top-0 left-0 right-0 z-50 glass border-b border-border"
+      className="fixed top-0 left-0 right-0 z-50 glass border-b border-border transition-colors duration-300"
     >
       <div className="container mx-auto flex items-center justify-between h-16 px-6">
+        
+        {/* BRANDING: Spinning Logo + ForgePro Text */}
         <Link to="/" className="flex items-center gap-3 group">
-          <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center glow-cyan">
-            <Brain className="w-5 h-5 text-primary" />
+          <div className="w-9 h-9 rounded-lg bg-primary/5 flex items-center justify-center border border-primary/20 overflow-hidden p-1 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
+            <motion.img 
+              animate={{ rotate: 360 }}
+              transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+              src="/comp-logo.PNG" 
+              alt="ForgePro Logo" 
+              className="w-full h-full object-contain"
+            />
           </div>
           <span className="font-display text-lg font-bold tracking-wider text-foreground">
-            BATS
+            ForgePro
           </span>
         </Link>
 
-        <div className="flex items-center gap-1">
+        {/* NAVIGATION LINKS */}
+        <div className="hidden md:flex items-center gap-1">
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
@@ -44,7 +74,7 @@ export default function Navbar() {
                 }`}
               >
                 <item.icon className="w-4 h-4" />
-                <span className="hidden sm:inline">{item.label}</span>
+                <span>{item.label}</span>
                 {isActive && (
                   <motion.div
                     layoutId="nav-active"
@@ -56,6 +86,32 @@ export default function Navbar() {
             );
           })}
         </div>
+
+        {/* THEME SWITCHER */}
+        <div className="flex items-center gap-2 p-1 rounded-lg bg-muted/50 border border-border">
+          <button
+            onClick={() => setTheme("dark")}
+            className={`p-1.5 rounded-md transition-all ${theme === "dark" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            title="Dark Mode"
+          >
+            <Moon className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setTheme("slate")}
+            className={`p-1.5 rounded-md transition-all ${theme === "slate" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            title="Slate Mode"
+          >
+            <Monitor className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setTheme("light")}
+            className={`p-1.5 rounded-md transition-all ${theme === "light" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            title="Light Mode"
+          >
+            <Sun className="w-4 h-4" />
+          </button>
+        </div>
+
       </div>
     </motion.nav>
   );
