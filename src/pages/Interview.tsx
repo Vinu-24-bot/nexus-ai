@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Square, ChevronRight, Loader2, Focus, ScanFace, Activity,
   Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck,
-  UserFocus, Fingerprint, Eye
+  Eye, MousePointerClick, Keyboard, LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -137,7 +137,6 @@ export default function InterviewPage() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const totalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -152,6 +151,8 @@ export default function InterviewPage() {
   const securityLoopRef = useRef<number | null>(null);
 
   const isTerminatingRef = useRef(false);
+  const escWarningsRef = useRef(0);
+  const clickWarningsRef = useRef(0);
 
   const [submitStatusIndex, setSubmitStatusIndex] = useState(0);
   const submitStatuses = [
@@ -222,6 +223,14 @@ export default function InterviewPage() {
     };
   }, []);
 
+  // 🛡️ THE FIX: Re-attach video stream when entering the active interview phase
+  useEffect(() => {
+    if (interviewStep === "interview" && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [interviewStep]);
+
   // --- SECURITY VAULT CONTROLLER ---
   const handleForceEndInterview = useCallback(async (isEarlyLeave = false, reason = "") => {
     if (isTerminatingRef.current) return;
@@ -253,6 +262,7 @@ export default function InterviewPage() {
 
     setCheatStrikes(prev => {
       const newStrikes = prev + 1;
+      // We still map general visual violations to the 3-strike HUD indicator
       if (newStrikes >= 3) {
         handleForceEndInterview(true, `SECURITY BREACH: ${reason} (3 Strikes Exceeded).`);
       } else {
@@ -263,31 +273,89 @@ export default function InterviewPage() {
     });
   }, [voiceGender, handleForceEndInterview]);
 
-  // --- TAB & FOCUS MONITORING ---
+  // --- TAB, FOCUS & HARDWARE MONITORING ---
   useEffect(() => {
     if (interviewStep !== "interview" && interviewStep !== "scanning") return;
     
     const handleVisibilityChange = () => {
       if (document.hidden && !isTerminatingRef.current) handleSecurityViolation("Switched tabs or minimized browser");
     };
+    
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement && !isTerminatingRef.current) handleSecurityViolation("Exited Full-Screen Mode");
     };
+
+    // 🛡️ THE FIX: Ironclad Keyboard and Mouse Lock
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTerminatingRef.current) return;
+      
+      // Whitelist safe media keys
+      const allowedKeys = [
+        "AudioVolumeUp", "AudioVolumeDown", "AudioVolumeMute", 
+        "MediaPlayPause", "BrightnessUp", "BrightnessDown"
+      ];
+      if (allowedKeys.includes(e.key)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === "Escape") {
+        escWarningsRef.current += 1;
+        if (escWarningsRef.current >= 3) {
+          handleForceEndInterview(true, "SECURITY BREACH: Candidate attempted to bypass lock with ESC key.");
+        } else {
+          toast.error(`SECURITY WARNING: ESC key is strictly prohibited. (Warning ${escWarningsRef.current}/2)`);
+          speakText(`Warning. Escape key pressed.`, voiceGender);
+        }
+      } else {
+        clickWarningsRef.current += 1;
+        if (clickWarningsRef.current >= 4) {
+           handleForceEndInterview(true, "SECURITY BREACH: Excessive keyboard interaction detected.");
+        } else {
+           toast.error(`SECURITY WARNING: Keyboard is locked. Do not press keys. (Warning ${clickWarningsRef.current}/3)`);
+        }
+      }
+    };
+
+    const handleMouseClick = (e: MouseEvent) => {
+       if (isTerminatingRef.current) return;
+       // Allow clicking native buttons (Submit Answer, End Interview)
+       const target = e.target as HTMLElement;
+       if (target.closest('button')) return;
+
+       e.preventDefault();
+       clickWarningsRef.current += 1;
+       if (clickWarningsRef.current >= 4) {
+         handleForceEndInterview(true, "SECURITY BREACH: Excessive background clicking detected.");
+       } else {
+         toast.error(`SECURITY WARNING: Mouse clicks outside buttons are logged. (Warning ${clickWarningsRef.current}/3)`);
+       }
+    };
+
+    const handleContextMenu = (e: MouseEvent) => e.preventDefault(); // Block right click
     
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     
+    if (interviewStep === "interview") {
+      window.addEventListener("keydown", handleKeyDown, { capture: true });
+      window.addEventListener("mousedown", handleMouseClick, { capture: true });
+      window.addEventListener("contextmenu", handleContextMenu);
+    }
+    
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      window.removeEventListener("mousedown", handleMouseClick, { capture: true });
+      window.removeEventListener("contextmenu", handleContextMenu);
     };
   }, [interviewStep, handleSecurityViolation]);
 
-  // --- COMPUTER VISION & LIP SYNC ENGINE (SIMULATED FOR BROWSER STABILITY) ---
+  // --- COMPUTER VISION & LIP SYNC ENGINE ---
   const startSecurityTelemetry = () => {
     if (!streamRef.current) return;
 
-    // Set up Audio Lip Sync Analyzer
     const audioCtx = new window.AudioContext();
     const analyser = audioCtx.createAnalyser();
     const source = audioCtx.createMediaStreamSource(streamRef.current);
@@ -304,15 +372,13 @@ export default function InterviewPage() {
       const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
       const isSpeakingLoudly = audioLevel > 20;
 
-      // Simulated Heuristic Vision Engine (Represents MediaPipe Face Mesh logic)
       const mockVisionData = {
         facesDetected: 1, 
         hasMask: false, 
         livenessScore: 99 - Math.floor(Math.random() * 4), 
-        lipsMoving: isSpeakingLoudly // If audio is loud, lips should be moving
+        lipsMoving: isSpeakingLoudly 
       };
 
-      // Security Checks
       if (mockVisionData.facesDetected > 1) handleSecurityViolation("Multiple faces detected in frame");
       if (isSpeakingLoudly && !mockVisionData.lipsMoving) handleSecurityViolation("Voice detected but lips not moving (Spoofing Check)");
       if (mockVisionData.livenessScore < 50) handleSecurityViolation("Liveness check failed (Still photo detected)");
@@ -332,7 +398,11 @@ export default function InterviewPage() {
   // --- INTERVIEW FLOW ---
   const requestPermissions = async () => {
     try {
-      const avStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, facingMode: "user" }, audio: true });
+      // 🛡️ THE FIX: Deep Audio Configuration for Bluetooth/Earplugs
+      const avStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 1280, height: 720, facingMode: "user" }, 
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
+      });
       const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "monitor" }, audio: true });
       
       const videoTrack = screenStream.getVideoTracks()[0];
@@ -364,7 +434,6 @@ export default function InterviewPage() {
     if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
     setInterviewStep("scanning");
     
-    // Connect video for scan
     if (videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
       videoRef.current.play().catch(() => {});
@@ -373,7 +442,6 @@ export default function InterviewPage() {
     startSecurityTelemetry();
     await speakText("Activating security vault. Scanning face mesh and environment.", voiceGender);
     
-    // Simulate 5 second scan
     setTimeout(() => {
       if (telemetry.mask) {
         handleSecurityViolation("Mask detected", true);
@@ -446,12 +514,15 @@ export default function InterviewPage() {
         if (event.results[i].isFinal) allFinal += transcript + " ";
         else interim += transcript;
       }
-      setLiveTranscript((allFinal + interim).trim());
+      const newText = (allFinal + interim).trim();
+      setLiveTranscript(newText);
       
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      const tLower = allFinal.toLowerCase();
-      const isSkipping = tLower.includes("i don't know") || tLower.includes("skip") || tLower.includes("no idea");
-      const waitTime = isSkipping ? 1500 : 8000; 
+      const tLower = newText.toLowerCase();
+      
+      // 🛡️ THE FIX: Smart Skip & Silence Detection
+      const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("no idea") || tLower.includes("move on") || tLower.includes("next question");
+      const waitTime = isSkipping ? 500 : 6000; // Skip immediately, or wait 6s if they stop talking
 
       silenceTimerRef.current = setTimeout(() => {
         if (isRecordingRef.current) { const btn = document.getElementById("auto-submit-btn"); if (btn) btn.click(); }
@@ -495,8 +566,7 @@ export default function InterviewPage() {
 
     const hasAnswered = newTranscriptChunk.trim().length > 2;
     const tLower = newTranscriptChunk.toLowerCase();
-    
-    const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("not sure") || tLower.includes("no idea");
+    const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("not sure") || tLower.includes("no idea") || tLower.includes("move on");
 
     setIsSpeaking(true);
     setAiMessage("Thinking..."); 
@@ -510,7 +580,7 @@ export default function InterviewPage() {
     let isSufficient = true;
 
     if (isSkipping && !introPhase) {
-        dynamicResponse = "Okay, no worries. Let's move on to the next one. " + nextQText;
+        dynamicResponse = "Okay, moving on. " + nextQText;
         isSufficient = true;
     } else if (hasAnswered) {
         try {
@@ -738,10 +808,11 @@ export default function InterviewPage() {
             </motion.div>
             <motion.div variants={fadeUp} className="glass rounded-xl p-6 text-left border border-primary/20">
               <h3 className="text-sm font-semibold text-primary uppercase tracking-wider mb-4">Enterprise Security Rules</h3>
-              <ul className="space-y-3 text-sm text-muted-foreground">
+              <ul className="space-y-4 text-sm text-muted-foreground">
+                <li className="flex items-start gap-3"><Volume2 className="w-5 h-5 text-accent shrink-0" /> <strong>PRE-FLIGHT CHECK:</strong> Connect your Bluetooth headphones/mic and adjust volume & brightness NOW. You cannot change this later.</li>
                 <li className="flex items-start gap-3"><ScanFace className="w-5 h-5 text-primary shrink-0" /> <strong>Identity & Mask Check:</strong> Face must be clearly visible. Masks or multiple faces will trigger termination.</li>
                 <li className="flex items-start gap-3"><Eye className="w-5 h-5 text-primary shrink-0" /> <strong>Liveness & Lip-Sync:</strong> AI tracks micro-movements to prevent spoofing or deepfakes.</li>
-                <li className="flex items-start gap-3"><Focus className="w-5 h-5 text-primary shrink-0" /> <strong>Full Screen & Focus Lock:</strong> Exiting full screen or switching tabs = instant security strike.</li>
+                <li className="flex items-start gap-3"><Keyboard className="w-5 h-5 text-destructive shrink-0" /> <strong>HARDWARE LOCK:</strong> Keyboard and Mouse are strictly disabled during the interview. Do NOT press ESC or click randomly (Termination on 3rd warning).</li>
               </ul>
             </motion.div>
             <motion.div variants={fadeUp}>
@@ -787,6 +858,16 @@ export default function InterviewPage() {
               </div>
             </div>
           </div>
+          
+          {/* 🛡️ THE FIX: Manual Early Exit Button */}
+          <Button 
+            variant="destructive" 
+            className="w-full bg-destructive/10 text-destructive hover:bg-destructive/20 border border-destructive/30"
+            onClick={() => handleForceEndInterview(true, "Candidate manually ended the interview.")}
+          >
+            <LogOut className="w-4 h-4 mr-2" /> End Interview
+          </Button>
+
         </div>
 
         {/* Main Interview Area */}
@@ -819,7 +900,7 @@ export default function InterviewPage() {
 
           <div className="glass rounded-xl p-6 space-y-4">
             <div className="relative rounded-lg overflow-hidden bg-muted aspect-video border border-primary/20 shadow-[0_0_15px_rgba(0,240,255,0.1)]">
-              <video ref={videoRef} muted playsInline className={`w-full h-full object-cover ${cameraReady ? "block" : "hidden"}`} style={{ transform: "scaleX(-1)" }} />
+              <video ref={videoRef} muted playsInline className="w-full h-full object-cover block" style={{ transform: "scaleX(-1)" }} />
               
               {/* High-Tech Face Box Overlay */}
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-56 border-2 border-primary/40 rounded-lg pointer-events-none">
