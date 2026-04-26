@@ -12,8 +12,9 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
-// Dynamically fetch from backend API
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+// 🛡️ THE FIX: Bulletproof URL parser to prevent 404 errors
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = `${API_BASE.replace(/\/$/, "")}/api`;
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },

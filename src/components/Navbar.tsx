@@ -15,7 +15,6 @@ export default function Navbar() {
   const location = useLocation();
   const [theme, setTheme] = useState<"dark" | "light" | "slate">("dark");
 
-  // Load theme from local storage on mount and apply to the document
   useEffect(() => {
     const savedTheme = (localStorage.getItem("forgepro_theme") as "dark" | "light" | "slate") || "dark";
     setTheme(savedTheme);
@@ -33,6 +32,22 @@ export default function Navbar() {
     
     localStorage.setItem("forgepro_theme", theme);
   }, [theme]);
+
+  // 🛡️ THE FIX: ForgePro Anti-Sleep Keep-Alive Ping Engine
+  useEffect(() => {
+    const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    const API_URL = `${API_BASE.replace(/\/$/, "")}/api`;
+    
+    const pingEngine = () => {
+      // Pings the backend to keep serverless hosts awake (Render, Heroku, etc.)
+      fetch(`${API_URL}/health`).catch(() => {}); 
+    };
+    
+    pingEngine(); 
+    const interval = setInterval(pingEngine, 4 * 60 * 1000); // Pulse every 4 mins
+    
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <motion.nav
