@@ -156,12 +156,29 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     frontend_url = frontend_url.rstrip('/')
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
-    candidate_body = f"Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro video interview for the pre-screening for the {req.position} role ({req.interview_level}).\n\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest,\nTalent Acquisition"
+    # 🛡️ THE FIX: Extracting Talent Associate Name safely
+    talent_name = getattr(req, "talent_associate_name", None)
+    if not talent_name or str(talent_name).strip() == "":
+        talent_name = "The ForgePro Team"
+
+    candidate_body = f"""Hello {req.candidate_name},
+
+You have been invited to a BATS ForgePro Initial Screening for the {req.position} role ({req.interview_level}).
+
+Your Talent Associate, {talent_name}, has set up a secure interview vault for you. 
+Please ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.
+
+Start Interview: {interview_link}
+
+Best regards,
+{talent_name}
+BATS ForgePro Talent Acquisition"""
+
     background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
 
     if req.recruiter_email:
         dashboard_link = f"{frontend_url}/dashboard"
-        recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\n\nYou will receive automated alerts when the candidate begins and completes the assessment.\n\nAccess your command center here: {dashboard_link}"
+        recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\nCreated By: {talent_name}\n\nYou will receive automated alerts when the candidate begins and completes the assessment.\n\nAccess your command center here: {dashboard_link}"
         background_tasks.add_task(send_system_email, req.recruiter_email, f"BATS Tracking: Session Created for {req.candidate_name}", recruiter_body)
     
     return {"message": "Session created and emails queued", "session_id": new_session.id}

@@ -87,6 +87,7 @@ class SessionCreateRequest(BaseModel):
     position: str
     job_description: str
     resume_text: str
+    talent_associate_name: Optional[str] = None
 
 class SessionStatusUpdateRequest(BaseModel):
     status: str 
