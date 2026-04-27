@@ -312,7 +312,7 @@ export default function HistoryPage() {
                   const isL1 = result.video_filename && String(result.video_filename).includes("[UPLOADED]");
                   
                   return (
-                    <motion.div key={result.id} variants={fadeUp} custom={i * 0.05}>
+                    <motion.div key={result.id} variants={fadeUp} initial="hidden" animate="visible" custom={i * 0.05}>
                       <div className="glass rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-primary/40 transition-all group shadow-sm">
                         <Link
                           to={`/result/${result.id}`}
