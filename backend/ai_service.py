@@ -51,44 +51,31 @@ def _validate_result(result: dict) -> dict:
             raise ValueError(f"Missing required field: {field}")
     return result
 
-# ─── ENTERPRISE PROMPTS (UPGRADED SEMANTIC ENGINE) ───────────
+# ─── ENTERPRISE PROMPTS (THE ZERO-TOLERANCE ENGINE) ───────────
 
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
-You are running a deep-dive evaluation. You have the Job Description, the Candidate's Deeply Parsed Resume, and the actual Live Interview Transcript.
+You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, and the actual Live Interview Transcript.
 
-*** ZERO-TOLERANCE KILL SWITCH (CRITICAL) ***
-If the [INTERVIEW_TRANSCRIPT] contains the phrase "[SYSTEM LOG]" (indicating a security breach/cheat):
-1. You MUST set ALL scores to EXACTLY 0.
-2. You MUST set hiring_recommendation to "Reject".
-3. You MUST state the security breach in the justification. 
+*** ZERO-TOLERANCE SCORING ENGINE (CRITICAL RULE) ***
+1. The [CANDIDATE_RESUME] is ONLY for background context. YOU MUST SCORE THE CANDIDATE PURELY ON WHAT THEY SPOKE IN THE [INTERVIEW_TRANSCRIPT].
+2. If the candidate worked at Google on their resume but said nothing, skipped questions, or gave shallow 1-sentence answers during the interview, their `technical_proficiency` MUST drop to Zero (0-30). Do NOT give them "free points" for a good resume.
+3. If the transcript shows the candidate abandoned the interview, answered nothing, or the transcript is mostly the AI talking with the candidate remaining silent, the `overall_score` MUST BE 0 and the `hiring_recommendation` MUST be "Reject".
+4. NEVER hallucinate competence. If they did not explicitly prove technical depth during the live interview, they fail.
 
 CRITICAL ENTERPRISE RULES:
-1. LATENT SEMANTIC RECOGNITION (The 2+2=4 Rule): Candidates have wildly different communication styles and backgrounds. You MUST look past textbook definitions and evaluate the underlying logical truth of their answers. If a candidate describes a concept using a unique analogy, informal language, or an unconventional but mathematically/logically sound approach, REWARD THEM FULLY. Never penalize a correct concept just because it lacks standard corporate jargon.
-2. FAIRNESS DOCTRINE: You MUST NOT penalize the candidate's "Technical Proficiency" for broken English, grammatical errors, or verbal fumbling. Judge them PURELY on technical accuracy.
-3. CONFIDENCE SCORE (0-100): Analyze the transcript for filler words ("um", "uh", "like"), sudden pauses, or incomplete sentences. Generate a separate Confidence Score based purely on speech patterns.
-4. RUTHLESS TECHNICAL STANDARD: If the candidate provides generic, high-level, or superficial answers without specific technical implementation details, you MUST assign a Technical Score below 50. Do not inflate scores out of politeness.
+1. LATENT SEMANTIC RECOGNITION: Reward candidates who explain concepts correctly using informal language or analogies. Do not penalize for lack of corporate jargon, but heavily penalize lack of logic.
+2. FAIRNESS DOCTRINE: You MUST NOT penalize the candidate's "Technical Proficiency" for broken English. Judge them PURELY on technical accuracy.
+3. CONFIDENCE SCORE: Analyze the transcript for filler words ("um", "uh", "like"), hesitation, or asking to skip questions repeatedly. 
 
-You MUST use the following "Mixture of Experts" framework:
-
-Step 1: THE ADVOCATE (Semantic Alignment)
-Find every piece of evidence in the transcript that proves the candidate possesses the skills listed in the JD, regardless of how they phrased it.
-
-Step 2: THE DETECTIVE (Cross-Verification)
-Compare what they *said* in the transcript against the exact metrics and projects they *claimed* on their resume. Identify any discrepancies.
-
-Step 3: THE SKEPTIC (Weaknesses)
-Where did their logic break down? Were their technical explanations shallow? 
-
-Step 4: THE JUDGE (Your Output)
 Synthesize the findings.
-- 90-100: Exceptional, undeniable proof of expertise. Strong Hire.
-- 75-89: Solid, capable, minor gaps. Lean Hire / Strong Hire.
+- 90-100: Exceptional, undeniable proof of expertise spoken in transcript. Strong Hire.
+- 75-89: Solid, capable, minor gaps. Lean Hire.
 - 60-74: Average, superficial answers, lacks deep knowledge. Reject.
-- Below 60: Major discrepancies or lack of knowledge. Reject.
+- Below 60: Major discrepancies, extreme brevity, or silence. Reject.
 
-You MUST output ONLY valid JSON matching this exact structure perfectly:
+You MUST output ONLY valid JSON matching this exact structure:
 {
-  "candidate_overview": "A highly detailed 4-sentence executive summary of their technical depth and semantic reasoning skills.",
+  "candidate_overview": "A highly detailed 4-sentence executive summary of their spoken technical depth and semantic reasoning skills.",
   "scores": {
     "technical_proficiency": 0,
     "relevance_to_jd": 0,
@@ -98,17 +85,17 @@ You MUST output ONLY valid JSON matching this exact structure perfectly:
   },
   "sentiment": {
     "rating": "Positive | Neutral | Negative",
-    "explanation": "Deep analysis of the candidate's tone."
+    "explanation": "Deep analysis of the candidate's tone and behavior."
   },
   "candidate_status": {
     "level": "Strong Confidence | Moderate Confidence | Low Confidence | Needs Improvement",
     "description": "Brief description of candidate's readiness."
   },
-  "strengths": ["Specific strength 1 matching transcript to resume", "Specific strength 2"],
+  "strengths": ["Specific strength 1 matching transcript", "Specific strength 2"],
   "red_flags_or_weaknesses": ["Specific technical gap or discrepancy 1", "Specific weakness 2"],
   "dynamic_follow_up_questions": ["Hard follow-up question based on a vague answer"],
   "hiring_recommendation": "Strong Hire | Lean Hire | Reject",
-  "justification": "A highly detailed 2-paragraph explanation explicitly citing the candidate's semantic logic from the interview transcript to justify the score."
+  "justification": "A highly detailed 2-paragraph explanation explicitly citing the candidate's spoken logic from the transcript to justify the score."
 }
 
 [JOB_DESCRIPTION]
@@ -128,11 +115,8 @@ The target difficulty level is: {interview_level}.
 
 RULES:
 1. HUMAN-LIKE PRE-SCREENING: Questions must be conversational, punchy, and sound like they are coming from a real Senior Engineer. Strictly keep questions under 2 sentences. 
-2. HYPER-PERSONALIZATION: Do not ask robotic trivia ("What is Kubernetes?"). Instead, ask contextual questions based on their resume ("I noticed you used Kubernetes on the Nexus project to scale traffic. What was the hardest part of configuring those clusters?").
-3. If the level is L1 (Junior), focus on fundamentals and basic resume projects.
-4. If the level is L3/L4 (Senior/Architect), ask brutal system design, scalability, and deep architectural questions.
-5. At least 40% MUST directly challenge specific projects, architectures, or metrics from their resume.
-6. Ensure no questions repeat for this candidate.
+2. HYPER-PERSONALIZATION: Do not ask robotic trivia ("What is Kubernetes?"). Instead, ask contextual questions based on their resume ("I noticed you used Kubernetes on the Nexus project. What was the hardest part of scaling that?").
+3. At least 40% MUST directly challenge specific projects, architectures, or metrics from their resume.
 
 Output ONLY valid JSON:
 {
@@ -155,21 +139,68 @@ Output ONLY valid JSON:
 
 JD_GENERATION_PROMPT = """Generate a detailed, professional Job Description for: {position}. Output plain text only."""
 
-DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite, empathetic AI technical interviewer. 
-You are conducting a live voice interview.
+DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite, highly realistic AI technical interviewer.
+You are conducting a live voice interview, mimicking a real Senior Engineer perfectly.
 
 Question you just asked: {question}
 Candidate's Answer: {answer}
-Next Question you need to ask: {next_question}
+Next Question queued: {next_question}
 
-Task: Analyze the candidate's answer and generate ONE fluid, conversational response.
+Your job is to analyze their answer and decide EXACTLY what to say next, based on these Strict Behavioral Edge Cases:
 
-CRITICAL ENTERPRISE RULES:
-1. SEMANTIC EMPATHY: Candidates may answer questions using unexpected analogies, informal language, or unconventional phrasing. If their core logic or semantic meaning is correct, validate it naturally (e.g., "That makes sense, taking a unique angle on it..."). Do not correct them just because they didn't use textbook jargon.
-2. RAMBLE CONTROL: If the candidate goes off-topic or gives an overly long answer, gently but firmly steer them back to the point or transition to the next question.
-3. ADAPTIVE LENGTH: If their answer is very short or lacks depth, set is_sufficient to false. Acknowledge what they said, then ask a probing follow-up question to dig deeper. Do NOT ask the Next Question yet.
-4. NATURAL TRANSITIONS: NEVER say "Thank you", "Thanks for your answer", or "Great". Use natural, casual human transitions like: "Got it.", "Understood.", "Interesting approach.", or "Okay, moving on."
-5. If the candidate's answer implies they don't know (e.g., "I don't know", "skip", "not sure"), YOU MUST SET "is_sufficient": true. Do not ask follow-ups. Just say "No problem, let's pivot," and ask the Next Question.
+🟢 A. Normal/Good Answer (Clear, 2-5 sec pauses):
+Acknowledge naturally ("Makes sense," "Got it.") and ask the [Next Question queued]. Set is_sufficient = true.
+
+🟡 B. Thinking / Pause Scenarios:
+- If answer contains "give me 2 minutes to think": Respond: "I can give you 30 seconds due to time constraints. Please proceed when ready." Set is_sufficient = false.
+- If answer contains "<SILENCE>": Respond: "Take your time, let me know when you're ready." Set is_sufficient = false. If they do it again, say "Let's move to the next question." and ask [Next Question queued], set is_sufficient = true.
+
+🔴 C. No Response / Technical Silence:
+- If answer contains "[SYSTEM: MIC_ERROR]": Respond: "I'm unable to hear you. Could you please check your microphone?" Set is_sufficient = false.
+
+🤯 D. Confused Candidate ("I didn't understand", "Can you repeat?"):
+Rephrase or simplify the current question. Set is_sufficient = false. If repeated, say "Let's try a different question" and ask [Next Question queued], setting is_sufficient = true.
+
+😵 E. Nervous / Hesitant (Uses "uhh", "umm", "like"):
+Encourage them: "Take your time, you're doing fine. Whenever you're ready..." Set is_sufficient = false.
+
+😶 F. One-Word / Weak Answers ("Yes", "No", "Maybe"):
+Trigger follow-up: "Could you elaborate on that?" or "Can you walk me through the 'why'?" Set is_sufficient = false.
+
+🧠 G. Overly Long Answers:
+- If answer contains "[SYSTEM: OVER_TIME_LIMIT]": Respond: "Thanks, I'll stop you here due to time constraints. Let's move on." Ask the [Next Question queued]. Set is_sufficient = true.
+
+🧪 H. Wrong / Irrelevant / Off-Topic Story:
+Respond: "That's not exactly what I was asking. Let me clarify, we are looking for..." and steer them back. Set is_sufficient = false.
+
+🧾 I. Copy-Paste / Cheating Detection (Robotic/Textbook answers):
+Ask follow-up: "Interesting. Can you explain that in your own words, perhaps with a real-world example from your past projects?" Set is_sufficient = false.
+
+😡 J. Rude / Aggressive Candidate ("This is stupid"):
+Respond: "Let's keep the conversation professional." Set is_sufficient = false.
+
+😂 K. Casual / Overfriendly ("Bro", "Dude"):
+Maintain strict professionalism. Do NOT mirror their tone. Proceed with evaluation.
+
+🛑 L. Candidate Refuses / Wants to Skip ("I don't know", "skip", "no idea", "next"):
+Respond: "That's completely fine, we'll pivot to something else." and ask the [Next Question queued]. Set is_sufficient = true.
+
+🎯 M. Counter Questions ("Is this remote?"):
+Respond: "We'll definitely cover role-related details at the end. For now, let's focus on..." and repeat your question. Set is_sufficient = false.
+
+🧑‍💻 N. Technical Partial Answers (Correct approach, wrong syntax):
+Give a hint: "You're on the right track. Think about the time complexity here..." Set is_sufficient = false.
+
+🧠 O. Smart Candidate (Deep answers):
+Ask a deeper follow-up. Probe an edge case. "That works, but what happens if we scale this to 1M users?" Set is_sufficient = false.
+
+📍 P. Asks for a Hint:
+Give a minimal hint, not the full answer. Set is_sufficient = false.
+
+CRITICAL RULES:
+1. NEVER say "Thank you for your answer." Act like a real, conversational Senior Engineer.
+2. If is_sufficient is TRUE, you MUST append the [Next Question queued] to your response_text.
+3. If is_sufficient is FALSE, you are digging deeper, waiting, or giving hints, so DO NOT ask the [Next Question queued].
 
 Output ONLY valid JSON matching this exact structure:
 {
@@ -178,53 +209,20 @@ Output ONLY valid JSON matching this exact structure:
 }
 """
 
-RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine used by Tier-1 companies (BATS ForgePro). 
-Your job is to read unstructured, messy resume text and meticulously extract EVERYTHING into a "Liquid JSON Schema".
-
-*** GOD MODE PARSING ACTIVATED ***
-The text provided may be fragmented, missing spaces, or contain OCR/binary artifacts (e.g., column layouts smashed together or separated by '|'). 
-You must use spatial reasoning to reconstruct broken words, align columns, and piece together fractured sentences before extraction.
-
-CRITICAL EXTRACTION RULES:
-1. NEVER output `null`. If data is missing, use "Not Provided" or an empty array `[]`.
-2. NO GENERIC SUMMARIES. For 'key_achievements', you MUST extract the candidate's EXACT numbers, metrics, scale, and highly specific technical outcomes. Reconstruct fragmented metric sentences.
-3. Extract ALL contact info, including GitHub, LinkedIn, or Portfolio URLs.
-4. Extract EVERY SINGLE Project and Company. Extract the EXACT technologies used.
-
-You MUST output ONLY valid JSON matching this exact structure:
+RESUME_PARSER_PROMPT = """You are an elite AI Data Extraction Engine.
+Extract unstructured text into this JSON format accurately.
 {
-  "candidate_info": {
-    "name": "string",
-    "email": "string",
-    "phone": "string",
-    "links": ["url 1", "url 2"]
-  },
-  "executive_summary": "Deep 3-sentence summary of their exact technical depth, years of experience, and primary domain.",
-  "core_skills": {
-    "languages_and_frameworks": ["skill 1", "skill 2"],
-    "cloud_and_infrastructure": ["skill 1", "skill 2"],
-    "databases_and_tools": ["skill 1", "skill 2"]
-  },
-  "experience_and_projects": [
-    {
-      "name": "Company OR Project Name",
-      "role": "string",
-      "duration": "string",
-      "technologies_used": ["tech 1", "tech 2"],
-      "key_achievements": ["Exact quantifiable metric/technical achievement 1", "Exact metric 2"]
-    }
-  ],
-  "education_and_certifications": [
-    "Degree/Cert 1 details",
-    "Degree/Cert 2 details"
-  ]
+  "candidate_info": {"name": "string", "email": "string", "phone": "string", "links": []},
+  "executive_summary": "Deep 3-sentence summary.",
+  "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []},
+  "experience_and_projects": [{"name": "string", "role": "string", "duration": "string", "technologies_used": [], "key_achievements": []}],
+  "education_and_certifications": []
 }
-
-Raw Resume Text:
+Raw Text:
 {raw_text}
 """
 
-# ─── BULLETPROOF REST API CALLS (SMART TOKEN ROUTING) ───
+# ─── API CALLS ──────────────────────────────────────
 
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
@@ -239,21 +237,13 @@ async def transcribe_audio(file_path: str) -> str:
 
 async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000, groq_model: str = "llama-3.3-70b-versatile") -> dict:
     async with httpx.AsyncClient(timeout=60) as client:
-        payload = {
-            "model": groq_model, 
-            "messages": [{"role": "user", "content": prompt}], 
-            "temperature": 0.2, 
-            "max_tokens": max_tokens
-        }
+        payload = {"model": groq_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.2, "max_tokens": max_tokens}
         if force_json: payload["response_format"] = {"type": "json_object"}
-            
         url = "https://api.groq.com/openai/v1/chat/completions"
         for attempt in range(3):
             resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json=payload)
             if resp.status_code == 429 and attempt < 2:
-                wait_time = (attempt + 1) * 5
-                print(f"[BATS ForgePro] Groq 429 Limit hit on {groq_model}. Holding breath for {wait_time} seconds...")
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep((attempt + 1) * 5)
                 continue
             resp.raise_for_status()
             if force_json: return json.loads(resp.json()["choices"][0]["message"]["content"])
@@ -262,16 +252,12 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
 async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    if force_json:
-        payload["generationConfig"] = {"responseMimeType": "application/json"}
-        
+    if force_json: payload["generationConfig"] = {"responseMimeType": "application/json"}
     async with httpx.AsyncClient(timeout=60) as client:
         for attempt in range(3):
             resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
             if resp.status_code == 429 and attempt < 2:
-                wait_time = (attempt + 1) * 5
-                print(f"[BATS ForgePro] Gemini 429 Limit hit. Holding breath for {wait_time} seconds...")
-                await asyncio.sleep(wait_time)
+                await asyncio.sleep((attempt + 1) * 5)
                 continue
             resp.raise_for_status()
             content = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -281,126 +267,64 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
 async def _call_groq_text(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=30) as client:
         url = "https://api.groq.com/openai/v1/chat/completions"
-        for attempt in range(3):
-            resp = await client.post(
-                url, 
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, 
-                json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 1000}
-            )
-            if resp.status_code == 429 and attempt < 2:
-                await asyncio.sleep(5)
-                continue
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
+        resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 1000})
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
 
 async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: int = 6000, groq_model: str = "llama-3.3-70b-versatile", prioritize_gemini: bool = False) -> dict:
     errors = []
     if prioritize_gemini and GEMINI_API_KEY:
-        try:
-            return await _call_gemini(prompt, force_json=force_json)
-        except Exception as e:
-            errors.append(f"Gemini Error: {e}")
-
+        try: return await _call_gemini(prompt, force_json=force_json)
+        except Exception as e: errors.append(f"Gemini Error: {e}")
     if GROQ_API_KEY:
-        try:
-            return await _call_groq(prompt, force_json, max_tokens=max_tokens, groq_model=groq_model)
-        except Exception as e:
-            errors.append(f"Groq Error: {e}")
-            
+        try: return await _call_groq(prompt, force_json, max_tokens=max_tokens, groq_model=groq_model)
+        except Exception as e: errors.append(f"Groq Error: {e}")
     if not prioritize_gemini and GEMINI_API_KEY:
-        try:
-            return await _call_gemini(prompt, force_json=force_json)
-        except Exception as e:
-            errors.append(f"Gemini Error: {e}")
-            
+        try: return await _call_gemini(prompt, force_json=force_json)
+        except Exception as e: errors.append(f"Gemini Error: {e}")
     raise ValueError(f"All AI Cascade providers failed: {'; '.join(errors)}")
 
-# ─── PUBLIC API EXPORTS ───────────────────────────────
+# ─── PUBLIC EXPORTS ──────────────────────────────────────
 
 async def parse_resume_to_json(raw_text: str) -> dict:
-    if len(raw_text.strip()) < 50:
-        print("[BATS ForgePro] WARNING: The extracted text is suspiciously short. PDF extraction may have failed.")
-        
-    safe_text = re.sub(r'[^\x20-\x7E\n\r\t\|]', ' ', raw_text) 
-    safe_text = re.sub(r'\s{3,}', ' | ', safe_text) 
-    safe_text = safe_text[:6000] 
-    
+    safe_text = re.sub(r'[^\x20-\x7E\n\r\t\|]', ' ', raw_text)[:6000]
     prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
-
-    try:
-        print("[BATS ForgePro] Parsing Resume with Smart Token Routing...")
-        return await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.1-8b-instant", prioritize_gemini=True)
-        
-    except Exception as e:
-        error_msg = str(e).replace('"', "'")
-        print(f"[BATS ForgePro] FATAL Parsing Error: {error_msg}")
-        
-        if "429" in error_msg:
-            return {
-                "candidate_info": {"name": "Candidate (API Busy)", "email": "api-rate-limit@system", "phone": "N/A", "links": []},
-                "executive_summary": "The AI APIs (Groq/Gemini) are temporarily rate-limited due to rapid testing. The system has automatically bypassed the lock so you can proceed to the interview room.",
-                "core_skills": {"languages_and_frameworks": ["System Override Activated"], "cloud_and_infrastructure": [], "databases_and_tools": []},
-                "experience_and_projects": [{"name": "BATS API Bypass", "role": "System Fallback", "duration": "Current", "technologies_used": ["Retry Engine"], "key_achievements": ["Successfully bypassed API lock to allow candidate to continue."]}],
-                "education_and_certifications": []
-            }
-            
-        return {
-            "candidate_info": {"name": "Extraction Failed", "email": "Error", "phone": "Error", "links": []},
-            "executive_summary": f"AI API ERROR: {error_msg}. Please check the server logs.",
-            "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []},
-            "experience_and_projects": [{"name": "System Error", "role": "Not Provided", "duration": "Not Provided", "technologies_used": [], "key_achievements": []}],
-            "education_and_certifications": []
-        }
+    try: return await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.1-8b-instant", prioritize_gemini=True)
+    except: return {"candidate_info": {"name": "Extraction Error", "email": "Error", "phone": "Error", "links": []}, "executive_summary": "Parsing failed.", "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []}, "experience_and_projects": [], "education_and_certifications": []}
 
 async def evaluate_candidate(job_description: str, resume: str, transcript: str) -> dict:
     clean_transcript = transcript.replace("(No speech detected)", "").strip()
     word_count = len(clean_transcript.split())
     is_breach = "[SYSTEM LOG]: SECURITY BREACH" in transcript
-
-    if is_breach or word_count < 2:
-        reason = "Candidate triggered the Anti-Cheat Security Vault." if is_breach else "Candidate remained completely silent or ended the interview immediately."
+    
+    # 🛡️ ZERO-TOLERANCE CHECK
+    if is_breach or word_count < 15:
+        reason = "Candidate triggered the Anti-Cheat Security Vault." if is_breach else "Candidate remained largely silent, skipped questions, or failed to provide any technical depth in the spoken interview."
         return {
             "candidate_overview": f"Session automatically rejected. {reason}",
             "scores": { "technical_proficiency": 0, "relevance_to_jd": 0, "communication": 0, "confidence_level": 0, "overall_score": 0 },
             "sentiment": {"rating": "Negative", "explanation": "Session failed or terminated prematurely."},
             "candidate_status": {"level": "Needs Improvement", "description": "Terminated/Incomplete"},
-            "strengths": ["None identified due to early termination."],
+            "strengths": ["None identified due to lack of technical interaction."],
             "red_flags_or_weaknesses": [f"CRITICAL: {reason}"],
             "dynamic_follow_up_questions": [],
             "hiring_recommendation": "Reject",
-            "justification": f"The platform's automatic kill switch was triggered. {reason} No technical evaluation was performed."
+            "justification": f"Zero-Tolerance Engine Activated: {reason} No technical points were awarded regardless of resume strength. The candidate's technical score is 0 due to an inability or refusal to verbally prove competence."
         }
 
     safe_resume = resume[:5000]
     safe_jd = job_description[:4000]
-
     prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=transcript)
     result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
     return _validate_result(result)
 
 async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 10, interview_level: str = "L2"):
-    safe_resume = resume[:4000]
-    safe_jd = job_description[:3000]
-    prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=safe_jd, resume=safe_resume, num_questions=num_questions, interview_level=interview_level)
-    
+    prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=job_description[:3000], resume=resume[:4000], num_questions=num_questions, interview_level=interview_level)
     try:
         result = await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.3-70b-versatile")
-        questions = result.get("questions", [])
-        if not questions:
-            raise ValueError("AI returned an empty array.")
-        return questions
-    except Exception as e:
-        print(f"[BATS ForgePro] Failed to generate custom questions, returning defaults: {e}")
-        return [
-            {"id": 1, "question": "Could you briefly describe your most impactful project and the core technologies used?", "category": "technical", "difficulty": "medium"},
-            {"id": 2, "question": "What is the most challenging bug you've faced recently, and how did you resolve it?", "category": "behavioral", "difficulty": "hard"},
-            {"id": 3, "question": "How does your specific experience align with the core requirements of this role?", "category": "behavioral", "difficulty": "medium"},
-            {"id": 4, "question": "Can you explain a time you had to optimize a system or process for better performance?", "category": "technical", "difficulty": "hard"},
-            {"id": 5, "question": "How do you handle disagreements on technical decisions within a team?", "category": "behavioral", "difficulty": "medium"},
-            {"id": 6, "question": "Where do you see your technical skills adding the most immediate value to our team?", "category": "situational", "difficulty": "medium"},
-            {"id": 7, "question": "Tell me about a time you had to learn a new technology quickly to deliver a project.", "category": "situational", "difficulty": "hard"},
-            {"id": 8, "question": "How do you ensure the code you write is maintainable and scalable?", "category": "technical", "difficulty": "medium"}
-        ]
+        return result.get("questions", [])
+    except Exception:
+        return [{"id": 1, "question": "Could you describe your most impactful project?", "category": "technical", "difficulty": "medium"}]
 
 async def generate_jd(position: str) -> str:
     prompt = format_prompt(JD_GENERATION_PROMPT, position=position)
