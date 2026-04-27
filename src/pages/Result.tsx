@@ -47,7 +47,6 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE FIX: Restored Video Scrubber (Removed Infinite Loop Hack)
 const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -71,46 +70,46 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   };
 
   const handleTimeUpdate = () => {
-    if (videoRef.current && !isScrubbing) {
+    if (videoRef.current && !isScrubbing && duration > 0) {
       setCurrentTime(videoRef.current.currentTime);
-      const vidDuration = videoRef.current.duration;
-      // Only update progress if duration is valid and not Infinity
-      if (vidDuration > 0 && vidDuration !== Infinity) {
-        setProgress((videoRef.current.currentTime / vidDuration) * 100);
-      }
+      setProgress((videoRef.current.currentTime / duration) * 100);
     }
   };
 
+  // 🛡️ THE BULLETPROOF FIX: The 'onseeked' duration grabber
   const handleLoadedMetadata = () => {
-    if (videoRef.current && videoRef.current.duration !== Infinity) {
-      setDuration(videoRef.current.duration);
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (video.duration === Infinity || isNaN(video.duration)) {
+      video.currentTime = 1e99;
+      video.onseeked = () => {
+        video.onseeked = null; // Unbind immediately to prevent loops
+        setDuration(video.duration);
+        video.currentTime = 0; // Safely return to start
+      };
+    } else {
+      setDuration(video.duration);
     }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newProgress = Number(e.target.value);
     setProgress(newProgress);
-    if (videoRef.current) {
-      const vidDuration = videoRef.current.duration;
-      if (vidDuration > 0 && vidDuration !== Infinity) {
-        const newTime = (newProgress / 100) * vidDuration;
-        videoRef.current.currentTime = newTime;
-        setCurrentTime(newTime);
-      }
+    if (videoRef.current && duration > 0) {
+      const newTime = (newProgress / 100) * duration;
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
     }
   };
 
   const skip = (amount: number) => {
-    if (videoRef.current) {
-      const vidDuration = videoRef.current.duration;
-      if (vidDuration > 0 && vidDuration !== Infinity) {
-        let newTime = videoRef.current.currentTime + amount;
-        newTime = Math.max(0, Math.min(newTime, vidDuration));
-        videoRef.current.currentTime = newTime;
-        setCurrentTime(newTime);
-      } else {
-        videoRef.current.currentTime += amount; // Fallback for infinite streams
-      }
+    if (videoRef.current && duration > 0) {
+      let newTime = videoRef.current.currentTime + amount;
+      newTime = Math.max(0, Math.min(newTime, duration));
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+      setProgress((newTime / duration) * 100);
     }
   };
 
@@ -225,7 +224,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
             </div>
 
             <span className="text-xs font-mono text-white/80">
-              {formatTime(currentTime)}
+              {formatTime(currentTime)} / {formatTime(duration)}
             </span>
           </div>
 
