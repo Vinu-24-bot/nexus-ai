@@ -136,7 +136,6 @@ export default function InterviewPage() {
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const totalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -147,7 +146,12 @@ export default function InterviewPage() {
   const isRecordingRef = useRef(false); 
   const fullRecordingChunksRef = useRef<Blob[]>([]);
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // 🛡️ ENTERPRISE UPGRADE: Human-Pulse Timing Engine
+  const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingStartRef = useRef(Date.now());
+  const lastSpeechRef = useRef(Date.now());
+  const isHandlingSubmitRef = useRef(false);
   const securityLoopRef = useRef<number | null>(null);
 
   const isTerminatingRef = useRef(false);
@@ -216,14 +220,13 @@ export default function InterviewPage() {
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
       if (totalTimerRef.current) clearInterval(totalTimerRef.current);
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
       if (securityLoopRef.current) cancelAnimationFrame(securityLoopRef.current);
       if (recognitionRef.current) recognitionRef.current.stop();
       if (audioContextRef.current) audioContextRef.current.close();
     };
   }, []);
 
-  // 🛡️ THE FIX: Re-attach video stream when entering the active interview phase
   useEffect(() => {
     if (interviewStep === "interview" && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
@@ -262,7 +265,6 @@ export default function InterviewPage() {
 
     setCheatStrikes(prev => {
       const newStrikes = prev + 1;
-      // We still map general visual violations to the 3-strike HUD indicator
       if (newStrikes >= 3) {
         handleForceEndInterview(true, `SECURITY BREACH: ${reason} (3 Strikes Exceeded).`);
       } else {
@@ -285,15 +287,10 @@ export default function InterviewPage() {
       if (!document.fullscreenElement && !isTerminatingRef.current) handleSecurityViolation("Exited Full-Screen Mode");
     };
 
-    // 🛡️ THE FIX: Ironclad Keyboard and Mouse Lock
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isTerminatingRef.current) return;
       
-      // Whitelist safe media keys
-      const allowedKeys = [
-        "AudioVolumeUp", "AudioVolumeDown", "AudioVolumeMute", 
-        "MediaPlayPause", "BrightnessUp", "BrightnessDown"
-      ];
+      const allowedKeys = ["AudioVolumeUp", "AudioVolumeDown", "AudioVolumeMute", "MediaPlayPause", "BrightnessUp", "BrightnessDown"];
       if (allowedKeys.includes(e.key)) return;
 
       e.preventDefault();
@@ -319,7 +316,6 @@ export default function InterviewPage() {
 
     const handleMouseClick = (e: MouseEvent) => {
        if (isTerminatingRef.current) return;
-       // Allow clicking native buttons (Submit Answer, End Interview)
        const target = e.target as HTMLElement;
        if (target.closest('button')) return;
 
@@ -332,7 +328,7 @@ export default function InterviewPage() {
        }
     };
 
-    const handleContextMenu = (e: MouseEvent) => e.preventDefault(); // Block right click
+    const handleContextMenu = (e: MouseEvent) => e.preventDefault(); 
     
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -398,7 +394,6 @@ export default function InterviewPage() {
   // --- INTERVIEW FLOW ---
   const requestPermissions = async () => {
     try {
-      // 🛡️ THE FIX: Deep Audio Configuration for Bluetooth/Earplugs
       const avStream = await navigator.mediaDevices.getUserMedia({ 
         video: { width: 1280, height: 720, facingMode: "user" }, 
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } 
@@ -488,18 +483,39 @@ export default function InterviewPage() {
     });
   }, []);
 
+  // 🛡️ THE FIX: Smart Human-Pulse Watchdog
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     isRecordingRef.current = true;
+    isHandlingSubmitRef.current = false;
+    recordingStartRef.current = Date.now();
+    lastSpeechRef.current = Date.now();
     
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    silenceTimerRef.current = setTimeout(() => {
-        if (isRecordingRef.current) { const btn = document.getElementById("auto-submit-btn"); if (btn) btn.click(); }
-    }, 15000); 
+    if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
+    watchdogIntervalRef.current = setInterval(() => {
+      if (!isRecordingRef.current || isHandlingSubmitRef.current) return;
+      const now = Date.now();
+      const timeSinceStart = now - recordingStartRef.current;
+      const timeSinceLastSpeech = now - lastSpeechRef.current;
+
+      // Over 2 minutes of rambling
+      if (timeSinceStart > 120000) { 
+        const btn = document.getElementById("auto-submit-btn");
+        if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
+      } 
+      // 12 seconds of pure silence
+      else if (timeSinceLastSpeech > 12000) {
+        const btn = document.getElementById("auto-submit-btn");
+        if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
+      }
+    }, 1000);
 
     // @ts-ignore
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
+    if (!SpeechRecognition) {
+      toast.error("Speech recognition not supported in this browser.");
+      return;
+    }
     
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
@@ -508,6 +524,8 @@ export default function InterviewPage() {
     
     // @ts-ignore
     recognition.onresult = (event) => {
+      lastSpeechRef.current = Date.now(); // Reset silence timer when speaking
+      
       let interim = ""; let allFinal = "";
       for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
@@ -517,19 +535,27 @@ export default function InterviewPage() {
       const newText = (allFinal + interim).trim();
       setLiveTranscript(newText);
       
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       const tLower = newText.toLowerCase();
-      
-      // 🛡️ THE FIX: Smart Skip & Silence Detection
       const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("no idea") || tLower.includes("move on") || tLower.includes("next question");
-      const waitTime = isSkipping ? 500 : 6000; // Skip immediately, or wait 6s if they stop talking
+      const isStalling = tLower.includes("give me a minute") || tLower.includes("hold on") || tLower.includes("let me think");
 
-      silenceTimerRef.current = setTimeout(() => {
-        if (isRecordingRef.current) { const btn = document.getElementById("auto-submit-btn"); if (btn) btn.click(); }
-      }, waitTime); 
+      // Smart Intent Trigger - Skip instantly if they say "skip"
+      if (isSkipping || isStalling) {
+         if (!isHandlingSubmitRef.current) {
+            setTimeout(() => {
+               const btn = document.getElementById("auto-submit-btn");
+               if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
+            }, 1000);
+         }
+      }
     };
     
-    recognition.onerror = () => {};
+    recognition.onerror = (event: any) => {
+       if (event.error === 'network' || event.error === 'no-speech' || event.error === 'audio-capture') {
+          const btn = document.getElementById("auto-submit-btn");
+          if (btn && !isHandlingSubmitRef.current) { btn.dataset.reason = "MIC_ERROR"; btn.click(); }
+       }
+    };
     recognition.onend = () => { if (isRecordingRef.current) { try { recognition.start(); } catch {} } };
     
     recognition.start();
@@ -538,7 +564,7 @@ export default function InterviewPage() {
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false; 
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
     
     const currentText = liveTranscript.trim();
@@ -556,17 +582,33 @@ export default function InterviewPage() {
     startSpeechRecognition();
   }, [voiceGender, startSpeechRecognition]);
 
-  const handleAnswerSubmit = useCallback(async () => {
+  // 🛡️ THE FIX: Dynamic Submit payload mapping
+  const handleAnswerSubmit = useCallback(async (e: any) => {
     if (!isRecording) return;
-    setIsRecording(false);
-    const newTranscriptChunk = stopRecording(); 
     
-    const totalAnswerSoFar = (accumulatedTranscript + " " + newTranscriptChunk).trim();
-    setAccumulatedTranscript(totalAnswerSoFar);
+    isHandlingSubmitRef.current = true;
+    setIsRecording(false);
+    
+    let reason = "";
+    if (e && e.target && e.target.dataset) {
+       reason = e.target.dataset.reason || "";
+       e.target.dataset.reason = ""; 
+    }
 
-    const hasAnswered = newTranscriptChunk.trim().length > 2;
-    const tLower = newTranscriptChunk.toLowerCase();
-    const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("not sure") || tLower.includes("no idea") || tLower.includes("move on");
+    const newTranscriptChunk = stopRecording(); 
+    let finalChunk = newTranscriptChunk.trim();
+
+    // Map system tags for the AI Engine
+    if (reason === "OVER_TIME_LIMIT") {
+       finalChunk += " [SYSTEM: OVER_TIME_LIMIT]";
+    } else if (reason === "MIC_ERROR") {
+       finalChunk += " [SYSTEM: MIC_ERROR]";
+    } else if (reason === "SILENCE" && finalChunk.length === 0 && accumulatedTranscript.length === 0) {
+       finalChunk = "<SILENCE>";
+    }
+
+    const totalAnswerSoFar = finalChunk === "<SILENCE>" ? "<SILENCE>" : (accumulatedTranscript + " " + finalChunk).trim();
+    setAccumulatedTranscript(totalAnswerSoFar);
 
     setIsSpeaking(true);
     setAiMessage("Thinking..."); 
@@ -579,22 +621,15 @@ export default function InterviewPage() {
     let dynamicResponse = "Got it. Let's move on.";
     let isSufficient = true;
 
-    if (isSkipping && !introPhase) {
-        dynamicResponse = "Okay, moving on. " + nextQText;
-        isSufficient = true;
-    } else if (hasAnswered) {
-        try {
-            const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: nextQText })
-            });
-            const ackData = await ackRes.json();
-            dynamicResponse = ackData.response_text || ("Okay. " + nextQText);
-            isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
-        } catch (err) { dynamicResponse = "Understood. " + nextQText; }
-    } else {
-        dynamicResponse = "I didn't quite catch that. " + nextQText;
-    }
+    try {
+        const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: nextQText })
+        });
+        const ackData = await ackRes.json();
+        dynamicResponse = ackData.response_text || ("Okay. " + nextQText);
+        isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
+    } catch (err) { dynamicResponse = "Understood. " + nextQText; }
 
     setAiMessage(dynamicResponse);
     await speakText(dynamicResponse, voiceGender);
@@ -625,6 +660,7 @@ export default function InterviewPage() {
     isTerminatingRef.current = true;
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
     if (securityLoopRef.current) cancelAnimationFrame(securityLoopRef.current);
+    if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     
     const fullBlob = await stopFullRecording();
     if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
@@ -859,7 +895,6 @@ export default function InterviewPage() {
             </div>
           </div>
           
-          {/* 🛡️ THE FIX: Manual Early Exit Button */}
           <Button 
             variant="destructive" 
             className="w-full bg-destructive/10 text-destructive hover:bg-destructive/20 border border-destructive/30"
