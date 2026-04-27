@@ -125,7 +125,6 @@ export default function InterviewPage() {
   const [interviewStep, setInterviewStep] = useState<"welcome" | "ready" | "scanning" | "interview" | "submitting" | "feedback">("welcome");
   const [cameraReady, setCameraReady] = useState(false);
   
-  // Enterprise Security States
   const [cheatStrikes, setCheatStrikes] = useState(0);
   const [terminationReason, setTerminationReason] = useState("");
   const [telemetry, setTelemetry] = useState({ faces: 1, liveness: 99, lipSync: true, mask: false });
@@ -147,7 +146,6 @@ export default function InterviewPage() {
   const fullRecordingChunksRef = useRef<Blob[]>([]);
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
   
-  // 🛡️ ENTERPRISE UPGRADE: Human-Pulse Timing Engine
   const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartRef = useRef(Date.now());
   const lastSpeechRef = useRef(Date.now());
@@ -187,7 +185,6 @@ export default function InterviewPage() {
   const progress = totalQuestions > 0 ? (Math.max(0, currentQ) / totalQuestions) * 100 : 0;
   const timeRemaining = (durationMinutes * 60) - totalElapsed;
 
-  // --- INITIALIZATION ---
   useEffect(() => {
     if (sessionId && !state) {
       const fetchSessionDetails = async () => {
@@ -234,7 +231,6 @@ export default function InterviewPage() {
     }
   }, [interviewStep]);
 
-  // --- SECURITY VAULT CONTROLLER ---
   const handleForceEndInterview = useCallback(async (isEarlyLeave = false, reason = "") => {
     if (isTerminatingRef.current) return;
     isTerminatingRef.current = true;
@@ -275,7 +271,6 @@ export default function InterviewPage() {
     });
   }, [voiceGender, handleForceEndInterview]);
 
-  // --- TAB, FOCUS & HARDWARE MONITORING ---
   useEffect(() => {
     if (interviewStep !== "interview" && interviewStep !== "scanning") return;
     
@@ -348,7 +343,6 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation]);
 
-  // --- COMPUTER VISION & LIP SYNC ENGINE ---
   const startSecurityTelemetry = () => {
     if (!streamRef.current) return;
 
@@ -391,7 +385,6 @@ export default function InterviewPage() {
     checkTelemetry();
   };
 
-  // --- INTERVIEW FLOW ---
   const requestPermissions = async () => {
     try {
       const avStream = await navigator.mediaDevices.getUserMedia({ 
@@ -464,7 +457,6 @@ export default function InterviewPage() {
     }, 800);
   };
 
-  // --- RECORDING & SPEECH ---
   const startFullRecording = useCallback((stream: MediaStream) => {
     const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
     fullRecordingChunksRef.current = [];
@@ -483,7 +475,6 @@ export default function InterviewPage() {
     });
   }, []);
 
-  // 🛡️ THE FIX: Smart Human-Pulse Watchdog
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     isRecordingRef.current = true;
@@ -498,12 +489,10 @@ export default function InterviewPage() {
       const timeSinceStart = now - recordingStartRef.current;
       const timeSinceLastSpeech = now - lastSpeechRef.current;
 
-      // Over 2 minutes of rambling
       if (timeSinceStart > 120000) { 
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      // 12 seconds of pure silence
       else if (timeSinceLastSpeech > 12000) {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
@@ -524,7 +513,7 @@ export default function InterviewPage() {
     
     // @ts-ignore
     recognition.onresult = (event) => {
-      lastSpeechRef.current = Date.now(); // Reset silence timer when speaking
+      lastSpeechRef.current = Date.now(); 
       
       let interim = ""; let allFinal = "";
       for (let i = 0; i < event.results.length; i++) {
@@ -539,7 +528,6 @@ export default function InterviewPage() {
       const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("no idea") || tLower.includes("move on") || tLower.includes("next question");
       const isStalling = tLower.includes("give me a minute") || tLower.includes("hold on") || tLower.includes("let me think");
 
-      // Smart Intent Trigger - Skip instantly if they say "skip"
       if (isSkipping || isStalling) {
          if (!isHandlingSubmitRef.current) {
             setTimeout(() => {
@@ -582,7 +570,6 @@ export default function InterviewPage() {
     startSpeechRecognition();
   }, [voiceGender, startSpeechRecognition]);
 
-  // 🛡️ THE FIX: Dynamic Submit payload mapping
   const handleAnswerSubmit = useCallback(async (e: any) => {
     if (!isRecording) return;
     
@@ -598,7 +585,6 @@ export default function InterviewPage() {
     const newTranscriptChunk = stopRecording(); 
     let finalChunk = newTranscriptChunk.trim();
 
-    // Map system tags for the AI Engine
     if (reason === "OVER_TIME_LIMIT") {
        finalChunk += " [SYSTEM: OVER_TIME_LIMIT]";
     } else if (reason === "MIC_ERROR") {
@@ -656,6 +642,7 @@ export default function InterviewPage() {
     }
   }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, finalQuestionsList, voiceGender, startSpeechRecognition]);
 
+  // 🛡️ THE HYBRID UPGRADE: Passing exact CV metrics to the backend math engine
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
     isTerminatingRef.current = true;
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
@@ -713,17 +700,28 @@ export default function InterviewPage() {
         } catch {}
       }
 
+      // 🛡️ SECRET CV TELEMETRY PACKAGER
+      const baseReason = forcedTerminationReason || "Completed normally.";
+      const metricsPayload = JSON.stringify({
+         tab_switches: clickWarningsRef.current,
+         esc_presses: escWarningsRef.current,
+         liveness_score: telemetry.liveness,
+         faces_detected: telemetry.faces,
+         lip_sync_failed: !telemetry.lipSync
+      });
+      const hybridRemarks = `${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
+
       await submitEvaluation({
         candidate_name: candidateName, position, job_description: jobDescription,
         resume, transcript: fullTranscript || "(No transcript)", video_filename: primaryVideoFilename,
-        remarks: forcedTerminationReason || "Completed normally",
+        remarks: hybridRemarks,
       } as any); 
 
       setInterviewStep("feedback");
     } catch (err: any) {
       setInterviewStep("feedback");
     }
-  }, [answers, finalQuestionsList, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording]);
+  }, [answers, finalQuestionsList, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording, telemetry]);
 
   const submitFeedback = async () => {
     if (!sessionId) { setFeedbackSubmitted(true); return; }
