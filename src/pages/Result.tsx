@@ -47,7 +47,7 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE FIX: Custom YouTube-Style Enterprise Video Player
+// 🛡️ THE FIX: Enterprise Player with WebM Duration Hack & Scrubbing
 const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -60,6 +60,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
 
   const togglePlay = () => {
     if (videoRef.current) {
@@ -70,30 +71,48 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   };
 
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
+    if (videoRef.current && !isScrubbing && duration > 0) {
       setCurrentTime(videoRef.current.currentTime);
-      setProgress((videoRef.current.currentTime / videoRef.current.duration) * 100);
+      setProgress((videoRef.current.currentTime / duration) * 100);
     }
   };
 
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
-      setDuration(videoRef.current.duration);
+      const vid = videoRef.current;
+      // 🛡️ WebM Infinity Duration Hack
+      if (vid.duration === Infinity || isNaN(vid.duration)) {
+        vid.currentTime = 1e99;
+        vid.ontimeupdate = () => {
+          vid.ontimeupdate = null;
+          vid.currentTime = 0;
+          setDuration(vid.duration);
+        };
+      } else {
+        setDuration(vid.duration);
+      }
     }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newTime = (Number(e.target.value) / 100) * duration;
-    if (videoRef.current) {
-      videoRef.current.currentTime = newTime;
+    const newProgress = Number(e.target.value);
+    setProgress(newProgress);
+    if (duration > 0) {
+      const newTime = (newProgress / 100) * duration;
       setCurrentTime(newTime);
-      setProgress(Number(e.target.value));
+      if (videoRef.current) {
+        videoRef.current.currentTime = newTime;
+      }
     }
   };
 
   const skip = (amount: number) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime += amount;
+    if (videoRef.current && duration > 0) {
+      let newTime = videoRef.current.currentTime + amount;
+      newTime = Math.max(0, Math.min(newTime, duration));
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+      setProgress((newTime / duration) * 100);
     }
   };
 
@@ -138,7 +157,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   }, []);
 
   const formatTime = (time: number) => {
-    if (isNaN(time)) return "0:00";
+    if (isNaN(time) || time === Infinity) return "0:00";
     const mins = Math.floor(time / 60);
     const secs = Math.floor(time % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
@@ -155,7 +174,6 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
         onLoadedMetadata={handleLoadedMetadata} 
       />
       
-      {/* Big Play Button Overlay */}
       {!isPlaying && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/20" onClick={togglePlay}>
           <div className="w-16 h-16 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center backdrop-blur-md shadow-[0_0_20px_rgba(0,240,255,0.4)] pointer-events-auto cursor-pointer hover:scale-110 transition-transform">
@@ -164,22 +182,25 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
         </div>
       )}
 
-      {/* YouTube-Style Controls Bar */}
-      <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 pt-12 transition-opacity duration-300 ${isPlaying ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
+      <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 pt-12 transition-opacity duration-300 ${isPlaying && !isScrubbing ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
         
-        {/* Progress Bar Scrubbing */}
+        {/* 🛡️ Scrubbing Slider Fix */}
         <div className="relative w-full h-1.5 bg-white/20 rounded-full mb-3 cursor-pointer group/progress">
           <input 
-            type="range" min="0" max="100" 
-            value={progress || 0} onChange={handleSeek} 
+            type="range" min="0" max="100" step="0.1"
+            value={progress || 0} 
+            onChange={handleSeek} 
+            onMouseDown={() => setIsScrubbing(true)}
+            onMouseUp={() => setIsScrubbing(false)}
+            onTouchStart={() => setIsScrubbing(true)}
+            onTouchEnd={() => setIsScrubbing(false)}
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
           />
-          <div className="absolute top-0 left-0 h-full bg-primary rounded-full pointer-events-none" style={{ width: `${progress}%` }}>
+          <div className="absolute top-0 left-0 h-full bg-primary rounded-full pointer-events-none transition-all duration-75" style={{ width: `${progress}%` }}>
             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full scale-0 group-hover/progress:scale-100 transition-transform" />
           </div>
         </div>
 
-        {/* Buttons Row */}
         <div className="flex items-center justify-between text-white">
           <div className="flex items-center gap-4">
             <button onClick={togglePlay} className="hover:text-primary transition-colors">
@@ -287,7 +308,6 @@ export default function ResultPage() {
   const SentimentIconComp = sentimentIcon[result.sentiment?.rating as keyof typeof sentimentIcon] || Meh;
   const sentClr = sentimentColor[result.sentiment?.rating as keyof typeof sentimentColor] || sentimentColor.Neutral;
   
-  // 🛡️ THE FIX: Safely strip the [UPLOADED] tag before hitting the frontend video player
   const cleanVideoFilename = result.video_filename ? result.video_filename.replace("[UPLOADED] ", "").replace("[UPLOADED]", "").trim() : null;
   const videoUrl = cleanVideoFilename ? `${API_BASE}/uploads/recordings/${encodeURIComponent(cleanVideoFilename)}` : null;
 
