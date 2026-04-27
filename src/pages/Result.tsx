@@ -287,7 +287,9 @@ export default function ResultPage() {
   const SentimentIconComp = sentimentIcon[result.sentiment?.rating as keyof typeof sentimentIcon] || Meh;
   const sentClr = sentimentColor[result.sentiment?.rating as keyof typeof sentimentColor] || sentimentColor.Neutral;
   
-  const videoUrl = result.video_filename ? `${API_BASE}/uploads/recordings/${encodeURIComponent(result.video_filename)}` : null;
+  // 🛡️ THE FIX: Safely strip the [UPLOADED] tag before hitting the frontend video player
+  const cleanVideoFilename = result.video_filename ? result.video_filename.replace("[UPLOADED] ", "").replace("[UPLOADED]", "").trim() : null;
+  const videoUrl = cleanVideoFilename ? `${API_BASE}/uploads/recordings/${encodeURIComponent(cleanVideoFilename)}` : null;
 
   return (
     <div className="min-h-screen bg-background nexus-grid pb-20">
@@ -458,7 +460,6 @@ export default function ResultPage() {
                 <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded border border-border/50">ForgePro Video Engine</span>
               </div>
               
-              {/* 🛡️ THE FIX: Replaced basic HTML5 video with ForgeProVideoPlayer */}
               <ForgeProVideoPlayer src={videoUrl} />
               
             </motion.div>
