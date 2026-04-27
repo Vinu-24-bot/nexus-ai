@@ -64,7 +64,7 @@ export default function HistoryPage() {
       const data = await getEvaluations();
       setResults(data || []);
     } catch {
-      // Backend not running — local data returned automatically
+      // Backend not running
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -165,13 +165,6 @@ export default function HistoryPage() {
     }
   };
 
-  const toggleSort = (field: SortField) => {
-    if (sortField === field) setSortAsc(!sortAsc);
-    else { setSortField(field); setSortAsc(false); }
-  };
-
-  const SortIcon = sortAsc ? SortAsc : SortDesc;
-
   return (
     <div className="min-h-screen bg-background nexus-grid">
       <Navbar />
@@ -198,7 +191,7 @@ export default function HistoryPage() {
             </div>
           </motion.div>
 
-          {/* Split Navigation Menus */}
+          {/* Tab Navigation Menu */}
           <motion.div variants={fadeUp} custom={0.2} className="flex items-center gap-2 border-b border-border/50 pb-4 mt-6 overflow-x-auto hide-scrollbar">
             <button 
               onClick={() => setActiveTab("all")}
@@ -220,87 +213,80 @@ export default function HistoryPage() {
             </button>
           </motion.div>
 
-          {/* Search & Filters */}
-          <motion.div variants={fadeUp} custom={0.4} className="glass rounded-xl p-5 space-y-5 shadow-sm border border-primary/10">
-            {/* Search Bar */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder={`Search ${activeTab === "all" ? "all" : activeTab === "initial" ? "live" : "uploaded"} candidates by name, position, or ID...`}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 bg-background border-border focus-visible:ring-primary h-11"
-              />
+          {/* Clean UI Search & Individual Filters */}
+          <motion.div variants={fadeUp} custom={0.4} className="glass rounded-xl p-5 space-y-4 shadow-sm border border-primary/10">
+            
+            {/* Top Row: Search & Common Sort Option */}
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder={`Search ${activeTab === "all" ? "all" : activeTab === "initial" ? "live" : "uploaded"} candidates by name, position, or ID...`}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 bg-background border-border focus-visible:ring-primary h-11"
+                />
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <SortAsc className="w-3.5 h-3.5" /> Sort By
+                </label>
+                <select
+                  value={sortField}
+                  onChange={(e) => setSortField(e.target.value as SortField)}
+                  className="bg-background border border-border/50 text-foreground text-sm rounded-md px-3 py-2.5 outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                >
+                  <option value="date">Date</option>
+                  <option value="score">Overall Score</option>
+                  <option value="name">Candidate Name</option>
+                </select>
+                <button 
+                  onClick={() => setSortAsc(!sortAsc)} 
+                  className="p-2.5 border border-border/50 rounded-md bg-background text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                  title="Toggle Sort Direction"
+                >
+                   {sortAsc ? <SortAsc className="w-4 h-4" /> : <SortDesc className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
-            {/* Filter Columns */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2 border-t border-border/50">
+            {/* Bottom Row: Individual Filter Menus */}
+            <div className="flex flex-col md:flex-row gap-6 pt-4 border-t border-border/50">
               
-              {/* Column 1: Recruiter Status */}
-              <div className="space-y-3">
-                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              {/* Recruiter Status Menu */}
+              <div className="flex items-center gap-3 flex-1">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 w-36">
                   <Filter className="w-3.5 h-3.5" /> Recruiter Status
                 </label>
-                <div className="flex flex-wrap gap-2 text-xs">
-                  {(["all", "pending", "selected", "rejected", "hold", "doubtful"] as FilterStatus[]).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setFilterStatus(s)}
-                      className={`px-3 py-1.5 rounded-md border transition-colors ${
-                        filterStatus === s
-                          ? "border-primary bg-primary/10 text-primary shadow-[0_0_10px_rgba(0,240,255,0.15)] font-medium"
-                          : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:bg-muted/50"
-                      }`}
-                    >
-                      {s === "all" ? "All Statuses" : s.charAt(0).toUpperCase() + s.slice(1)}
-                    </button>
-                  ))}
-                </div>
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value as FilterStatus)}
+                  className="w-full bg-background border border-border/50 text-sm text-foreground rounded-md px-3 py-2 outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="selected">Selected</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="hold">Hold</option>
+                  <option value="doubtful">Doubtful</option>
+                </select>
               </div>
 
-              {/* Column 2: ForgePro Recommendation */}
-              <div className="space-y-3">
-                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+              {/* AI Recommendation Menu */}
+              <div className="flex items-center gap-3 flex-1">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 w-36 md:w-44">
                   <Sparkles className="w-3.5 h-3.5" /> AI Recommendation
                 </label>
-                <div className="flex flex-wrap gap-2 text-xs">
-                  {(["all", "Strong Hire", "Lean Hire", "Reject"] as FilterRec[]).map((r) => (
-                    <button
-                      key={r}
-                      onClick={() => setFilterRec(r)}
-                      className={`px-3 py-1.5 rounded-md border transition-colors ${
-                        filterRec === r
-                          ? "border-accent bg-accent/10 text-accent shadow-[0_0_10px_rgba(139,92,246,0.15)] font-medium"
-                          : "border-border bg-background text-muted-foreground hover:border-accent/30 hover:bg-muted/50"
-                      }`}
-                    >
-                      {r === "all" ? "All Recs" : r}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Column 3: Sort Order */}
-              <div className="space-y-3">
-                <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <SortAsc className="w-3.5 h-3.5" /> Sort Results By
-                </label>
-                <div className="flex flex-wrap gap-2 text-xs">
-                  {(["date", "score", "name"] as SortField[]).map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => toggleSort(f)}
-                      className={`px-3 py-1.5 rounded-md border flex items-center gap-1.5 transition-colors ${
-                        sortField === f
-                          ? "border-foreground bg-foreground/10 text-foreground font-medium"
-                          : "border-border bg-background text-muted-foreground hover:border-foreground/30 hover:bg-muted/50"
-                      }`}
-                    >
-                      {f.charAt(0).toUpperCase() + f.slice(1)}
-                      {sortField === f && <SortIcon className="w-3 h-3" />}
-                    </button>
-                  ))}
-                </div>
+                <select
+                  value={filterRec}
+                  onChange={(e) => setFilterRec(e.target.value as FilterRec)}
+                  className="w-full bg-background border border-border/50 text-sm text-foreground rounded-md px-3 py-2 outline-none focus:ring-1 focus:ring-accent cursor-pointer"
+                >
+                  <option value="all">All Recommendations</option>
+                  <option value="Strong Hire">Strong Hire</option>
+                  <option value="Lean Hire">Lean Hire</option>
+                  <option value="Reject">Reject</option>
+                </select>
               </div>
 
             </div>
@@ -316,14 +302,8 @@ export default function HistoryPage() {
               <p className="text-muted-foreground">
                 {results.length === 0
                   ? "No evaluations yet. Complete an interview to see history."
-                  : "No results match your filters in this category."}
+                  : "No results match your current filters and search."}
               </p>
-              {results.length === 0 && (
-                <div className="flex gap-3 justify-center mt-3">
-                  <Link to="/evaluate" className="text-primary text-sm hover:underline font-medium">Start an Interview →</Link>
-                  <Link to="/upload-analysis" className="text-accent text-sm hover:underline font-medium">Upload & Analyze →</Link>
-                </div>
-              )}
             </div>
           ) : (
             <AnimatePresence mode="wait">
@@ -351,7 +331,7 @@ export default function HistoryPage() {
                                 {result.date}
                               </span>
                               
-                              {/* Round Type Badge */}
+                              {/* Clean Round Type Badge */}
                               <span className={`flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border ${isL1 ? 'text-accent border-accent/30 bg-accent/5' : 'text-primary border-primary/30 bg-primary/5'}`}>
                                 {isL1 ? <Upload className="w-2.5 h-2.5" /> : <Mic className="w-2.5 h-2.5" />}
                                 {isL1 ? "L1 Tech Round" : "Initial Screening"}
