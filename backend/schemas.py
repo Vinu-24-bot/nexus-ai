@@ -25,7 +25,8 @@ class AcknowledgmentRequest(BaseModel):
     next_question: Optional[str] = None  
 
 class SelectionStatusRequest(BaseModel):
-    status: str = Field(..., pattern="^(pending|selected|rejected)$")
+    # 🛡️ THE FIX: Expanded regex pattern to accept the new Enterprise statuses
+    status: str = Field(..., pattern="^(pending|selected|rejected|hold|doubtful)$")
 
 class ResumeUploadResponse(BaseModel):
     filename: str
