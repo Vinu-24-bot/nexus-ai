@@ -156,7 +156,6 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     frontend_url = frontend_url.rstrip('/')
     interview_link = f"{frontend_url}/interview/{new_session.id}"
 
-    # 🛡️ THE FIX: Extracting Talent Associate Name safely
     talent_name = getattr(req, "talent_associate_name", None)
     if not talent_name or str(talent_name).strip() == "":
         talent_name = "The ForgePro Team"
@@ -318,15 +317,19 @@ async def acknowledge_answer(req: AcknowledgmentRequest):
 async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db)):
     try:
         final_transcript = req.transcript
-        if req.video_filename:
-            video_path = RECORDINGS_DIR / req.video_filename
+        
+        # 🛡️ THE FIX: Safely strip the [UPLOADED] tag before hitting the filesystem
+        actual_video_filename = req.video_filename.replace("[UPLOADED]", "").strip() if req.video_filename else None
+        
+        if actual_video_filename:
+            video_path = RECORDINGS_DIR / actual_video_filename
             if video_path.exists():
-                audio_path = RECORDINGS_DIR / f"{req.video_filename}.mp3"
+                audio_path = RECORDINGS_DIR / f"{actual_video_filename}.mp3"
                 if extract_audio(str(video_path), str(audio_path)):
                     try: final_transcript = await transcribe_audio(str(audio_path))
                     except: pass
 
-        if len(final_transcript.strip()) < 5:
+        if not final_transcript or len(final_transcript.strip()) < 5:
             raise ValueError("Transcript is essentially empty. Audio extraction failed to find speech.")
 
         ai_result = await evaluate_candidate(req.job_description, req.resume, final_transcript)
@@ -335,7 +338,8 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
         evaluation = Evaluation(
             id=candidate_id, candidate_name=req.candidate_name, position=req.position,
             job_description=req.job_description, resume=req.resume, transcript=final_transcript,
-            video_filename=req.video_filename, remarks=req.remarks or "Completed normally.", 
+            video_filename=req.video_filename, # Save original tag so Dashboard splits work
+            remarks=req.remarks or "Completed normally.", 
             candidate_overview=ai_result.get("candidate_overview", ""), scores=ai_result.get("scores", {}),
             sentiment=ai_result.get("sentiment", {"rating": "Neutral", "explanation": ""}),
             candidate_status=ai_result.get("candidate_status", {"level": "Moderate Confidence", "description": ""}),

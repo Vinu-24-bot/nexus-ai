@@ -56,22 +56,16 @@ def _validate_result(result: dict) -> dict:
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, and the actual Live Interview Transcript.
 
-*** ZERO-TOLERANCE SCORING ENGINE (CRITICAL RULE) ***
-1. The [CANDIDATE_RESUME] is ONLY for background context. YOU MUST SCORE THE CANDIDATE PURELY ON WHAT THEY SPOKE IN THE [INTERVIEW_TRANSCRIPT].
-2. If the candidate worked at Google on their resume but said nothing, skipped questions, or gave shallow 1-sentence answers during the interview, their `technical_proficiency` MUST drop to Zero (0-30). Do NOT give them "free points" for a good resume.
-3. If the transcript shows the candidate abandoned the interview, answered nothing, or the transcript is mostly the AI talking with the candidate remaining silent, the `overall_score` MUST BE 0 and the `hiring_recommendation` MUST be "Reject".
-4. NEVER hallucinate competence. If they did not explicitly prove technical depth during the live interview, they fail.
+*** ENTERPRISE EVALUATION PROTOCOL ***
+1. JD + RESUME + TRANSCRIPT TRIANGLE: The evaluation MUST be accurate, reliable, and entirely justified by what the candidate ACTUALLY SPOKE in the [INTERVIEW_TRANSCRIPT]. The [CANDIDATE_RESUME] provides context to verify if their spoken claims match their written claims.
+2. ZERO-TOLERANCE BIAS: If the candidate worked at Google on their resume but said nothing, skipped questions, or gave shallow answers during the interview, their `technical_proficiency` MUST drop to Zero. Do NOT give them "free points" for a good resume.
+3. VOCAL SENTIMENT & CONFIDENCE: Deeply analyze the transcript for behavioral cues. Look for "<SILENCE>", filler words ("um", "uh", "like"), frequent pauses, or asking to skip questions repeatedly. Use this to determine `confidence_level` and `sentiment`.
 
-CRITICAL ENTERPRISE RULES:
-1. LATENT SEMANTIC RECOGNITION: Reward candidates who explain concepts correctly using informal language or analogies. Do not penalize for lack of corporate jargon, but heavily penalize lack of logic.
-2. FAIRNESS DOCTRINE: You MUST NOT penalize the candidate's "Technical Proficiency" for broken English. Judge them PURELY on technical accuracy.
-3. CONFIDENCE SCORE: Analyze the transcript for filler words ("um", "uh", "like"), hesitation, or asking to skip questions repeatedly. 
-
-Synthesize the findings.
+Synthesize the findings reliably.
 - 90-100: Exceptional, undeniable proof of expertise spoken in transcript. Strong Hire.
 - 75-89: Solid, capable, minor gaps. Lean Hire.
 - 60-74: Average, superficial answers, lacks deep knowledge. Reject.
-- Below 60: Major discrepancies, extreme brevity, or silence. Reject.
+- Below 60: Major discrepancies, extreme brevity, lack of confidence, or silence. Reject.
 
 You MUST output ONLY valid JSON matching this exact structure:
 {
@@ -85,7 +79,7 @@ You MUST output ONLY valid JSON matching this exact structure:
   },
   "sentiment": {
     "rating": "Positive | Neutral | Negative",
-    "explanation": "Deep analysis of the candidate's tone and behavior."
+    "explanation": "Deep analysis of the candidate's vocal sentiment, pacing, hesitation, and emotional confidence based on transcript markers."
   },
   "candidate_status": {
     "level": "Strong Confidence | Moderate Confidence | Low Confidence | Needs Improvement",
@@ -95,7 +89,7 @@ You MUST output ONLY valid JSON matching this exact structure:
   "red_flags_or_weaknesses": ["Specific technical gap or discrepancy 1", "Specific weakness 2"],
   "dynamic_follow_up_questions": ["Hard follow-up question based on a vague answer"],
   "hiring_recommendation": "Strong Hire | Lean Hire | Reject",
-  "justification": "A highly detailed 2-paragraph explanation explicitly citing the candidate's spoken logic from the transcript to justify the score."
+  "justification": "A highly reliable, accurate, and detailed 2-paragraph explanation explicitly citing the candidate's spoken logic from the interview to justify the verdict."
 }
 
 [JOB_DESCRIPTION]
