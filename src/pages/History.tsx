@@ -272,10 +272,10 @@ export default function HistoryPage() {
                 </select>
               </div>
 
-              {/* AI Recommendation Menu */}
+              {/* ForgePro Recommendation Menu */}
               <div className="flex items-center gap-3 flex-1">
                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 w-36 md:w-44">
-                  <Sparkles className="w-3.5 h-3.5" /> AI Recommendation
+                  <Sparkles className="w-3.5 h-3.5" /> ForgePro Recommendation
                 </label>
                 <select
                   value={filterRec}
