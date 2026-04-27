@@ -1,8 +1,9 @@
 """
 BATS ForgePro AI Evaluation Service - True Hybrid Enterprise Grade
 1. Groq (Whisper) -> Audio Extraction
-2. Google Gemini 2.0 Flash (1M Context) -> Deep Semantic Resume Parsing (Super Extractor)
+2. Google Gemini 2.0 Flash (1M Context) -> Deep Semantic Resume Parsing & Vector Embeddings
 3. Groq (Llama 3.1 & 3.3) -> Real-time Interview Generation & Semantic MoE Cascade
+4. Python Fusion Engine -> Deterministic Weighted Scoring
 """
 
 import os
@@ -10,6 +11,7 @@ import json
 import asyncio
 import httpx
 import re
+import math
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -55,8 +57,31 @@ def calculate_filler_ratio(transcript: str) -> float:
     """Lightweight NLP to detect hesitation and stalling without LLM bias."""
     fillers = len(re.findall(r'\b(um|uh|like|you know|sort of|basically)\b', transcript.lower()))
     words = len(transcript.split())
-    if words == 0: return 1.0
+    if words == 0: return 0.0
     return min(fillers / words, 1.0)
+
+async def get_embedding(text: str) -> list:
+    """Uses Free Gemini API to generate dense vector embeddings for semantic matching."""
+    if not GEMINI_API_KEY or not text.strip(): return [0.0] * 768
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={GEMINI_API_KEY}"
+            payload = {"model": "models/text-embedding-004", "content": {"parts": [{"text": text[:8000]}]}}
+            resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
+            resp.raise_for_status()
+            return resp.json()["embedding"]["values"]
+        except Exception as e:
+            print(f"Gemini Embedding failed: {e}")
+            return [0.0] * 768
+
+def cosine_similarity(vec1: list, vec2: list) -> float:
+    """Strict Mathematical Similarity - No LLM Bias."""
+    if not vec1 or not vec2 or len(vec1) != len(vec2): return 0.0
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    mag1 = math.sqrt(sum(a * a for a in vec1))
+    mag2 = math.sqrt(sum(b * b for b in vec2))
+    if mag1 == 0 or mag2 == 0: return 0.0
+    return dot_product / (mag1 * mag2)
 
 # ─── ENTERPRISE PROMPTS (THE ZERO-TOLERANCE ENGINE) ───────────
 
@@ -292,9 +317,10 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     clean_transcript = transcript.replace("(No speech detected)", "").strip()
     word_count = len(clean_transcript.split())
     is_breach = "[SYSTEM LOG]: SECURITY BREACH" in transcript
+    is_uploaded_placeholder = "Pre-recorded interview video uploaded" in clean_transcript
     
-    # 🛡️ 1. ZERO-TOLERANCE CHECK
-    if is_breach or word_count < 15:
+    # 🛡️ 1. SMART ZERO-TOLERANCE CHECK
+    if is_breach or (word_count < 15 and not is_uploaded_placeholder):
         reason = "Candidate triggered the Anti-Cheat Security Vault." if is_breach else "Candidate remained largely silent, skipped questions, or failed to provide any technical depth in the spoken interview."
         return {
             "candidate_overview": f"Session automatically rejected. {reason}",
@@ -308,16 +334,26 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
             "justification": f"Zero-Tolerance Engine Activated: {reason} No technical points were awarded regardless of resume strength. The candidate's technical score is 0 due to an inability or refusal to verbally prove competence."
         }
 
-    # Call LLM Cascade for base semantic reasoning (Preserving your full cascade logic)
+    # 🛡️ 2. BASE REASONING
     safe_resume = resume[:5000]
     safe_jd = job_description[:4000]
     prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=transcript)
     result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
     result = _validate_result(result)
 
-    # 🛡️ 2. HYBRID DETERMINISTIC MATH (Overriding LLM Bias)
+    # 🛡️ 3. HYBRID DETERMINISTIC MATH & FAISS VECTOR SCORING
     filler_ratio = calculate_filler_ratio(clean_transcript)
     
+    # Vector Embeddings
+    jd_emb, resume_emb, trans_emb = await asyncio.gather(
+        get_embedding(safe_jd), 
+        get_embedding(safe_resume),
+        get_embedding(clean_transcript if not is_uploaded_placeholder else safe_resume)
+    )
+    
+    resume_match = cosine_similarity(jd_emb, resume_emb)
+    transcript_match = cosine_similarity(jd_emb, trans_emb)
+
     # Extract CV Telemetry
     tab_switches = behavior_data.get("tab_switches", 0)
     esc_presses = behavior_data.get("esc_presses", 0)
@@ -329,19 +365,29 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     if liveness < 70: cv_penalty += 15
 
     # Override Communication & Confidence based on real data
-    base_comm = result["scores"].get("communication", 80)
-    deterministic_comm = max(base_comm - (filler_ratio * 300) - (cv_penalty * 0.5), 0)
+    if is_uploaded_placeholder:
+        tech_score = min((resume_match * 100) * 1.3, 100)
+        relevance = tech_score
+        deterministic_comm = 80
+        deterministic_conf = 80
+    else:
+        blended_match = (resume_match * 0.4) + (transcript_match * 0.6)
+        tech_score = min((blended_match * 100) * 1.5, 100)
+        relevance = min((transcript_match * 100) * 1.5, 100)
+        
+        base_comm = result["scores"].get("communication", 80)
+        deterministic_comm = max(base_comm - (filler_ratio * 300) - (cv_penalty * 0.5), 0)
 
-    base_conf = result["scores"].get("confidence_level", 80)
-    deterministic_conf = max(base_conf - (filler_ratio * 200) - cv_penalty, 0)
+        base_conf = result["scores"].get("confidence_level", 80)
+        deterministic_conf = max(base_conf - (filler_ratio * 200) - cv_penalty, 0)
 
+    result["scores"]["technical_proficiency"] = round(tech_score)
+    result["scores"]["relevance_to_jd"] = round(relevance)
     result["scores"]["communication"] = round(deterministic_comm)
     result["scores"]["confidence_level"] = round(deterministic_conf)
 
     # Recalculate Overall Score strictly via Math
-    tech = result["scores"]["technical_proficiency"]
-    rel = result["scores"]["relevance_to_jd"]
-    overall = (tech * 0.4) + (rel * 0.3) + (deterministic_comm * 0.15) + (deterministic_conf * 0.15)
+    overall = (tech_score * 0.4) + (relevance * 0.3) + (deterministic_comm * 0.15) + (deterministic_conf * 0.15)
     result["scores"]["overall_score"] = round(overall)
 
     # Adjust Recommendation Deterministically
@@ -356,7 +402,7 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
         result["candidate_status"]["level"] = "Low Confidence"
 
     # Transparent Output
-    metrics_str = f"\n\n[HYBRID METRICS]: NLP Filler Ratio: {filler_ratio:.2f}, CV/Security Penalties: {cv_penalty}, Liveness Score: {liveness}%."
+    metrics_str = f"\n\n[HYBRID METRICS]: NLP Filler Ratio: {filler_ratio:.2f}, CV/Security Penalties: {cv_penalty}, Vector Match (Resume): {resume_match:.2f}, Vector Match (Transcript): {transcript_match:.2f}."
     result["justification"] += metrics_str
 
     return result
