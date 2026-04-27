@@ -47,6 +47,7 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
+// 🛡️ THE FIX: Bulletproof WebM Duration Indexer
 const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -61,6 +62,37 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
 
+  // 🛡️ Force browser to calculate duration & build seek index for WebM blobs
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleLoadedMetadata = () => {
+      if (video.duration === Infinity || isNaN(video.duration)) {
+        video.currentTime = 1e99; // Silently jump to the end
+      } else {
+        setDuration(video.duration);
+      }
+    };
+
+    const handleDurationChange = () => {
+      if (video.duration !== Infinity && !isNaN(video.duration)) {
+        setDuration(video.duration);
+        if (video.currentTime > 1e98) {
+          video.currentTime = 0; // Rewind back to 00:00 instantly
+        }
+      }
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('durationchange', handleDurationChange);
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('durationchange', handleDurationChange);
+    };
+  }, [src]);
+
   const togglePlay = () => {
     if (videoRef.current) {
       if (isPlaying) videoRef.current.pause();
@@ -70,46 +102,43 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   };
 
   const handleTimeUpdate = () => {
-    if (videoRef.current && !isScrubbing && duration > 0) {
-      setCurrentTime(videoRef.current.currentTime);
-      setProgress((videoRef.current.currentTime / duration) * 100);
-    }
-  };
+    if (videoRef.current && !isScrubbing) {
+      const current = videoRef.current.currentTime;
+      if (current > 1e98) return; // Hide the 1e99 hack from UI
 
-  // 🛡️ THE BULLETPROOF FIX: The 'onseeked' duration grabber
-  const handleLoadedMetadata = () => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    if (video.duration === Infinity || isNaN(video.duration)) {
-      video.currentTime = 1e99;
-      video.onseeked = () => {
-        video.onseeked = null; // Unbind immediately to prevent loops
-        setDuration(video.duration);
-        video.currentTime = 0; // Safely return to start
-      };
-    } else {
-      setDuration(video.duration);
+      setCurrentTime(current);
+      const activeDuration = duration > 0 ? duration : videoRef.current.duration;
+      if (activeDuration > 0 && activeDuration !== Infinity) {
+        setProgress((current / activeDuration) * 100);
+      }
     }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newProgress = Number(e.target.value);
     setProgress(newProgress);
-    if (videoRef.current && duration > 0) {
-      const newTime = (newProgress / 100) * duration;
-      videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
+    if (videoRef.current) {
+      const activeDuration = duration > 0 ? duration : videoRef.current.duration;
+      if (activeDuration > 0 && activeDuration !== Infinity) {
+        const newTime = (newProgress / 100) * activeDuration;
+        videoRef.current.currentTime = newTime;
+        setCurrentTime(newTime);
+      }
     }
   };
 
   const skip = (amount: number) => {
-    if (videoRef.current && duration > 0) {
-      let newTime = videoRef.current.currentTime + amount;
-      newTime = Math.max(0, Math.min(newTime, duration));
-      videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
-      setProgress((newTime / duration) * 100);
+    if (videoRef.current) {
+      const activeDuration = duration > 0 ? duration : videoRef.current.duration;
+      if (activeDuration > 0 && activeDuration !== Infinity) {
+        let newTime = videoRef.current.currentTime + amount;
+        newTime = Math.max(0, Math.min(newTime, activeDuration));
+        videoRef.current.currentTime = newTime;
+        setCurrentTime(newTime);
+        setProgress((newTime / activeDuration) * 100);
+      } else {
+        videoRef.current.currentTime += amount; // Fallback if indexing failed
+      }
     }
   };
 
@@ -168,7 +197,6 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
         className="w-full max-h-[600px] cursor-pointer" 
         onClick={togglePlay} 
         onTimeUpdate={handleTimeUpdate} 
-        onLoadedMetadata={handleLoadedMetadata} 
       />
       
       {!isPlaying && (
