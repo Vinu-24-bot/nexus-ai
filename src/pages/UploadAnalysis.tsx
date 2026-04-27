@@ -257,9 +257,6 @@ export default function UploadAnalysisPage() {
             <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground">
               Analyze Pre-Recorded Interviews With BATS ForgePro
             </h1>
-            <p className="text-muted-foreground max-w-xl mx-auto">
-              Upload pre-recorded interview videos or paste transcripts. BATS ForgePro will analyze them against the JD and resume.
-            </p>
           </motion.div>
 
           {/* How It Works Restored & Enhanced */}
