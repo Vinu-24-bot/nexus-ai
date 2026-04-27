@@ -216,7 +216,6 @@ export default function HistoryPage() {
           {/* Clean UI Search & Individual Filters */}
           <motion.div variants={fadeUp} custom={0.4} className="glass rounded-xl p-5 space-y-4 shadow-sm border border-primary/10">
             
-            {/* Top Row: Search & Common Sort Option */}
             <div className="flex flex-col md:flex-row gap-4">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -250,10 +249,8 @@ export default function HistoryPage() {
               </div>
             </div>
 
-            {/* Bottom Row: Individual Filter Menus */}
             <div className="flex flex-col md:flex-row gap-6 pt-4 border-t border-border/50">
               
-              {/* Recruiter Status Menu */}
               <div className="flex items-center gap-3 flex-1">
                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 w-36">
                   <Filter className="w-3.5 h-3.5" /> Recruiter Status
@@ -272,7 +269,6 @@ export default function HistoryPage() {
                 </select>
               </div>
 
-              {/* ForgePro Recommendation Menu */}
               <div className="flex items-center gap-3 flex-1">
                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 w-36 md:w-44">
                   <Sparkles className="w-3.5 h-3.5" /> ForgePro Recommendation
@@ -331,7 +327,6 @@ export default function HistoryPage() {
                                 {result.date}
                               </span>
                               
-                              {/* Clean Round Type Badge */}
                               <span className={`flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded border ${isL1 ? 'text-accent border-accent/30 bg-accent/5' : 'text-primary border-primary/30 bg-primary/5'}`}>
                                 {isL1 ? <Upload className="w-2.5 h-2.5" /> : <Mic className="w-2.5 h-2.5" />}
                                 {isL1 ? "L1 Tech Round" : "Initial Screening"}
