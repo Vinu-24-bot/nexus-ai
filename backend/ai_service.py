@@ -1,9 +1,8 @@
 """
-BATS ForgePro AI Evaluation Service - True Hybrid Enterprise Grade
+BATS ForgePro AI Evaluation Service - Enterprise LLM RAG Engine
 1. Groq (Whisper) -> Audio Extraction
-2. Google Gemini 2.0 Flash (1M Context) -> Deep Semantic Resume Parsing & Vector Embeddings
-3. Groq (Llama 3.1 & 3.3) -> Real-time Interview Generation & Semantic MoE Cascade
-4. Python Fusion Engine -> Deterministic Weighted Scoring
+2. Google Gemini 2.0 Flash (1M Context) -> Deep Semantic Resume Parsing 
+3. Groq (Llama 3.1 & 3.3) -> Real-time Interview Generation & Elite RAG Scoring
 """
 
 import os
@@ -11,7 +10,6 @@ import json
 import asyncio
 import httpx
 import re
-import math
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,7 +17,7 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# ─── UTILITY & NLP FUNCTIONS ────────────────────────────────
+# ─── UTILITY FUNCTIONS ──────────────────────────────────────
 
 def format_prompt(template: str, **kwargs) -> str:
     prompt = template
@@ -53,49 +51,19 @@ def _validate_result(result: dict) -> dict:
             raise ValueError(f"Missing required field: {field}")
     return result
 
-def calculate_filler_ratio(transcript: str) -> float:
-    """Lightweight NLP to detect hesitation and stalling without LLM bias."""
-    fillers = len(re.findall(r'\b(um|uh|like|you know|sort of|basically)\b', transcript.lower()))
-    words = len(transcript.split())
-    if words == 0: return 0.0
-    return min(fillers / words, 1.0)
-
-async def get_embedding(text: str) -> list:
-    """Uses Free Gemini API to generate dense vector embeddings for semantic matching."""
-    if not GEMINI_API_KEY or not text.strip(): return [0.0] * 768
-    async with httpx.AsyncClient(timeout=30) as client:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={GEMINI_API_KEY}"
-            payload = {"model": "models/text-embedding-004", "content": {"parts": [{"text": text[:8000]}]}}
-            resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
-            resp.raise_for_status()
-            return resp.json()["embedding"]["values"]
-        except Exception as e:
-            print(f"Gemini Embedding failed: {e}")
-            return [0.0] * 768
-
-def cosine_similarity(vec1: list, vec2: list) -> float:
-    """Strict Mathematical Similarity - No LLM Bias."""
-    if not vec1 or not vec2 or len(vec1) != len(vec2): return 0.0
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
-    mag1 = math.sqrt(sum(a * a for a in vec1))
-    mag2 = math.sqrt(sum(b * b for b in vec2))
-    if mag1 == 0 or mag2 == 0: return 0.0
-    return dot_product / (mag1 * mag2)
-
-# ─── ENTERPRISE PROMPTS (THE ZERO-TOLERANCE ENGINE) ───────────
+# ─── ENTERPRISE PROMPTS (RESTORED RAG ENGINE) ───────────
 
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
-You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, and the actual Live Interview Transcript.
+You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, and the Interview Transcript.
 
 *** ENTERPRISE EVALUATION PROTOCOL ***
-1. JD + RESUME + TRANSCRIPT TRIANGLE: The evaluation MUST be accurate, reliable, and entirely justified by what the candidate ACTUALLY SPOKE in the [INTERVIEW_TRANSCRIPT]. The [CANDIDATE_RESUME] provides context to verify if their spoken claims match their written claims.
-2. ZERO-TOLERANCE BIAS: If the candidate worked at Google on their resume but said nothing, skipped questions, or gave shallow answers during the interview, their `technical_proficiency` MUST drop to Zero. Do NOT give them "free points" for a good resume.
-3. VOCAL SENTIMENT & CONFIDENCE: Deeply analyze the transcript for behavioral cues. Look for "<SILENCE>", filler words ("um", "uh", "like"), frequent pauses, or asking to skip questions repeatedly. Use this to determine `confidence_level` and `sentiment`.
+1. HYBRID MATCHING: If the [INTERVIEW_TRANSCRIPT] contains "(Pre-recorded interview video uploaded" or is very brief, this is an L1 Tech Round. You MUST heavily weigh the [CANDIDATE_RESUME] against the [JOB_DESCRIPTION] to grant their technical and relevance scores. Do NOT score them 0.
+2. LIVE INTERVIEW: If the transcript contains a full conversation, evaluate their spoken communication, confidence, and ability to answer questions clearly. 
+3. SCORING: Provide a highly accurate, fair, and justified score out of 100. Focus on technical competence.
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
-  "candidate_overview": "A highly detailed 4-sentence executive summary of their spoken technical depth and semantic reasoning skills.",
+  "candidate_overview": "A highly detailed 4-sentence executive summary of their technical depth and semantic reasoning skills.",
   "scores": {
     "technical_proficiency": 0,
     "relevance_to_jd": 0,
@@ -105,17 +73,17 @@ Synthesize the findings reliably. Output ONLY valid JSON matching this exact str
   },
   "sentiment": {
     "rating": "Positive | Neutral | Negative",
-    "explanation": "Deep analysis of the candidate's vocal sentiment, pacing, hesitation, and emotional confidence based on transcript markers."
+    "explanation": "Deep analysis of the candidate's tone, pacing, and emotional confidence."
   },
   "candidate_status": {
     "level": "Strong Confidence | Moderate Confidence | Low Confidence | Needs Improvement",
     "description": "Brief description of candidate's readiness."
   },
-  "strengths": ["Specific strength 1 matching transcript", "Specific strength 2"],
+  "strengths": ["Specific strength 1 matching resume/transcript", "Specific strength 2"],
   "red_flags_or_weaknesses": ["Specific technical gap or discrepancy 1", "Specific weakness 2"],
-  "dynamic_follow_up_questions": ["Hard follow-up question based on a vague answer"],
+  "dynamic_follow_up_questions": ["Hard follow-up question based on their profile"],
   "hiring_recommendation": "Strong Hire | Lean Hire | Reject",
-  "justification": "A highly reliable, accurate, and detailed 2-paragraph explanation explicitly citing the candidate's spoken logic from the interview to justify the verdict."
+  "justification": "A highly reliable, accurate, and detailed 2-paragraph explanation explicitly citing the candidate's resume and interview to justify the verdict."
 }
 
 [JOB_DESCRIPTION]
@@ -135,8 +103,7 @@ The target difficulty level is: {interview_level}.
 
 RULES:
 1. HUMAN-LIKE PRE-SCREENING: Questions must be conversational, punchy, and sound like they are coming from a real Senior Engineer. Strictly keep questions under 2 sentences. 
-2. HYPER-PERSONALIZATION: Do not ask robotic trivia ("What is Kubernetes?"). Instead, ask contextual questions based on their resume ("I noticed you used Kubernetes on the Nexus project. What was the hardest part of scaling that?").
-3. At least 40% MUST directly challenge specific projects, architectures, or metrics from their resume.
+2. HYPER-PERSONALIZATION: Do not ask robotic trivia. Ask contextual questions based on their resume.
 
 Output ONLY valid JSON:
 {
@@ -166,65 +133,15 @@ Question you just asked: {question}
 Candidate's Answer: {answer}
 Next Question queued: {next_question}
 
-Your job is to analyze their answer and decide EXACTLY what to say next, based on these Strict Behavioral Edge Cases:
+Decide EXACTLY what to say next based on these Edge Cases:
+- Silence / "Give me a minute": Say "Take your time" (is_sufficient=false).
+- Skip / "I don't know": Say "No problem, let's move on" and ask [Next Question queued] (is_sufficient=true).
+- Weak Answer: Say "Could you elaborate on that?" (is_sufficient=false).
+- Normal Answer: Acknowledge naturally and ask [Next Question queued] (is_sufficient=true).
 
-🟢 A. Normal/Good Answer (Clear, 2-5 sec pauses):
-Acknowledge naturally ("Makes sense," "Got it.") and ask the [Next Question queued]. Set is_sufficient = true.
-
-🟡 B. Thinking / Pause Scenarios:
-- If answer contains "give me 2 minutes to think": Respond: "I can give you 30 seconds due to time constraints. Please proceed when ready." Set is_sufficient = false.
-- If answer contains "<SILENCE>": Respond: "Take your time, let me know when you're ready." Set is_sufficient = false. If they do it again, say "Let's move to the next question." and ask [Next Question queued], set is_sufficient = true.
-
-🔴 C. No Response / Technical Silence:
-- If answer contains "[SYSTEM: MIC_ERROR]": Respond: "I'm unable to hear you. Could you please check your microphone?" Set is_sufficient = false.
-
-🤯 D. Confused Candidate ("I didn't understand", "Can you repeat?"):
-Rephrase or simplify the current question. Set is_sufficient = false. If repeated, say "Let's try a different question" and ask [Next Question queued], setting is_sufficient = true.
-
-😵 E. Nervous / Hesitant (Uses "uhh", "umm", "like"):
-Encourage them: "Take your time, you're doing fine. Whenever you're ready..." Set is_sufficient = false.
-
-😶 F. One-Word / Weak Answers ("Yes", "No", "Maybe"):
-Trigger follow-up: "Could you elaborate on that?" or "Can you walk me through the 'why'?" Set is_sufficient = false.
-
-🧠 G. Overly Long Answers:
-- If answer contains "[SYSTEM: OVER_TIME_LIMIT]": Respond: "Thanks, I'll stop you here due to time constraints. Let's move on." Ask the [Next Question queued]. Set is_sufficient = true.
-
-🧪 H. Wrong / Irrelevant / Off-Topic Story:
-Respond: "That's not exactly what I was asking. Let me clarify, we are looking for..." and steer them back. Set is_sufficient = false.
-
-🧾 I. Copy-Paste / Cheating Detection (Robotic/Textbook answers):
-Ask follow-up: "Interesting. Can you explain that in your own words, perhaps with a real-world example from your past projects?" Set is_sufficient = false.
-
-😡 J. Rude / Aggressive Candidate ("This is stupid"):
-Respond: "Let's keep the conversation professional." Set is_sufficient = false.
-
-😂 K. Casual / Overfriendly ("Bro", "Dude"):
-Maintain strict professionalism. Do NOT mirror their tone. Proceed with evaluation.
-
-🛑 L. Candidate Refuses / Wants to Skip ("I don't know", "skip", "no idea", "next"):
-Respond: "That's completely fine, we'll pivot to something else." and ask the [Next Question queued]. Set is_sufficient = true.
-
-🎯 M. Counter Questions ("Is this remote?"):
-Respond: "We'll definitely cover role-related details at the end. For now, let's focus on..." and repeat your question. Set is_sufficient = false.
-
-🧑‍💻 N. Technical Partial Answers (Correct approach, wrong syntax):
-Give a hint: "You're on the right track. Think about the time complexity here..." Set is_sufficient = false.
-
-🧠 O. Smart Candidate (Deep answers):
-Ask a deeper follow-up. Probe an edge case. "That works, but what happens if we scale this to 1M users?" Set is_sufficient = false.
-
-📍 P. Asks for a Hint:
-Give a minimal hint, not the full answer. Set is_sufficient = false.
-
-CRITICAL RULES:
-1. NEVER say "Thank you for your answer." Act like a real, conversational Senior Engineer.
-2. If is_sufficient is TRUE, you MUST append the [Next Question queued] to your response_text.
-3. If is_sufficient is FALSE, you are digging deeper, waiting, or giving hints, so DO NOT ask the [Next Question queued].
-
-Output ONLY valid JSON matching this exact structure:
+Output ONLY valid JSON:
 {
-  "response_text": "The exact conversational words you will speak.",
+  "response_text": "The exact words you will speak.",
   "is_sufficient": true
 }
 """
@@ -315,95 +232,51 @@ async def parse_resume_to_json(raw_text: str) -> dict:
 async def evaluate_candidate(job_description: str, resume: str, transcript: str, behavior_data: dict = None) -> dict:
     behavior_data = behavior_data or {}
     clean_transcript = transcript.replace("(No speech detected)", "").strip()
-    word_count = len(clean_transcript.split())
     is_breach = "[SYSTEM LOG]: SECURITY BREACH" in transcript
-    is_uploaded_placeholder = "Pre-recorded interview video uploaded" in clean_transcript
-    
-    # 🛡️ 1. SMART ZERO-TOLERANCE CHECK
-    if is_breach or (word_count < 15 and not is_uploaded_placeholder):
-        reason = "Candidate triggered the Anti-Cheat Security Vault." if is_breach else "Candidate remained largely silent, skipped questions, or failed to provide any technical depth in the spoken interview."
+
+    # 1. SECURITY VAULT
+    if is_breach:
         return {
-            "candidate_overview": f"Session automatically rejected. {reason}",
+            "candidate_overview": "Session automatically rejected. Candidate triggered the Anti-Cheat Security Vault.",
             "scores": { "technical_proficiency": 0, "relevance_to_jd": 0, "communication": 0, "confidence_level": 0, "overall_score": 0 },
             "sentiment": {"rating": "Negative", "explanation": "Session failed or terminated prematurely."},
-            "candidate_status": {"level": "Needs Improvement", "description": "Terminated/Incomplete"},
-            "strengths": ["None identified due to lack of technical interaction."],
-            "red_flags_or_weaknesses": [f"CRITICAL: {reason}"],
+            "candidate_status": {"level": "Needs Improvement", "description": "Terminated"},
+            "strengths": ["None identified due to security breach."],
+            "red_flags_or_weaknesses": ["CRITICAL: SECURITY BREACH"],
             "dynamic_follow_up_questions": [],
             "hiring_recommendation": "Reject",
-            "justification": f"Zero-Tolerance Engine Activated: {reason} No technical points were awarded regardless of resume strength. The candidate's technical score is 0 due to an inability or refusal to verbally prove competence."
+            "justification": "Zero-Tolerance Engine Activated: Security Protocol violated. Score locked to 0."
         }
 
-    # 🛡️ 2. BASE REASONING
+    # 2. ELITE RAG EVALUATION
     safe_resume = resume[:5000]
     safe_jd = job_description[:4000]
-    prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=transcript)
+    prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=clean_transcript)
     result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
     result = _validate_result(result)
 
-    # 🛡️ 3. HYBRID DETERMINISTIC MATH & FAISS VECTOR SCORING
-    filler_ratio = calculate_filler_ratio(clean_transcript)
-    
-    # Vector Embeddings
-    jd_emb, resume_emb, trans_emb = await asyncio.gather(
-        get_embedding(safe_jd), 
-        get_embedding(safe_resume),
-        get_embedding(clean_transcript if not is_uploaded_placeholder else safe_resume)
-    )
-    
-    resume_match = cosine_similarity(jd_emb, resume_emb)
-    transcript_match = cosine_similarity(jd_emb, trans_emb)
-
-    # Extract CV Telemetry
+    # 3. APPLY CV TELEMETRY PENALTIES 
     tab_switches = behavior_data.get("tab_switches", 0)
     esc_presses = behavior_data.get("esc_presses", 0)
     liveness = behavior_data.get("liveness_score", 99)
     faces = behavior_data.get("faces_detected", 1)
 
-    cv_penalty = (tab_switches * 5) + (esc_presses * 10)
-    if faces > 1: cv_penalty += 20
-    if liveness < 70: cv_penalty += 15
+    cv_penalty = (tab_switches * 3) + (esc_presses * 5)
+    if faces > 1: cv_penalty += 10
+    if liveness < 70: cv_penalty += 10
 
-    # Override Communication & Confidence based on real data
-    if is_uploaded_placeholder:
-        tech_score = min((resume_match * 100) * 1.3, 100)
-        relevance = tech_score
-        deterministic_comm = 80
-        deterministic_conf = 80
-    else:
-        blended_match = (resume_match * 0.4) + (transcript_match * 0.6)
-        tech_score = min((blended_match * 100) * 1.5, 100)
-        relevance = min((transcript_match * 100) * 1.5, 100)
-        
-        base_comm = result["scores"].get("communication", 80)
-        deterministic_comm = max(base_comm - (filler_ratio * 300) - (cv_penalty * 0.5), 0)
+    base_conf = result["scores"].get("confidence_level", 85)
+    result["scores"]["confidence_level"] = max(base_conf - cv_penalty, 0)
+    
+    if cv_penalty > 0:
+        result["justification"] += f"\n\n[SECURITY METRICS]: Candidate incurred a telemetry penalty. Esc presses: {esc_presses}, Tab switches: {tab_switches}."
 
-        base_conf = result["scores"].get("confidence_level", 80)
-        deterministic_conf = max(base_conf - (filler_ratio * 200) - cv_penalty, 0)
-
-    result["scores"]["technical_proficiency"] = round(tech_score)
-    result["scores"]["relevance_to_jd"] = round(relevance)
-    result["scores"]["communication"] = round(deterministic_comm)
-    result["scores"]["confidence_level"] = round(deterministic_conf)
-
-    # Recalculate Overall Score strictly via Math
-    overall = (tech_score * 0.4) + (relevance * 0.3) + (deterministic_comm * 0.15) + (deterministic_conf * 0.15)
-    result["scores"]["overall_score"] = round(overall)
-
-    # Adjust Recommendation Deterministically
-    if overall >= 85:
-        result["hiring_recommendation"] = "Strong Hire"
-        result["candidate_status"]["level"] = "Strong Confidence"
-    elif overall >= 70:
-        result["hiring_recommendation"] = "Lean Hire"
-        result["candidate_status"]["level"] = "Moderate Confidence"
-    else:
-        result["hiring_recommendation"] = "Reject"
-        result["candidate_status"]["level"] = "Low Confidence"
-
-    # Transparent Output
-    metrics_str = f"\n\n[HYBRID METRICS]: NLP Filler Ratio: {filler_ratio:.2f}, CV/Security Penalties: {cv_penalty}, Vector Match (Resume): {resume_match:.2f}, Vector Match (Transcript): {transcript_match:.2f}."
-    result["justification"] += metrics_str
+    # Recalculate Overall safely
+    t = result["scores"]["technical_proficiency"]
+    r = result["scores"]["relevance_to_jd"]
+    c = result["scores"]["communication"]
+    cf = result["scores"]["confidence_level"]
+    result["scores"]["overall_score"] = round((t * 0.4) + (r * 0.3) + (c * 0.15) + (cf * 0.15))
 
     return result
 
