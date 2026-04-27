@@ -17,7 +17,7 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# ─── UTILITY FUNCTIONS ──────────────────────────────────────
+# ─── UTILITY & NLP FUNCTIONS ────────────────────────────────
 
 def format_prompt(template: str, **kwargs) -> str:
     prompt = template
@@ -51,6 +51,13 @@ def _validate_result(result: dict) -> dict:
             raise ValueError(f"Missing required field: {field}")
     return result
 
+def calculate_filler_ratio(transcript: str) -> float:
+    """Lightweight NLP to detect hesitation and stalling without LLM bias."""
+    fillers = len(re.findall(r'\b(um|uh|like|you know|sort of|basically)\b', transcript.lower()))
+    words = len(transcript.split())
+    if words == 0: return 1.0
+    return min(fillers / words, 1.0)
+
 # ─── ENTERPRISE PROMPTS (THE ZERO-TOLERANCE ENGINE) ───────────
 
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
@@ -61,13 +68,7 @@ You are running a deep-dive evaluation. You have the Job Description, the Candid
 2. ZERO-TOLERANCE BIAS: If the candidate worked at Google on their resume but said nothing, skipped questions, or gave shallow answers during the interview, their `technical_proficiency` MUST drop to Zero. Do NOT give them "free points" for a good resume.
 3. VOCAL SENTIMENT & CONFIDENCE: Deeply analyze the transcript for behavioral cues. Look for "<SILENCE>", filler words ("um", "uh", "like"), frequent pauses, or asking to skip questions repeatedly. Use this to determine `confidence_level` and `sentiment`.
 
-Synthesize the findings reliably.
-- 90-100: Exceptional, undeniable proof of expertise spoken in transcript. Strong Hire.
-- 75-89: Solid, capable, minor gaps. Lean Hire.
-- 60-74: Average, superficial answers, lacks deep knowledge. Reject.
-- Below 60: Major discrepancies, extreme brevity, lack of confidence, or silence. Reject.
-
-You MUST output ONLY valid JSON matching this exact structure:
+Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
   "candidate_overview": "A highly detailed 4-sentence executive summary of their spoken technical depth and semantic reasoning skills.",
   "scores": {
@@ -286,12 +287,13 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     try: return await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.1-8b-instant", prioritize_gemini=True)
     except: return {"candidate_info": {"name": "Extraction Error", "email": "Error", "phone": "Error", "links": []}, "executive_summary": "Parsing failed.", "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []}, "experience_and_projects": [], "education_and_certifications": []}
 
-async def evaluate_candidate(job_description: str, resume: str, transcript: str) -> dict:
+async def evaluate_candidate(job_description: str, resume: str, transcript: str, behavior_data: dict = None) -> dict:
+    behavior_data = behavior_data or {}
     clean_transcript = transcript.replace("(No speech detected)", "").strip()
     word_count = len(clean_transcript.split())
     is_breach = "[SYSTEM LOG]: SECURITY BREACH" in transcript
     
-    # 🛡️ ZERO-TOLERANCE CHECK
+    # 🛡️ 1. ZERO-TOLERANCE CHECK
     if is_breach or word_count < 15:
         reason = "Candidate triggered the Anti-Cheat Security Vault." if is_breach else "Candidate remained largely silent, skipped questions, or failed to provide any technical depth in the spoken interview."
         return {
@@ -306,11 +308,58 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str)
             "justification": f"Zero-Tolerance Engine Activated: {reason} No technical points were awarded regardless of resume strength. The candidate's technical score is 0 due to an inability or refusal to verbally prove competence."
         }
 
+    # Call LLM Cascade for base semantic reasoning (Preserving your full cascade logic)
     safe_resume = resume[:5000]
     safe_jd = job_description[:4000]
     prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=transcript)
     result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
-    return _validate_result(result)
+    result = _validate_result(result)
+
+    # 🛡️ 2. HYBRID DETERMINISTIC MATH (Overriding LLM Bias)
+    filler_ratio = calculate_filler_ratio(clean_transcript)
+    
+    # Extract CV Telemetry
+    tab_switches = behavior_data.get("tab_switches", 0)
+    esc_presses = behavior_data.get("esc_presses", 0)
+    liveness = behavior_data.get("liveness_score", 99)
+    faces = behavior_data.get("faces_detected", 1)
+
+    cv_penalty = (tab_switches * 5) + (esc_presses * 10)
+    if faces > 1: cv_penalty += 20
+    if liveness < 70: cv_penalty += 15
+
+    # Override Communication & Confidence based on real data
+    base_comm = result["scores"].get("communication", 80)
+    deterministic_comm = max(base_comm - (filler_ratio * 300) - (cv_penalty * 0.5), 0)
+
+    base_conf = result["scores"].get("confidence_level", 80)
+    deterministic_conf = max(base_conf - (filler_ratio * 200) - cv_penalty, 0)
+
+    result["scores"]["communication"] = round(deterministic_comm)
+    result["scores"]["confidence_level"] = round(deterministic_conf)
+
+    # Recalculate Overall Score strictly via Math
+    tech = result["scores"]["technical_proficiency"]
+    rel = result["scores"]["relevance_to_jd"]
+    overall = (tech * 0.4) + (rel * 0.3) + (deterministic_comm * 0.15) + (deterministic_conf * 0.15)
+    result["scores"]["overall_score"] = round(overall)
+
+    # Adjust Recommendation Deterministically
+    if overall >= 85:
+        result["hiring_recommendation"] = "Strong Hire"
+        result["candidate_status"]["level"] = "Strong Confidence"
+    elif overall >= 70:
+        result["hiring_recommendation"] = "Lean Hire"
+        result["candidate_status"]["level"] = "Moderate Confidence"
+    else:
+        result["hiring_recommendation"] = "Reject"
+        result["candidate_status"]["level"] = "Low Confidence"
+
+    # Transparent Output
+    metrics_str = f"\n\n[HYBRID METRICS]: NLP Filler Ratio: {filler_ratio:.2f}, CV/Security Penalties: {cv_penalty}, Liveness Score: {liveness}%."
+    result["justification"] += metrics_str
+
+    return result
 
 async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 10, interview_level: str = "L2"):
     prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=job_description[:3000], resume=resume[:4000], num_questions=num_questions, interview_level=interview_level)

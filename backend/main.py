@@ -105,7 +105,6 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
-# 🛡️ Universal Google Webhook Engine
 def send_system_email(to_email: str, subject: str, body: str):
     gas_url = os.getenv("GOOGLE_SCRIPT_URL")
     if not gas_url:
@@ -318,7 +317,6 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
     try:
         final_transcript = req.transcript
         
-        # 🛡️ THE FIX: Safely strip the [UPLOADED] tag before hitting the filesystem
         actual_video_filename = req.video_filename.replace("[UPLOADED]", "").strip() if req.video_filename else None
         
         if actual_video_filename:
@@ -329,17 +327,23 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
                     try: final_transcript = await transcribe_audio(str(audio_path))
                     except: pass
 
-        if not final_transcript or len(final_transcript.strip()) < 5:
-            raise ValueError("Transcript is essentially empty. Audio extraction failed to find speech.")
+        # 🛡️ THE HYBRID FIX: Extract CV/Behavior metrics passed silently in remarks
+        behavior_data = {}
+        clean_remarks = req.remarks or "Completed normally."
+        if "METRICS_PAYLOAD:" in clean_remarks:
+            try:
+                parts = clean_remarks.split("METRICS_PAYLOAD:")
+                clean_remarks = parts[0].strip()
+                behavior_data = json.loads(parts[1])
+            except: pass
 
-        ai_result = await evaluate_candidate(req.job_description, req.resume, final_transcript)
+        ai_result = await evaluate_candidate(req.job_description, req.resume, final_transcript, behavior_data)
         candidate_id = generate_candidate_id(req.candidate_name, req.position)
 
         evaluation = Evaluation(
             id=candidate_id, candidate_name=req.candidate_name, position=req.position,
             job_description=req.job_description, resume=req.resume, transcript=final_transcript,
-            video_filename=req.video_filename, # Save original tag so Dashboard splits work
-            remarks=req.remarks or "Completed normally.", 
+            video_filename=req.video_filename, remarks=clean_remarks, 
             candidate_overview=ai_result.get("candidate_overview", ""), scores=ai_result.get("scores", {}),
             sentiment=ai_result.get("sentiment", {"rating": "Neutral", "explanation": ""}),
             candidate_status=ai_result.get("candidate_status", {"level": "Moderate Confidence", "description": ""}),
