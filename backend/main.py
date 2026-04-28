@@ -52,12 +52,14 @@ app = FastAPI(
     version="3.0.0",
 )
 
+# 🛡️ THE FIX: Exposing Range Headers so Vercel Frontend can read the stream length!
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
     allow_credentials=False, 
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Accept-Ranges", "Content-Range", "Content-Length", "Content-Type"]
 )
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
@@ -140,8 +142,6 @@ async def health_check(db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "offline", "error": str(e)}
 
-# 🛡️ THE PRO-ENGINEER FIX: Custom Byte-Range Streaming Endpoint
-# This solves the WebM Chrome playback failure directly from the backend.
 @app.get("/api/stream/{filename}")
 async def stream_video(filename: str, request: Request):
     file_path = RECORDINGS_DIR / filename
