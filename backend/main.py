@@ -52,7 +52,6 @@ app = FastAPI(
     version="3.0.0",
 )
 
-# 🛡️ THE FIX: Exposing Range Headers so Vercel Frontend can read the stream length!
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -319,12 +318,28 @@ async def upload_resume(file: UploadFile = File(...)):
             import docx
             import io
             doc = docx.Document(io.BytesIO(content))
-            extracted_text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+            
+            # 🛡️ THE FIX: Upgraded DOCX extraction to include text from hidden tables!
+            text_parts = []
+            for p in doc.paragraphs:
+                if p.text.strip(): text_parts.append(p.text.strip())
+                
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = " | ".join([cell.text.strip() for cell in row.cells if cell.text.strip()])
+                    if row_text: text_parts.append(row_text)
+                    
+            extracted_text = "\n".join(text_parts)
         except ImportError:
             extracted_text = "[DOCX extraction requires python-docx.]"
 
-    structured_resume = await parse_resume_to_json(extracted_text)
-    return ResumeUploadResponse(filename=safe_name, path=str(file_path), extracted_text=json.dumps(structured_resume, indent=2), size=len(content))
+    # 🛡️ THE FIX: Removed the slow LLM JSON parser call. It now instantly returns the raw text!
+    return ResumeUploadResponse(
+        filename=safe_name, 
+        path=str(file_path), 
+        extracted_text=extracted_text, 
+        size=len(content)
+    )
 
 @app.post("/api/generate-questions")
 async def generate_questions(req: QuestionGenerationRequest):
