@@ -12,7 +12,6 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
-// 🛡️ THE FIX: Bulletproof URL parser to prevent 404 errors
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const API_URL = `${API_BASE.replace(/\/$/, "")}/api`;
 
@@ -74,7 +73,6 @@ export default function EvaluatePage() {
   const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
   const [isExtractingResume, setIsExtractingResume] = useState(false);
   
-  // State Fields
   const [talentAssociateName, setTalentAssociateName] = useState("");
   const [talentAssociateEmail, setTalentAssociateEmail] = useState("");
   const [candidateName, setCandidateName] = useState("");
@@ -85,8 +83,8 @@ export default function EvaluatePage() {
   const [resumeFileName, setResumeFileName] = useState("");
   
   const [selectedLevel, setSelectedLevel] = useState(LEVEL_OPTIONS[1]);
-  const [durationMinutes, setDurationMinutes] = useState(DURATION_OPTIONS[0]); // Default 10 Mins
-  const [voiceType, setVoiceType] = useState(VOICE_OPTIONS[0]); // Default Indian
+  const [durationMinutes, setDurationMinutes] = useState(DURATION_OPTIONS[0]);
+  const [voiceType, setVoiceType] = useState(VOICE_OPTIONS[0]);
   const [transcriptQuestions, setTranscriptQuestions] = useState("");
   
   const [backendStatus, setBackendStatus] = useState<boolean | null>(null);
@@ -142,6 +140,7 @@ export default function EvaluatePage() {
     }, 800);
   };
 
+  // 🛡️ THE FIX: Smart DOCX Routing to the Backend
   const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -160,24 +159,30 @@ export default function EvaluatePage() {
 
     setIsExtractingResume(true);
     try {
-      const text = await extractTextFromFile(file);
-      if (text.trim()) {
-        setResume(text);
-        setResumeFileName(file.name);
-        toast.success(`Resume "${file.name}" text extracted successfully!`);
-      } else if (ext === ".doc" || ext === ".docx") {
-        toast.error("DOC/DOCX requires the backend for extraction. Please paste content manually or convert to PDF.");
+      if (ext === ".doc" || ext === ".docx") {
+        toast.info("Sending DOCX to ForgePro Engine for extraction...");
+        const response: any = await uploadResume(file); // Call backend
+        if (response && response.extracted_text) {
+          setResume(response.extracted_text);
+          setResumeFileName(file.name);
+          toast.success(`Resume "${file.name}" extracted via Backend!`);
+        } else {
+          toast.error("Failed to extract DOCX text. Please paste manually.");
+        }
       } else {
-        toast.error("Could not extract text. Please paste content manually.");
+        const text = await extractTextFromFile(file);
+        if (text.trim()) {
+          setResume(text);
+          setResumeFileName(file.name);
+          toast.success(`Resume "${file.name}" text extracted successfully!`);
+        } else {
+          toast.error("Could not extract text. Please paste content manually.");
+        }
+        // Silently push PDF/TXT to backend for records
+        uploadResume(file).catch(() => {});
       }
-
-      uploadResume(file).then(() => {
-        console.log(`Resume "${file.name}" saved to backend/uploads/resumes`);
-      }).catch(() => {
-        console.log("Backend resume save skipped (backend may be offline)");
-      });
-    } catch {
-      toast.error("Failed to parse resume. Please paste content manually.");
+    } catch (error) {
+      toast.error("Failed to parse resume. Please ensure the backend is running for DOCX files.");
     } finally {
       setIsExtractingResume(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -253,14 +258,12 @@ export default function EvaluatePage() {
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-4xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
           
-          {/* Header */}
           <motion.div variants={fadeUp} custom={0} className="text-center mb-4">
             <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
               Start ForgePro Interview
             </h1>
           </motion.div>
 
-          {/* How It Works */}
           <motion.div variants={fadeUp} custom={0.2} className="glass rounded-xl p-6 border-primary/20 relative overflow-hidden mb-6 shadow-sm">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
             <h3 className="text-xs font-bold text-primary uppercase tracking-widest mb-6 text-center flex items-center justify-center gap-2">
@@ -295,19 +298,17 @@ export default function EvaluatePage() {
             </div>
           </motion.div>
 
-          {/* Backend Status */}
           <motion.div variants={fadeUp} custom={0.3}>
             {backendStatus === false && (
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
                 <WifiOff className="w-4 h-4 text-destructive shrink-0" />
                 <p className="text-xs text-destructive">
-                  <strong>Backend offline</strong> — Cannot generate links or send emails. Please start the backend server.
+                  <strong>Backend offline</strong> — Cannot generate links, send emails, or extract DOCX. Please start the backend server.
                 </p>
               </div>
             )}
           </motion.div>
 
-          {/* Success State / Generated Link UI */}
           {generatedLink ? (
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="p-8 rounded-2xl border border-primary/30 bg-primary/5 space-y-6 text-center">
               <div className="mx-auto w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">
@@ -333,14 +334,10 @@ export default function EvaluatePage() {
               </Button>
             </motion.div>
           ) : (
-            
-            /* Form UI */
             <div className="space-y-6">
               
-              {/* Core Info Container */}
               <motion.div variants={fadeUp} custom={1} className="glass p-6 rounded-xl border border-primary/10 space-y-6 shadow-sm">
                 
-                {/* Row 1: Talent Associate Info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -369,7 +366,6 @@ export default function EvaluatePage() {
 
                 <div className="h-[1px] w-full bg-border/50" />
 
-                {/* Row 2: Candidate Info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -396,7 +392,6 @@ export default function EvaluatePage() {
                   </div>
                 </div>
 
-                {/* Row 3: Role & Level */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -439,10 +434,7 @@ export default function EvaluatePage() {
                 </div>
               </motion.div>
 
-              {/* Settings Container */}
               <motion.div variants={fadeUp} custom={2} className="glass p-6 rounded-xl border border-primary/10 space-y-6 shadow-sm">
-                
-                {/* Row 4: Duration & Voices */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-3">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -490,10 +482,7 @@ export default function EvaluatePage() {
                 </div>
               </motion.div>
 
-              {/* Documents Container */}
               <motion.div variants={fadeUp} custom={3} className="glass p-6 rounded-xl border border-primary/10 space-y-6 shadow-sm">
-                
-                {/* Row 5: JD */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -531,7 +520,6 @@ export default function EvaluatePage() {
 
                 <div className="h-[1px] w-full bg-border/50" />
 
-                {/* Row 6: Resume */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -580,7 +568,6 @@ export default function EvaluatePage() {
 
                 <div className="h-[1px] w-full bg-border/50" />
 
-                {/* Row 7: ForgePro Transcript (Optional) */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -618,7 +605,6 @@ export default function EvaluatePage() {
                 </div>
               </motion.div>
 
-              {/* Submit Button */}
               <motion.div variants={fadeUp} custom={4}>
                 <Button
                   onClick={handleGenerateLink}

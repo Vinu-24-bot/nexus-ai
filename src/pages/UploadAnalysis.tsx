@@ -97,7 +97,6 @@ export default function UploadAnalysisPage() {
   const handleGenerateJD = async () => {
     let targetPosition = position.trim();
     
-    // 🛡️ Random Role Generator (God Mode)
     if (!targetPosition) {
       targetPosition = RANDOM_ROLES[Math.floor(Math.random() * RANDOM_ROLES.length)];
       setPosition(targetPosition);
@@ -141,6 +140,7 @@ export default function UploadAnalysisPage() {
     }, 800);
   };
 
+  // 🛡️ THE FIX: Smart DOCX Routing to the Backend
   const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -159,24 +159,29 @@ export default function UploadAnalysisPage() {
 
     setIsExtractingResume(true);
     try {
-      const text = await extractTextFromFile(file);
-      if (text.trim()) {
-        setResume(text);
-        setResumeFileName(file.name);
-        toast.success(`Resume "${file.name}" text extracted!`);
-      } else if (ext === ".doc" || ext === ".docx") {
-        toast.error("DOC/DOCX requires the backend. Please paste content manually or use PDF/TXT.");
+      if (ext === ".doc" || ext === ".docx") {
+        toast.info("Sending DOCX to ForgePro Engine for extraction...");
+        const response: any = await uploadResume(file); // Call backend
+        if (response && response.extracted_text) {
+          setResume(response.extracted_text);
+          setResumeFileName(file.name);
+          toast.success(`Resume "${file.name}" extracted via Backend!`);
+        } else {
+          toast.error("Failed to extract DOCX text. Please paste manually.");
+        }
       } else {
-        toast.error("Could not extract text. Please paste content manually.");
+        const text = await extractTextFromFile(file);
+        if (text.trim()) {
+          setResume(text);
+          setResumeFileName(file.name);
+          toast.success(`Resume "${file.name}" text extracted successfully!`);
+        } else {
+          toast.error("Could not extract text. Please paste content manually.");
+        }
+        uploadResume(file).catch(() => {});
       }
-
-      uploadResume(file).then(() => {
-        console.log(`Resume "${file.name}" saved to backend/uploads/resumes`);
-      }).catch(() => {
-        console.log("Backend resume save skipped (backend may be offline)");
-      });
-    } catch {
-      toast.error("Failed to parse resume. Please paste content manually.");
+    } catch (error) {
+      toast.error("Failed to parse resume. Please ensure the backend is running for DOCX files.");
     } finally {
       setIsExtractingResume(false);
       if (resumeInputRef.current) resumeInputRef.current.value = "";
@@ -252,7 +257,6 @@ export default function UploadAnalysisPage() {
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-4xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
           
-          {/* Header */}
           <motion.div variants={fadeUp} custom={0} className="text-center space-y-3">
             <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground leading-tight">
               Analyze Pre-Recorded Interviews With <br />
@@ -260,7 +264,6 @@ export default function UploadAnalysisPage() {
             </h1>
           </motion.div>
 
-          {/* How It Works Restored & Enhanced */}
           <motion.div variants={fadeUp} custom={0.2} className="glass rounded-xl p-6 border-primary/20 relative overflow-hidden mb-6 shadow-sm">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50" />
             <h3 className="text-xs font-bold text-primary uppercase tracking-widest mb-6 text-center flex items-center justify-center gap-2">
@@ -295,21 +298,18 @@ export default function UploadAnalysisPage() {
             </div>
           </motion.div>
 
-          {/* Backend Status Banner */}
           <motion.div variants={fadeUp} custom={0.3}>
             {backendStatus === false && (
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
                 <WifiOff className="w-4 h-4 text-destructive shrink-0" />
                 <p className="text-xs text-destructive">
-                  <strong>Backend offline</strong> — ForgePro will evaluate locally. Start backend for deep analysis.
+                  <strong>Backend offline</strong> — ForgePro will evaluate locally. Start backend for deep analysis and DOCX extraction.
                 </p>
               </div>
             )}
           </motion.div>
 
-          {/* Form */}
           <div className="space-y-6">
-            {/* Candidate Info */}
             <motion.div variants={fadeUp} custom={1} className="glass p-6 rounded-xl border border-primary/10 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -335,9 +335,7 @@ export default function UploadAnalysisPage() {
               </div>
             </motion.div>
 
-            {/* JD & Resume Container */}
             <motion.div variants={fadeUp} custom={2} className="glass p-6 rounded-xl border border-primary/10 shadow-sm space-y-6">
-              {/* JD */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -375,7 +373,6 @@ export default function UploadAnalysisPage() {
 
               <div className="h-[1px] w-full bg-border/50" />
 
-              {/* Resume */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -419,9 +416,7 @@ export default function UploadAnalysisPage() {
               </div>
             </motion.div>
 
-            {/* Video & Transcript Container */}
             <motion.div variants={fadeUp} custom={3} className="glass p-6 rounded-xl border border-primary/10 shadow-sm space-y-6">
-              {/* Video Upload */}
               <div className="space-y-3">
                 <label className="flex items-center gap-2 text-sm font-medium text-foreground">
                   <Video className="w-4 h-4 text-accent" /> Pre-Recorded Interview Video <span className="text-[10px] text-muted-foreground font-normal ml-1">(Optional if transcript provided)</span>
@@ -465,7 +460,6 @@ export default function UploadAnalysisPage() {
 
               <div className="h-[1px] w-full bg-border/50" />
 
-              {/* ForgePro Transcript */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -503,7 +497,6 @@ export default function UploadAnalysisPage() {
               </div>
             </motion.div>
 
-            {/* Submit */}
             <motion.div variants={fadeUp} custom={4}>
               <Button
                 onClick={handleSubmit}
