@@ -34,27 +34,22 @@ const sentimentIcon = {
 };
 
 const sentimentColor = {
-  Positive: "text-green-500 bg-green-500/10 border-green-500/20",
-  Neutral: "text-blue-500 bg-blue-500/10 border-blue-500/20",
-  Negative: "text-red-500 bg-red-500/10 border-red-500/20",
+  Positive: "text-nexus-green bg-nexus-green/10",
+  Neutral: "text-nexus-amber bg-nexus-amber/10",
+  Negative: "text-nexus-red bg-nexus-red/10",
 };
 
 const statusStyles: Record<string, string> = {
-  pending: "text-yellow-500 bg-yellow-500/10 border-yellow-500/30",
-  selected: "text-green-500 bg-green-500/10 border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.15)]",
-  rejected: "text-red-500 bg-red-500/10 border-red-500/30",
-  hold: "text-blue-500 bg-blue-500/10 border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.15)]",
-  doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
+  pending: "text-nexus-amber bg-nexus-amber/10 border-nexus-amber/20",
+  selected: "text-nexus-green bg-nexus-green/10 border-nexus-green/20",
+  rejected: "text-nexus-red bg-nexus-red/10 border-nexus-red/20",
 };
 
-// 🛡️ THE MASTER FIX: Blob RAM Fetcher + Unrestricted Custom YouTube UI
+// 🛡️ THE FIX: Restored Custom YouTube UI connected to the new Streaming Endpoint
 const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  const [localSrc, setLocalSrc] = useState<string>("");
-  const [isFetchingBlob, setIsFetchingBlob] = useState(true);
-
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -65,63 +60,29 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
 
-  // 1. Fetch video into RAM to bypass FastAPI HTTP Range request crashes
-  useEffect(() => {
-    let objectUrl = "";
-    let isMounted = true;
-
-    const loadVideoToRAM = async () => {
-      setIsFetchingBlob(true);
-      try {
-        const response = await fetch(src);
-        const blob = await response.blob();
-        if (!isMounted) return;
-        objectUrl = URL.createObjectURL(blob);
-        setLocalSrc(objectUrl);
-      } catch (error) {
-        console.warn("Failed to fetch Blob, falling back to raw URL.");
-        if (isMounted) setLocalSrc(src);
-      } finally {
-        if (isMounted) setIsFetchingBlob(false);
-      }
-    };
-
-    loadVideoToRAM();
-
-    return () => {
-      isMounted = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [src]);
-
-  // 2. Playback Controls
   const togglePlay = () => {
-    if (isFetchingBlob || !videoRef.current) return;
-    if (isPlaying) {
-      videoRef.current.pause();
-    } else {
-      videoRef.current.play().catch(e => console.error("Playback error:", e));
+    if (videoRef.current) {
+      if (isPlaying) videoRef.current.pause();
+      else videoRef.current.play();
+      setIsPlaying(!isPlaying);
     }
-    setIsPlaying(!isPlaying);
   };
 
   const handleTimeUpdate = () => {
-    const vid = videoRef.current;
-    if (!vid) return;
-
-    setCurrentTime(vid.currentTime);
-
-    // Dynamic Duration Extractor (Works perfectly with RAM Blobs)
-    let currentDuration = vid.duration;
-    if (isNaN(currentDuration) || currentDuration === Infinity || currentDuration === 0) {
-      if (vid.buffered && vid.buffered.length > 0) {
-        currentDuration = vid.buffered.end(vid.buffered.length - 1);
+    if (videoRef.current && !isScrubbing) {
+      const vid = videoRef.current;
+      setCurrentTime(vid.currentTime);
+      
+      // Dynamic fallback if browser struggles with initial WebM metadata
+      let currentDuration = vid.duration;
+      if (isNaN(currentDuration) || currentDuration === Infinity || currentDuration === 0) {
+        if (vid.buffered && vid.buffered.length > 0) {
+          currentDuration = vid.buffered.end(vid.buffered.length - 1);
+        }
       }
-    }
 
-    if (currentDuration > 0 && currentDuration !== Infinity) {
-      setDuration(currentDuration);
-      if (!isScrubbing) {
+      if (currentDuration > 0 && currentDuration !== Infinity) {
+        setDuration(currentDuration);
         setProgress((vid.currentTime / currentDuration) * 100);
       }
     }
@@ -131,21 +92,15 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
     const newProgress = Number(e.target.value);
     setProgress(newProgress);
     if (videoRef.current && duration > 0) {
-      const newTime = (newProgress / 100) * duration;
-      videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
+      videoRef.current.currentTime = (newProgress / 100) * duration;
     }
   };
 
   const skip = (amount: number) => {
     if (videoRef.current) {
-      // Unrestricted Math (No Math.min upper limit clamp) to prevent 00:00 jump bugs
       const newTime = Math.max(0, videoRef.current.currentTime + amount);
       videoRef.current.currentTime = newTime;
       setCurrentTime(newTime);
-      if (duration > 0) {
-        setProgress((newTime / duration) * 100);
-      }
     }
   };
 
@@ -197,27 +152,18 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   };
 
   return (
-    <div ref={containerRef} className="relative group bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
+    <div ref={containerRef} className="relative group w-full bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
       
-      {/* 3. Smooth Loading Overlay */}
-      {isFetchingBlob && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm border border-primary/20">
-           <Loader2 className="w-10 h-10 animate-spin text-primary mb-3" />
-           <p className="text-xs font-mono font-bold tracking-widest text-primary animate-pulse">DECRYPTING SECURE STREAM...</p>
-        </div>
-      )}
-
       <video 
         ref={videoRef} 
-        src={localSrc} 
-        className={`w-full max-h-[600px] cursor-pointer outline-none transition-opacity duration-500 ${isFetchingBlob ? 'opacity-0' : 'opacity-100'}`} 
+        src={src} 
+        className="w-full max-h-[600px] cursor-pointer outline-none" 
         onClick={togglePlay} 
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleTimeUpdate}
-        preload="auto"
+        onTimeUpdate={handleTimeUpdate} 
+        preload="metadata"
       />
       
-      {!isPlaying && !isFetchingBlob && (
+      {!isPlaying && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/20" onClick={togglePlay}>
           <div className="w-16 h-16 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center backdrop-blur-md shadow-[0_0_20px_rgba(0,240,255,0.4)] pointer-events-auto cursor-pointer hover:scale-110 transition-transform">
             <Play className="w-8 h-8 ml-1" />
@@ -237,8 +183,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
             onMouseUp={() => setIsScrubbing(false)}
             onTouchStart={() => setIsScrubbing(true)}
             onTouchEnd={() => setIsScrubbing(false)}
-            disabled={isFetchingBlob}
-            className={`absolute inset-0 w-full h-full opacity-0 z-10 ${isFetchingBlob ? 'cursor-not-allowed' : 'cursor-pointer'}`} 
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
           />
           <div className="absolute top-0 left-0 h-full bg-primary rounded-full pointer-events-none transition-all duration-75" style={{ width: `${progress}%` }}>
             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full scale-0 group-hover/progress:scale-100 transition-transform" />
@@ -247,14 +192,14 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
 
         <div className="flex items-center justify-between text-white">
           <div className="flex items-center gap-4">
-            <button onClick={togglePlay} disabled={isFetchingBlob} className="hover:text-primary transition-colors disabled:opacity-50">
+            <button onClick={togglePlay} className="hover:text-primary transition-colors">
               {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
             </button>
             
-            <button onClick={() => skip(-10)} disabled={isFetchingBlob} className="hover:text-primary transition-colors disabled:opacity-50" title="Rewind 10s">
+            <button onClick={() => skip(-10)} className="hover:text-primary transition-colors" title="Rewind 10s">
               <Rewind className="w-4 h-4" />
             </button>
-            <button onClick={() => skip(10)} disabled={isFetchingBlob} className="hover:text-primary transition-colors disabled:opacity-50" title="Forward 10s">
+            <button onClick={() => skip(10)} className="hover:text-primary transition-colors" title="Forward 10s">
               <FastForward className="w-4 h-4" />
             </button>
             
@@ -282,7 +227,6 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
                 className="bg-transparent text-white text-xs outline-none cursor-pointer font-medium appearance-none" 
                 value={playbackRate} 
                 onChange={handleSpeed}
-                disabled={isFetchingBlob}
               >
                 <option value="0.5" className="text-black">0.5x Speed</option>
                 <option value="1" className="text-black">1.0x Speed</option>
@@ -316,28 +260,15 @@ export default function ResultPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const handleStatusChange = async (status: "selected" | "rejected" | "hold" | "doubtful" | "pending") => {
+  const handleStatusChange = async (status: "selected" | "rejected" | "pending") => {
     if (!id || !result) return;
     try {
-      const updated = await updateSelectionStatus(id, status as any);
+      const updated = await updateSelectionStatus(id, status);
       setResult(updated);
-      toast.success(`Candidate marked as ${status.toUpperCase()}`);
+      toast.success(`Candidate marked as ${status}`);
     } catch {
       toast.error("Failed to update status");
     }
-  };
-
-  const handleExport = () => {
-    if (!result) return;
-    const data = JSON.stringify(result, null, 2);
-    const blob = new Blob([data], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${result.id}_${result.candidateName.replace(/\s+/g, "_")}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Evaluation exported successfully!");
   };
 
   if (loading) {
@@ -353,13 +284,17 @@ export default function ResultPage() {
   const SentimentIconComp = sentimentIcon[result.sentiment?.rating as keyof typeof sentimentIcon] || Meh;
   const sentClr = sentimentColor[result.sentiment?.rating as keyof typeof sentimentColor] || sentimentColor.Neutral;
   
-  const cleanVideoFilename = result.video_filename ? result.video_filename.replace("[UPLOADED] ", "").replace("[UPLOADED]", "").trim() : null;
-  const videoUrl = cleanVideoFilename ? `${API_BASE}/uploads/recordings/${encodeURIComponent(cleanVideoFilename)}` : null;
+  // 🛡️ THE FIX: Pointing the player specifically to the new FastAPI backend streaming endpoint
+  const rawVideoFiles = result.video_filename?.split(", ").filter(Boolean) || [];
+  const videoFiles = rawVideoFiles.map((f) => {
+    const cleanName = f.replace(/^\[.*?\]\s*/, "");
+    return { name: cleanName, url: `${API_BASE}/api/stream/${encodeURIComponent(cleanName)}` };
+  });
 
   return (
     <div className="min-h-screen bg-background nexus-grid pb-20">
       <Navbar />
-      <div className="container mx-auto px-6 pt-24 max-w-5xl">
+      <div className="container mx-auto px-6 pt-24 pb-16 max-w-5xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
           
           <motion.div variants={fadeUp} custom={0} className="space-y-4">
@@ -367,196 +302,154 @@ export default function ResultPage() {
               <ArrowLeft className="w-4 h-4" />
               Back to Dashboard
             </Link>
-            
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
+                <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground">
                   {result.candidateName}
                 </h1>
-                <p className="text-muted-foreground mt-1 text-lg">
-                  {result.position}
+                <p className="text-muted-foreground mt-1">
+                  {result.position} · Evaluated {result.date}
                 </p>
-                <div className="flex items-center gap-3 mt-2">
-                  <p className="text-xs px-2 py-1 bg-muted rounded-md text-muted-foreground font-mono border border-border/50">
-                    ID: {result.id}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Evaluated on {result.date}
-                  </p>
-                </div>
+                <p className="text-xs text-muted-foreground/60 font-mono mt-0.5">
+                  ID: {result.id}
+                </p>
               </div>
               <div className="flex items-center gap-3">
                 <RecommendationBadge recommendation={result.hiring_recommendation} />
-                <span className={`px-4 py-1.5 rounded-full text-xs font-bold border uppercase tracking-wider ${statusStyles[result.selection_status?.toLowerCase() || "pending"]}`}>
-                  {result.selection_status || "pending"}
+                <span className={`px-3 py-1 rounded-full text-xs font-medium border ${statusStyles[result.selection_status || "pending"]}`}>
+                  {(result.selection_status || "pending").toUpperCase()}
                 </span>
               </div>
             </div>
           </motion.div>
 
-          <motion.div variants={fadeUp} custom={0.5} className="flex flex-wrap items-center justify-between gap-4 p-4 glass rounded-xl border border-primary/10 shadow-sm">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant={result.selection_status === "selected" ? "default" : "outline"}
-                size="sm"
-                onClick={() => handleStatusChange("selected")}
-                className={result.selection_status === "selected" ? "bg-green-600 hover:bg-green-700 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]" : "hover:text-green-500 hover:border-green-500 hover:bg-green-500/10"}
-              >
-                <UserCheck className="w-4 h-4 mr-2" /> Select
+          <motion.div variants={fadeUp} custom={0.5} className="flex flex-wrap gap-3">
+            <Button variant="outline" size="sm" onClick={() => handleStatusChange("selected")} className={`border-nexus-green/30 hover:bg-nexus-green/10 ${result.selection_status === "selected" ? "bg-nexus-green/10 text-nexus-green" : "text-muted-foreground"}`}>
+              <UserCheck className="w-4 h-4 mr-1.5" /> Select Candidate
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => handleStatusChange("rejected")} className={`border-nexus-red/30 hover:bg-nexus-red/10 ${result.selection_status === "rejected" ? "bg-nexus-red/10 text-nexus-red" : "text-muted-foreground"}`}>
+              <UserX className="w-4 h-4 mr-1.5" /> Reject Candidate
+            </Button>
+            {result.selection_status !== "pending" && (
+              <Button variant="ghost" size="sm" onClick={() => handleStatusChange("pending")} className="text-muted-foreground">
+                Reset to Pending
               </Button>
-              <Button
-                variant={result.selection_status === "rejected" ? "destructive" : "outline"}
-                size="sm"
-                onClick={() => handleStatusChange("rejected")}
-                className={result.selection_status === "rejected" ? "shadow-[0_0_10px_rgba(239,68,68,0.3)]" : "hover:text-red-500 hover:border-red-500 hover:bg-red-500/10"}
-              >
-                <UserX className="w-4 h-4 mr-2" /> Reject
+            )}
+            <div className="ml-auto flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => {
+                const data = JSON.stringify(result, null, 2);
+                const blob = new Blob([data], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${result.id}_${result.candidateName.replace(/\s+/g, "_")}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                toast.success("Evaluation exported!");
+              }} className="text-muted-foreground">
+                <Download className="w-4 h-4 mr-1.5" /> Export
               </Button>
-              <Button
-                variant={result.selection_status === "hold" ? "default" : "outline"}
-                size="sm"
-                onClick={() => handleStatusChange("hold")}
-                className={result.selection_status === "hold" ? "bg-blue-600 hover:bg-blue-700 text-white shadow-[0_0_10px_rgba(59,130,246,0.3)]" : "hover:text-blue-500 hover:border-blue-500 hover:bg-blue-500/10"}
-              >
-                <Clock className="w-4 h-4 mr-2" /> Hold
-              </Button>
-              <Button
-                variant={result.selection_status === "doubtful" ? "default" : "outline"}
-                size="sm"
-                onClick={() => handleStatusChange("doubtful")}
-                className={result.selection_status === "doubtful" ? "bg-orange-600 hover:bg-orange-700 text-white shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "hover:text-orange-500 hover:border-orange-500 hover:bg-orange-500/10"}
-              >
-                <HelpCircle className="w-4 h-4 mr-2" /> Doubtful
-              </Button>
-
-              {result.selection_status !== "pending" && (
-                <Button variant="ghost" size="sm" onClick={() => handleStatusChange("pending")} className="text-muted-foreground ml-2">
-                  Reset
-                </Button>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleExport} className="text-muted-foreground hover:text-primary">
-                <Download className="w-4 h-4 mr-2" /> Export JSON
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(result.id); toast.success("ID copied!"); }} className="text-muted-foreground hover:text-primary">
-                <Copy className="w-4 h-4 mr-2" /> Copy ID
+              <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(result.id); toast.success("Candidate ID copied!"); }} className="text-muted-foreground">
+                <Copy className="w-4 h-4 mr-1.5" /> Copy ID
               </Button>
             </div>
           </motion.div>
 
-          {/* @ts-ignore */}
-          {(result as any).remarks && (result as any).remarks !== "Completed normally without interruptions." && (result as any).remarks !== "Completed normally." && (
-            <motion.div variants={fadeUp} custom={0.8} className="w-full bg-destructive/10 border border-destructive/30 rounded-xl p-4 mb-6 flex items-start gap-3">
-              <ShieldAlert className="w-6 h-6 text-destructive shrink-0 mt-0.5" />
-              <div>
-                <h3 className="text-sm font-bold text-destructive uppercase tracking-wider">System Alert / Security Breach</h3>
-                {/* @ts-ignore */}
-                <p className="text-sm text-foreground">{(result as any).remarks}</p>
-              </div>
-            </motion.div>
-          )}
-
-          <motion.div variants={fadeUp} custom={1} className="glass rounded-xl p-6 border-l-4 border-l-primary shadow-sm">
+          <motion.div variants={fadeUp} custom={1} className="glass rounded-xl p-6">
             <div className="flex items-center gap-2 mb-3">
-              <Sparkles className="w-5 h-5 text-primary" />
-              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Executive Summary</h2>
+              <Sparkles className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Executive Summary</h2>
             </div>
-            <p className="text-muted-foreground leading-relaxed text-base">{result.candidate_overview}</p>
+            <p className="text-muted-foreground leading-relaxed">{result.candidate_overview}</p>
           </motion.div>
 
           <motion.div variants={fadeUp} custom={1.5} className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="glass rounded-xl p-6 border border-border/50 shadow-sm">
-              <div className="flex justify-between items-start mb-4">
-                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
-                  <Smile className="w-4 h-4 text-muted-foreground" /> Vocal Sentiment
-                </h2>
-                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${sentClr}`}>
-                  <SentimentIconComp className="w-3.5 h-3.5" />
-                  {result.sentiment?.rating || "Neutral"}
-                </div>
+            <div className="glass rounded-xl p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <SentimentIconComp className={`w-4 h-4 ${sentClr.split(" ")[0]}`} />
+                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Candidate Sentiment</h2>
               </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                {result.sentiment?.explanation || "Vocal sentiment analysis was not able to extract definitive confidence markers from this transcript."}
-              </p>
+              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${sentClr} mb-3`}>
+                <SentimentIconComp className="w-4 h-4" />
+                {result.sentiment?.rating || "Neutral"}
+              </div>
+              <p className="text-sm text-muted-foreground">{result.sentiment?.explanation || "No analysis available"}</p>
             </div>
-
-            <div className="glass rounded-xl p-6 border border-border/50 shadow-sm">
-              <div className="flex justify-between items-start mb-4">
-                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-muted-foreground" /> Readiness Level
-                </h2>
-                <div className="px-3 py-1 rounded-full text-xs font-bold border bg-accent/10 text-accent border-accent/20">
-                  {result.candidate_status?.level || "Pending"}
-                </div>
+            <div className="glass rounded-xl p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Shield className="w-4 h-4 text-nexus-purple" />
+                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Candidate Status</h2>
               </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                {result.candidate_status?.description || "No detailed readiness description provided by the evaluator."}
-              </p>
+              <p className="text-sm font-semibold text-foreground mb-2">{result.candidate_status?.level || "Not assessed"}</p>
+              <p className="text-sm text-muted-foreground">{result.candidate_status?.description || ""}</p>
             </div>
           </motion.div>
 
           <motion.div variants={fadeUp} custom={2} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="glass rounded-xl p-6 flex flex-col items-center border border-border/50 shadow-sm">
-              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider mb-6 self-start">
+            <div className="glass rounded-xl p-6 flex flex-col items-center">
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-6 self-start">
                 Performance Radar
               </h2>
-              <RadarChart scores={result.scores} size={280} />
+              <RadarChart scores={result.scores} size={260} />
             </div>
-            <div className="glass rounded-xl p-6 border border-border/50 shadow-sm">
-              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider mb-6">
+            <div className="glass rounded-xl p-6">
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-6">
                 Score Breakdown
               </h2>
               <div className="grid grid-cols-2 gap-6 place-items-center">
-                <ScoreRing score={result.scores.technical_proficiency} label="Technical" color="hsl(173 80% 50%)" size={110} />
-                <ScoreRing score={result.scores.relevance_to_jd} label="Relevance" color="hsl(260 70% 60%)" size={110} />
-                <ScoreRing score={result.scores.communication} label="Communication" color="hsl(220 80% 55%)" size={110} />
-                <ScoreRing score={result.scores.confidence_level || 0} label="Confidence" color="hsl(38 92% 55%)" size={110} />
+                <ScoreRing score={result.scores.technical_proficiency} label="Technical" color="hsl(173 80% 50%)" size={100} />
+                <ScoreRing score={result.scores.relevance_to_jd} label="Relevance" color="hsl(260 70% 60%)" size={100} />
+                <ScoreRing score={result.scores.communication} label="Communication" color="hsl(220 80% 55%)" size={100} />
+                <ScoreRing score={result.scores.confidence_level || 0} label="Confidence" color="hsl(38 92% 55%)" size={100} />
+                <div className="col-span-2">
+                  <ScoreRing score={result.scores.overall_score} label="Overall" color="hsl(150 70% 50%)" size={120} />
+                </div>
               </div>
             </div>
           </motion.div>
 
-          {videoUrl && (
-            <motion.div variants={fadeUp} custom={2.5} className="glass rounded-xl p-6 border border-border/50 shadow-sm">
+          {/* 🛡️ Full-Width Session Recording UI - No "Question 1" Text */}
+          {videoFiles.length > 0 && (
+            <motion.div variants={fadeUp} custom={2.5} className="glass rounded-xl p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
-                  <Play className="w-4 h-4 text-primary" /> Session Recording
-                </h2>
+                <div className="flex items-center gap-2">
+                  <Play className="w-4 h-4 text-primary" />
+                  <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Session Recording</h2>
+                </div>
                 <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded border border-border/50">ForgePro Video Engine</span>
               </div>
-              
               <div className="w-full">
-                <ForgeProVideoPlayer src={videoUrl} />
+                {videoFiles.map((vf, i) => (
+                  <ForgeProVideoPlayer key={i} src={vf.url} />
+                ))}
               </div>
-              
             </motion.div>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6 border border-green-500/20 bg-gradient-to-b from-green-500/5 to-transparent shadow-sm">
-              <div className="flex items-center gap-2 mb-6">
-                <CheckCircle2 className="w-5 h-5 text-green-500" />
-                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Identified Strengths</h2>
+            <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <CheckCircle2 className="w-4 h-4 text-nexus-green" />
+                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Strengths</h2>
               </div>
-              <ul className="space-y-4">
+              <ul className="space-y-3">
                 {result.strengths.map((s, i) => (
-                  <li key={i} className="flex gap-3 text-sm text-foreground/90">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 mt-2 shrink-0 shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
+                  <li key={i} className="flex gap-3 text-sm text-muted-foreground">
+                    <span className="w-1.5 h-1.5 rounded-full bg-nexus-green mt-1.5 shrink-0" />
                     {s}
                   </li>
                 ))}
               </ul>
             </motion.div>
-            
-            <motion.div variants={fadeUp} custom={4} className="glass rounded-xl p-6 border border-red-500/20 bg-gradient-to-b from-red-500/5 to-transparent shadow-sm">
-              <div className="flex items-center gap-2 mb-6">
-                <AlertTriangle className="w-5 h-5 text-red-500" />
-                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Red Flags & Gaps</h2>
+            <motion.div variants={fadeUp} custom={4} className="glass rounded-xl p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <AlertTriangle className="w-4 h-4 text-nexus-amber" />
+                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Red Flags</h2>
               </div>
-              <ul className="space-y-4">
+              <ul className="space-y-3">
                 {result.red_flags_or_weaknesses.map((w, i) => (
-                  <li key={i} className="flex gap-3 text-sm text-foreground/90">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-2 shrink-0 shadow-[0_0_5px_rgba(239,68,68,0.5)]" />
+                  <li key={i} className="flex gap-3 text-sm text-muted-foreground">
+                    <span className="w-1.5 h-1.5 rounded-full bg-nexus-amber mt-1.5 shrink-0" />
                     {w}
                   </li>
                 ))}
@@ -564,32 +457,28 @@ export default function ResultPage() {
             </motion.div>
           </div>
 
-          <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6 border-l-4 border-l-accent shadow-sm">
+          <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6">
             <div className="flex items-center gap-2 mb-4">
-              <HelpCircle className="w-5 h-5 text-accent" />
-              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Suggested Follow-Up Questions</h2>
+              <HelpCircle className="w-4 h-4 text-nexus-purple" />
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Follow-Up Questions</h2>
             </div>
-            <p className="text-xs text-muted-foreground mb-4">Auto-generated by the ForgePro agent based on vague answers in the transcript.</p>
             <div className="space-y-3">
               {result.dynamic_follow_up_questions.map((q, i) => (
-                <div key={i} className="flex gap-3 p-4 rounded-lg bg-muted/30 border border-border/50">
-                  <MessageSquare className="w-4 h-4 text-accent mt-0.5 shrink-0" />
-                  <span className="text-sm font-medium text-foreground/90">{q}</span>
+                <div key={i} className="flex gap-3 p-3 rounded-lg bg-muted/50">
+                  <MessageSquare className="w-4 h-4 text-nexus-purple mt-0.5 shrink-0" />
+                  <span className="text-sm text-muted-foreground">{q}</span>
                 </div>
               ))}
             </div>
           </motion.div>
 
-          <motion.div variants={fadeUp} custom={6} className="glass rounded-xl p-6 border border-border/50 shadow-sm">
-            <div className="flex items-center gap-2 mb-4">
-              <FileText className="w-5 h-5 text-primary" />
-              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Hiring Manager Justification</h2>
+          <motion.div variants={fadeUp} custom={6} className="glass rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <FileText className="w-4 h-4 text-primary" />
+              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Justification</h2>
             </div>
-            <div className="p-4 rounded-lg bg-muted/20 text-foreground/90 leading-relaxed text-sm md:text-base whitespace-pre-wrap border border-border/50">
-              {result.justification}
-            </div>
+            <p className="text-muted-foreground leading-relaxed">{result.justification}</p>
           </motion.div>
-
         </motion.div>
       </div>
     </div>
