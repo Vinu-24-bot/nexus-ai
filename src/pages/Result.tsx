@@ -47,213 +47,69 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE FIX: Indestructible Native Video Player
-const ForgeProVideoPlayer = ({ src }: { src: string }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [isMuted, setIsMuted] = useState(false);
-  const [playbackRate, setPlaybackRate] = useState(1);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isScrubbing, setIsScrubbing] = useState(false);
-
-  const togglePlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) videoRef.current.pause();
-      else videoRef.current.play();
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    const vid = videoRef.current;
-    if (!vid) return;
-
-    setCurrentTime(vid.currentTime);
-
-    // 🛡️ Dynamic Duration Extraction: Bypasses the WebM Infinity Bug
-    let currentDuration = vid.duration;
-    if (isNaN(currentDuration) || currentDuration === Infinity || currentDuration === 0) {
-      // Use the browser's downloaded buffer to find the true max time
-      if (vid.buffered && vid.buffered.length > 0) {
-        currentDuration = vid.buffered.end(vid.buffered.length - 1);
-      }
-    }
-
-    if (currentDuration > 0 && currentDuration !== Infinity) {
-      setDuration(currentDuration);
-      if (!isScrubbing) {
-        setProgress((vid.currentTime / currentDuration) * 100);
-      }
-    }
-  };
-
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newProgress = Number(e.target.value);
-    setProgress(newProgress);
-    if (videoRef.current && duration > 0) {
-      const newTime = (newProgress / 100) * duration;
-      videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
-    }
-  };
-
-  const skip = (amount: number) => {
-    if (videoRef.current) {
-      // 🛡️ The Math Fix: Removed the `duration` clamp that was causing the 00:00 reset
-      const newTime = Math.max(0, videoRef.current.currentTime + amount);
-      videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
-      
-      if (duration > 0) {
-        setProgress((newTime / duration) * 100);
-      }
-    }
-  };
-
-  const toggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted;
-      setIsMuted(!isMuted);
-    }
-  };
-
-  const handleVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = Number(e.target.value);
-    setVolume(val);
-    if (videoRef.current) {
-      videoRef.current.volume = val;
-      if (val > 0 && isMuted) {
-        videoRef.current.muted = false;
-        setIsMuted(false);
-      }
-    }
-  };
-
-  const handleSpeed = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const rate = Number(e.target.value);
-    setPlaybackRate(rate);
-    if (videoRef.current) videoRef.current.playbackRate = rate;
-  };
-
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().catch(() => toast.error("Fullscreen not supported"));
-    } else {
-      document.exitFullscreen();
-    }
-  };
+// 🛡️ THE FIX: Native HTML5 Player wrapped with a Blob-Fetcher and Duration Indexer
+// This bypasses FastAPI HTTP Range limitations, allowing flawless native scrubbing & 2x speed.
+const NativeForgePlayer = ({ src }: { src: string }) => {
+  const [videoSrc, setVideoSrc] = useState(src);
+  const [isBuffering, setIsBuffering] = useState(true);
 
   useEffect(() => {
-    const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, []);
+    let objectUrl = "";
+    let isMounted = true;
 
-  const formatTime = (time: number) => {
-    if (isNaN(time) || time === Infinity || time < 0) return "0:00";
-    const mins = Math.floor(time / 60);
-    const secs = Math.floor(time % 60);
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    const fetchAndFixVideo = async () => {
+      try {
+        // Fetch video into browser RAM to bypass HTTP range-request limitations on raw WebM
+        const response = await fetch(src);
+        const blob = await response.blob();
+        if (!isMounted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setVideoSrc(objectUrl);
+      } catch (e) {
+        if (isMounted) setVideoSrc(src); // Fallback to raw URL if fetch fails
+      } finally {
+        if (isMounted) setIsBuffering(false);
+      }
+    };
+
+    fetchAndFixVideo();
+
+    return () => {
+      isMounted = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src]);
+
+  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
+    const video = e.currentTarget;
+    // The WebM Duration Fix: If duration is missing/Infinity, jump to end to calculate it.
+    if (video.duration === Infinity || isNaN(video.duration)) {
+      video.currentTime = 1e99;
+      video.onseeked = () => {
+        video.onseeked = null; // Unbind to prevent loops
+        video.currentTime = 0; // Snap back to start instantly
+      };
+    }
   };
 
   return (
-    <div ref={containerRef} className="relative group bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
-      
-      <video 
-        ref={videoRef} 
-        src={src} 
-        className="w-full max-h-[600px] cursor-pointer" 
-        onClick={togglePlay} 
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleTimeUpdate}
-        preload="metadata"
-      />
-      
-      {!isPlaying && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/20" onClick={togglePlay}>
-          <div className="w-16 h-16 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center backdrop-blur-md shadow-[0_0_20px_rgba(0,240,255,0.4)] pointer-events-auto cursor-pointer hover:scale-110 transition-transform">
-            <Play className="w-8 h-8 ml-1" />
-          </div>
+    <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center border border-border/50 shadow-inner">
+      {isBuffering && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm text-primary">
+          <Loader2 className="w-8 h-8 animate-spin mb-2" />
+          <p className="text-xs font-mono font-bold tracking-widest animate-pulse">BUFFERING STREAM...</p>
         </div>
       )}
-
-      <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 pt-12 transition-opacity duration-300 ${isPlaying && !isScrubbing ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
-        
-        {/* Playback Scrubber */}
-        <div className="relative w-full h-1.5 bg-white/20 rounded-full mb-3 cursor-pointer group/progress">
-          <input 
-            type="range" min="0" max="100" step="0.1"
-            value={progress || 0} 
-            onChange={handleSeek} 
-            onMouseDown={() => setIsScrubbing(true)}
-            onMouseUp={() => setIsScrubbing(false)}
-            onTouchStart={() => setIsScrubbing(true)}
-            onTouchEnd={() => setIsScrubbing(false)}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
-          />
-          <div className="absolute top-0 left-0 h-full bg-primary rounded-full pointer-events-none transition-all duration-75" style={{ width: `${progress}%` }}>
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full scale-0 group-hover/progress:scale-100 transition-transform" />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between text-white">
-          <div className="flex items-center gap-4">
-            <button onClick={togglePlay} className="hover:text-primary transition-colors">
-              {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-            </button>
-            
-            <button onClick={() => skip(-10)} className="hover:text-primary transition-colors" title="Rewind 10s">
-              <Rewind className="w-4 h-4" />
-            </button>
-            <button onClick={() => skip(10)} className="hover:text-primary transition-colors" title="Forward 10s">
-              <FastForward className="w-4 h-4" />
-            </button>
-            
-            <div className="flex items-center gap-2 group/volume relative">
-              <button onClick={toggleMute} className="hover:text-primary transition-colors">
-                {isMuted || volume === 0 ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-              </button>
-              <input 
-                type="range" min="0" max="1" step="0.05" 
-                value={isMuted ? 0 : volume} 
-                onChange={handleVolume} 
-                className="w-0 opacity-0 group-hover/volume:w-20 group-hover/volume:opacity-100 transition-all duration-300 accent-primary cursor-pointer origin-left" 
-              />
-            </div>
-
-            <span className="text-xs font-mono text-white/80">
-              {formatTime(currentTime)} {duration > 0 ? `/ ${formatTime(duration)}` : ''}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1 bg-white/10 rounded px-2 py-1 hover:bg-white/20 transition-colors">
-              <Settings className="w-3.5 h-3.5 text-white/70" />
-              <select 
-                className="bg-transparent text-white text-xs outline-none cursor-pointer font-medium appearance-none" 
-                value={playbackRate} 
-                onChange={handleSpeed}
-              >
-                <option value="0.5" className="text-black">0.5x Speed</option>
-                <option value="1" className="text-black">1.0x Speed</option>
-                <option value="1.5" className="text-black">1.5x Speed</option>
-                <option value="2" className="text-black">2.0x Speed</option>
-              </select>
-            </div>
-            
-            <button onClick={toggleFullscreen} className="hover:text-primary transition-colors">
-              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-            </button>
-          </div>
-        </div>
-      </div>
+      <video
+        controls
+        controlsList="nodownload"
+        className={`w-full h-full transition-opacity duration-500 ${isBuffering ? 'opacity-0' : 'opacity-100'}`}
+        src={videoSrc}
+        onLoadedMetadata={handleLoadedMetadata}
+        preload="auto"
+      >
+        Your browser does not support video playback.
+      </video>
     </div>
   );
 };
@@ -482,7 +338,7 @@ export default function ResultPage() {
                 <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded border border-border/50">ForgePro Video Engine</span>
               </div>
               
-              <ForgeProVideoPlayer src={videoUrl} />
+              <NativeForgePlayer src={videoUrl} />
               
             </motion.div>
           )}
