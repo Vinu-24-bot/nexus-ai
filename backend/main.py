@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text  
 
@@ -138,6 +139,44 @@ async def health_check(db: Session = Depends(get_db)):
         return {"status": "online", "database": "connected and awake"}
     except Exception as e:
         return {"status": "offline", "error": str(e)}
+
+# 🛡️ THE PRO-ENGINEER FIX: Custom Byte-Range Streaming Endpoint
+# This solves the WebM Chrome playback failure directly from the backend.
+@app.get("/api/stream/{filename}")
+async def stream_video(filename: str, request: Request):
+    file_path = RECORDINGS_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range")
+
+    if range_header:
+        match = re.search(r'bytes=(\d+)-(\d*)', range_header)
+        byte1 = int(match.group(1)) if match else 0
+        byte2 = int(match.group(2)) if match and match.group(2) else file_size - 1
+        length = byte2 - byte1 + 1
+
+        def file_iterator(path, start, length, chunk_size=8192 * 4):
+            with open(path, "rb") as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    chunk = f.read(min(chunk_size, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                    yield chunk
+
+        headers = {
+            "Content-Range": f"bytes {byte1}-{byte2}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+            "Content-Type": "video/webm" if str(filename).endswith(".webm") else "video/mp4",
+        }
+        return StreamingResponse(file_iterator(file_path, byte1, length), status_code=206, headers=headers)
+
+    return FileResponse(file_path, media_type="video/webm")
 
 @app.post("/api/sessions/create")
 async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -327,7 +366,6 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
                     try: final_transcript = await transcribe_audio(str(audio_path))
                     except: pass
 
-        # 🛡️ THE HYBRID FIX: Extract CV/Behavior metrics passed silently in remarks
         behavior_data = {}
         clean_remarks = req.remarks or "Completed normally."
         if "METRICS_PAYLOAD:" in clean_remarks:
