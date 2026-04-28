@@ -47,7 +47,7 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE FIX: Resilient Unblocked Native Scrubber
+// 🛡️ THE FIX: Indestructible Math Scrubber for WebM streams
 const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -70,15 +70,22 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
     }
   };
 
+  const updateDuration = () => {
+    if (videoRef.current) {
+      const d = videoRef.current.duration;
+      if (d && !isNaN(d) && d !== Infinity && d !== duration) {
+        setDuration(d);
+      }
+    }
+  };
+
   const handleTimeUpdate = () => {
     if (videoRef.current && !isScrubbing) {
+      updateDuration(); // Constantly poll for duration if browser finally calculates it
       const current = videoRef.current.currentTime;
       setCurrentTime(current);
-      // Grab duration directly to avoid Infinity reset loops
-      const d = videoRef.current.duration;
-      if (d && !isNaN(d) && d !== Infinity) {
-        setDuration(d);
-        setProgress((current / d) * 100);
+      if (duration > 0) {
+        setProgress((current / duration) * 100);
       }
     }
   };
@@ -86,24 +93,29 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newProgress = Number(e.target.value);
     setProgress(newProgress);
-    if (videoRef.current) {
-      const d = duration || videoRef.current.duration;
-      // Allow seeking natively even if duration is mathematically tricky
-      if (d && !isNaN(d) && d !== Infinity) {
-        const newTime = (newProgress / 100) * d;
-        videoRef.current.currentTime = newTime;
-        setCurrentTime(newTime);
-      }
+    if (videoRef.current && duration > 0) {
+      const newTime = (newProgress / 100) * duration;
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
     }
   };
 
   const skip = (amount: number) => {
     if (videoRef.current) {
-      const vid = videoRef.current;
-      // Directly inject native time skips. Doesn't require duration knowledge to work!
-      const newTime = Math.max(0, vid.currentTime + amount);
-      vid.currentTime = newTime;
+      let newTime = videoRef.current.currentTime + amount;
+      newTime = Math.max(0, newTime); // Never allow negative time
+      
+      // 🛡️ The Math Fix: Only clamp the max time IF we know the real duration
+      if (duration > 0) {
+        newTime = Math.min(newTime, duration);
+      }
+      
+      videoRef.current.currentTime = newTime;
       setCurrentTime(newTime);
+      
+      if (duration > 0) {
+        setProgress((newTime / duration) * 100);
+      }
     }
   };
 
@@ -163,7 +175,9 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
         className="w-full max-h-[600px] cursor-pointer" 
         onClick={togglePlay} 
         onTimeUpdate={handleTimeUpdate} 
-        preload="metadata"
+        onLoadedMetadata={updateDuration}
+        onDurationChange={updateDuration}
+        preload="auto"
       />
       
       {!isPlaying && (
@@ -186,7 +200,8 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
             onMouseUp={() => setIsScrubbing(false)}
             onTouchStart={() => setIsScrubbing(true)}
             onTouchEnd={() => setIsScrubbing(false)}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+            disabled={duration === 0}
+            className={`absolute inset-0 w-full h-full opacity-0 z-10 ${duration === 0 ? 'cursor-not-allowed' : 'cursor-pointer'}`}
           />
           <div className="absolute top-0 left-0 h-full bg-primary rounded-full pointer-events-none transition-all duration-75" style={{ width: `${progress}%` }}>
             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full scale-0 group-hover/progress:scale-100 transition-transform" />
@@ -219,7 +234,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
             </div>
 
             <span className="text-xs font-mono text-white/80">
-              {formatTime(currentTime)} / {formatTime(duration)}
+              {formatTime(currentTime)} {duration > 0 ? `/ ${formatTime(duration)}` : ''}
             </span>
           </div>
 
