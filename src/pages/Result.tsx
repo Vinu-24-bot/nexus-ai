@@ -47,14 +47,10 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE PRO-ENGINEER FIX: Asynchronous Duration Indexing & Clamping
+// 🛡️ THE FIX: Indestructible Native Video Player
 const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  
-  const [localSrc, setLocalSrc] = useState<string>("");
-  const [isBuffering, setIsBuffering] = useState(true);
-  const [isReady, setIsReady] = useState(false);
   
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -66,82 +62,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
 
-  // Step 1: Fetch as Blob to force memory access
-  useEffect(() => {
-    let objectUrl = "";
-    let isMounted = true;
-
-    const fetchVideo = async () => {
-      setIsBuffering(true);
-      setIsReady(false);
-      try {
-        const response = await fetch(src);
-        const blob = await response.blob();
-        if (!isMounted) return;
-        objectUrl = URL.createObjectURL(blob);
-        setLocalSrc(objectUrl);
-      } catch (e) {
-        if (isMounted) setLocalSrc(src);
-      } finally {
-        if (isMounted) setIsBuffering(false);
-      }
-    };
-
-    fetchVideo();
-
-    return () => {
-      isMounted = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [src]);
-
-  // Step 2: The Asynchronous 1e99 Duration Hack
-  const handleLoadedMetadata = () => {
-    const vid = videoRef.current;
-    if (!vid) return;
-
-    // Check if Chrome failed to parse the duration
-    if (vid.duration === Infinity || isNaN(vid.duration) || vid.duration === 0) {
-      vid.currentTime = 1e99; // Force seek to end
-
-      // Fallback Timeout if 'onseeked' never fires
-      const timeout = setTimeout(() => {
-        vid.onseeked = null;
-        if (vid.buffered && vid.buffered.length > 0) {
-          setDuration(vid.buffered.end(vid.buffered.length - 1));
-        }
-        vid.currentTime = 0; // Snap back
-        setIsReady(true);
-      }, 500);
-
-      // Ideal path: Wait for the seek to finish asynchronously
-      vid.onseeked = () => {
-        clearTimeout(timeout);
-        vid.onseeked = null; // Unbind
-        setDuration(vid.currentTime); // Grab real duration
-        vid.currentTime = 0; // Snap back
-        setIsReady(true);
-      };
-    } else {
-      setDuration(vid.duration);
-      setIsReady(true);
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    const vid = videoRef.current;
-    if (!vid || !isReady || isScrubbing) return;
-    
-    const current = vid.currentTime;
-    setCurrentTime(current);
-    
-    if (duration > 0) {
-      setProgress((current / duration) * 100);
-    }
-  };
-
   const togglePlay = () => {
-    if (isBuffering || !isReady) return;
     if (videoRef.current) {
       if (isPlaying) videoRef.current.pause();
       else videoRef.current.play();
@@ -149,8 +70,30 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
     }
   };
 
+  const handleTimeUpdate = () => {
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    setCurrentTime(vid.currentTime);
+
+    // 🛡️ Dynamic Duration Extraction: Bypasses the WebM Infinity Bug
+    let currentDuration = vid.duration;
+    if (isNaN(currentDuration) || currentDuration === Infinity || currentDuration === 0) {
+      // Use the browser's downloaded buffer to find the true max time
+      if (vid.buffered && vid.buffered.length > 0) {
+        currentDuration = vid.buffered.end(vid.buffered.length - 1);
+      }
+    }
+
+    if (currentDuration > 0 && currentDuration !== Infinity) {
+      setDuration(currentDuration);
+      if (!isScrubbing) {
+        setProgress((vid.currentTime / currentDuration) * 100);
+      }
+    }
+  };
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!isReady) return;
     const newProgress = Number(e.target.value);
     setProgress(newProgress);
     if (videoRef.current && duration > 0) {
@@ -161,18 +104,16 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   };
 
   const skip = (amount: number) => {
-    if (!isReady || !videoRef.current) return;
-    
-    let newTime = videoRef.current.currentTime + amount;
-    newTime = Math.max(0, newTime); // Never drop below 0
-    
-    if (duration > 0) {
-      newTime = Math.min(newTime, duration); // Never exceed true duration
-      setProgress((newTime / duration) * 100);
+    if (videoRef.current) {
+      // 🛡️ The Math Fix: Removed the `duration` clamp that was causing the 00:00 reset
+      const newTime = Math.max(0, videoRef.current.currentTime + amount);
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
+      
+      if (duration > 0) {
+        setProgress((newTime / duration) * 100);
+      }
     }
-    
-    videoRef.current.currentTime = newTime;
-    setCurrentTime(newTime);
   };
 
   const toggleMute = () => {
@@ -225,27 +166,17 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   return (
     <div ref={containerRef} className="relative group bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
       
-      {/* Dynamic Load State Overlay */}
-      {(isBuffering || !isReady) && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm border border-primary/20">
-           <Loader2 className="w-10 h-10 animate-spin text-primary mb-3" />
-           <p className="text-xs font-mono font-bold tracking-widest text-primary animate-pulse">
-             {isBuffering ? "FETCHING STREAM..." : "INDEXING DURATION..."}
-           </p>
-        </div>
-      )}
-
       <video 
         ref={videoRef} 
-        src={localSrc} 
-        className={`w-full max-h-[600px] cursor-pointer ${isBuffering || !isReady ? 'opacity-0' : 'opacity-100'} transition-opacity duration-300`}
+        src={src} 
+        className="w-full max-h-[600px] cursor-pointer" 
         onClick={togglePlay} 
-        onTimeUpdate={handleTimeUpdate} 
-        onLoadedMetadata={handleLoadedMetadata}
-        preload="auto"
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleTimeUpdate}
+        preload="metadata"
       />
       
-      {!isPlaying && isReady && !isBuffering && (
+      {!isPlaying && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/20" onClick={togglePlay}>
           <div className="w-16 h-16 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center backdrop-blur-md shadow-[0_0_20px_rgba(0,240,255,0.4)] pointer-events-auto cursor-pointer hover:scale-110 transition-transform">
             <Play className="w-8 h-8 ml-1" />
@@ -265,8 +196,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
             onMouseUp={() => setIsScrubbing(false)}
             onTouchStart={() => setIsScrubbing(true)}
             onTouchEnd={() => setIsScrubbing(false)}
-            disabled={isBuffering || !isReady || duration === 0}
-            className={`absolute inset-0 w-full h-full opacity-0 z-10 ${isBuffering || !isReady || duration === 0 ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
           />
           <div className="absolute top-0 left-0 h-full bg-primary rounded-full pointer-events-none transition-all duration-75" style={{ width: `${progress}%` }}>
             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full scale-0 group-hover/progress:scale-100 transition-transform" />
@@ -275,14 +205,14 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
 
         <div className="flex items-center justify-between text-white">
           <div className="flex items-center gap-4">
-            <button onClick={togglePlay} disabled={isBuffering || !isReady} className="hover:text-primary transition-colors disabled:opacity-50">
+            <button onClick={togglePlay} className="hover:text-primary transition-colors">
               {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
             </button>
             
-            <button onClick={() => skip(-10)} disabled={isBuffering || !isReady} className="hover:text-primary transition-colors disabled:opacity-50" title="Rewind 10s">
+            <button onClick={() => skip(-10)} className="hover:text-primary transition-colors" title="Rewind 10s">
               <Rewind className="w-4 h-4" />
             </button>
-            <button onClick={() => skip(10)} disabled={isBuffering || !isReady} className="hover:text-primary transition-colors disabled:opacity-50" title="Forward 10s">
+            <button onClick={() => skip(10)} className="hover:text-primary transition-colors" title="Forward 10s">
               <FastForward className="w-4 h-4" />
             </button>
             
@@ -310,7 +240,6 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
                 className="bg-transparent text-white text-xs outline-none cursor-pointer font-medium appearance-none" 
                 value={playbackRate} 
                 onChange={handleSpeed}
-                disabled={isBuffering || !isReady}
               >
                 <option value="0.5" className="text-black">0.5x Speed</option>
                 <option value="1" className="text-black">1.0x Speed</option>
