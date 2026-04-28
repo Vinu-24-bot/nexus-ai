@@ -47,7 +47,7 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE FIX: Enterprise Scrubber with WebM seek-index forcing
+// 🛡️ THE FIX: Resilient Unblocked Native Scrubber
 const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -61,10 +61,8 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
-  const [isIndexing, setIsIndexing] = useState(true);
 
   const togglePlay = () => {
-    if (isIndexing) return;
     if (videoRef.current) {
       if (isPlaying) videoRef.current.pause();
       else videoRef.current.play();
@@ -73,49 +71,39 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   };
 
   const handleTimeUpdate = () => {
-    if (videoRef.current && !isScrubbing && duration > 0) {
-      setCurrentTime(videoRef.current.currentTime);
-      setProgress((videoRef.current.currentTime / duration) * 100);
-    }
-  };
-
-  // 🛡️ THE BULLETPROOF FIX: The 'onseeked' duration grabber for WebM blobs
-  const handleLoadedMetadata = () => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    if (video.duration === Infinity || isNaN(video.duration)) {
-      video.currentTime = 1e99; // Jump to end to force indexing
-      video.onseeked = () => {
-        video.onseeked = null; // Prevent loops
-        setDuration(video.duration);
-        video.currentTime = 0; // Return to start
-        setIsIndexing(false);
-      };
-    } else {
-      setDuration(video.duration);
-      setIsIndexing(false);
+    if (videoRef.current && !isScrubbing) {
+      const current = videoRef.current.currentTime;
+      setCurrentTime(current);
+      // Grab duration directly to avoid Infinity reset loops
+      const d = videoRef.current.duration;
+      if (d && !isNaN(d) && d !== Infinity) {
+        setDuration(d);
+        setProgress((current / d) * 100);
+      }
     }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (isIndexing) return;
     const newProgress = Number(e.target.value);
     setProgress(newProgress);
-    if (videoRef.current && duration > 0) {
-      const newTime = (newProgress / 100) * duration;
-      videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
+    if (videoRef.current) {
+      const d = duration || videoRef.current.duration;
+      // Allow seeking natively even if duration is mathematically tricky
+      if (d && !isNaN(d) && d !== Infinity) {
+        const newTime = (newProgress / 100) * d;
+        videoRef.current.currentTime = newTime;
+        setCurrentTime(newTime);
+      }
     }
   };
 
   const skip = (amount: number) => {
-    if (videoRef.current && duration > 0 && !isIndexing) {
-      let newTime = videoRef.current.currentTime + amount;
-      newTime = Math.max(0, Math.min(newTime, duration));
-      videoRef.current.currentTime = newTime;
+    if (videoRef.current) {
+      const vid = videoRef.current;
+      // Directly inject native time skips. Doesn't require duration knowledge to work!
+      const newTime = Math.max(0, vid.currentTime + amount);
+      vid.currentTime = newTime;
       setCurrentTime(newTime);
-      setProgress((newTime / duration) * 100);
     }
   };
 
@@ -169,25 +157,16 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   return (
     <div ref={containerRef} className="relative group bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
       
-      {/* Loading Overlay while indexing duration */}
-      {isIndexing && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm text-primary">
-           <Loader2 className="w-8 h-8 animate-spin mb-2" />
-           <p className="text-xs font-mono font-bold tracking-widest animate-pulse uppercase">Optimizing Stream...</p>
-        </div>
-      )}
-
       <video 
         ref={videoRef} 
         src={src} 
         className="w-full max-h-[600px] cursor-pointer" 
         onClick={togglePlay} 
         onTimeUpdate={handleTimeUpdate} 
-        onLoadedMetadata={handleLoadedMetadata}
-        preload="auto"
+        preload="metadata"
       />
       
-      {!isPlaying && !isIndexing && (
+      {!isPlaying && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/20" onClick={togglePlay}>
           <div className="w-16 h-16 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center backdrop-blur-md shadow-[0_0_20px_rgba(0,240,255,0.4)] pointer-events-auto cursor-pointer hover:scale-110 transition-transform">
             <Play className="w-8 h-8 ml-1" />
@@ -207,8 +186,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
             onMouseUp={() => setIsScrubbing(false)}
             onTouchStart={() => setIsScrubbing(true)}
             onTouchEnd={() => setIsScrubbing(false)}
-            disabled={isIndexing}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 disabled:cursor-not-allowed" 
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
           />
           <div className="absolute top-0 left-0 h-full bg-primary rounded-full pointer-events-none transition-all duration-75" style={{ width: `${progress}%` }}>
             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full scale-0 group-hover/progress:scale-100 transition-transform" />
@@ -217,14 +195,14 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
 
         <div className="flex items-center justify-between text-white">
           <div className="flex items-center gap-4">
-            <button onClick={togglePlay} disabled={isIndexing} className="hover:text-primary transition-colors disabled:opacity-50">
+            <button onClick={togglePlay} className="hover:text-primary transition-colors">
               {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
             </button>
             
-            <button onClick={() => skip(-10)} disabled={isIndexing} className="hover:text-primary transition-colors disabled:opacity-50" title="Rewind 10s">
+            <button onClick={() => skip(-10)} className="hover:text-primary transition-colors" title="Rewind 10s">
               <Rewind className="w-4 h-4" />
             </button>
-            <button onClick={() => skip(10)} disabled={isIndexing} className="hover:text-primary transition-colors disabled:opacity-50" title="Forward 10s">
+            <button onClick={() => skip(10)} className="hover:text-primary transition-colors" title="Forward 10s">
               <FastForward className="w-4 h-4" />
             </button>
             
@@ -252,7 +230,6 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
                 className="bg-transparent text-white text-xs outline-none cursor-pointer font-medium appearance-none" 
                 value={playbackRate} 
                 onChange={handleSpeed}
-                disabled={isIndexing}
               >
                 <option value="0.5" className="text-black">0.5x Speed</option>
                 <option value="1" className="text-black">1.0x Speed</option>

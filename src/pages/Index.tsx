@@ -72,12 +72,8 @@ export default function LandingPage() {
             animate="visible"
             className="flex-1 space-y-8 text-center lg:text-left pt-10 lg:pt-0"
           >
-            <motion.div variants={fadeUp} custom={0} className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium">
-              <Zap className="w-3.5 h-3.5" />
-              BATS ForgePro Platform
-            </motion.div>
+            {/* The Badge was removed here as requested */}
 
-            {/* Adjusted Font Size for a Cleaner Enterprise Look */}
             <motion.h1
               variants={fadeUp}
               custom={1}

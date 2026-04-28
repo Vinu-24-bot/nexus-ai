@@ -254,8 +254,9 @@ export default function UploadAnalysisPage() {
           
           {/* Header */}
           <motion.div variants={fadeUp} custom={0} className="text-center space-y-3">
-            <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground">
-              Analyze Pre-Recorded Interviews With BATS ForgePro
+            <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground leading-tight">
+              Analyze Pre-Recorded Interviews With <br />
+              <span className="text-primary">BATS ForgePro</span>
             </h1>
           </motion.div>
 
@@ -398,7 +399,7 @@ export default function UploadAnalysisPage() {
                       {isExtractingResume ? (
                         <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Extracting...</span>
                       ) : (
-                        <span className="flex items-center gap-1.5"><Upload className="w-3 h-3" /> Upload Resume</span>
+                        <span className="flex items-center gap-1.5"><Upload className="w-3 h-3" /> Upload Resume (PDF/TXT/DOCX)</span>
                       )}
                     </Button>
                   </div>

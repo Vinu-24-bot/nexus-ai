@@ -555,7 +555,7 @@ export default function EvaluatePage() {
                         {isExtractingResume ? (
                           <span className="flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Extracting...</span>
                         ) : (
-                          <span className="flex items-center gap-1.5"><Upload className="w-3 h-3" /> Upload Resume (PDF/TXT)</span>
+                          <span className="flex items-center gap-1.5"><Upload className="w-3 h-3" /> Upload Resume (PDF/TXT/DOCX)</span>
                         )}
                       </Button>
                     </div>
