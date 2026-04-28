@@ -34,24 +34,27 @@ const sentimentIcon = {
 };
 
 const sentimentColor = {
-  Positive: "text-nexus-green bg-nexus-green/10",
-  Neutral: "text-nexus-amber bg-nexus-amber/10",
-  Negative: "text-nexus-red bg-nexus-red/10",
+  Positive: "text-green-500 bg-green-500/10 border-green-500/20",
+  Neutral: "text-blue-500 bg-blue-500/10 border-blue-500/20",
+  Negative: "text-red-500 bg-red-500/10 border-red-500/20",
 };
 
 const statusStyles: Record<string, string> = {
-  pending: "text-nexus-amber bg-nexus-amber/10 border-nexus-amber/20",
-  selected: "text-nexus-green bg-nexus-green/10 border-nexus-green/20",
-  rejected: "text-nexus-red bg-nexus-red/10 border-nexus-red/20",
+  pending: "text-yellow-500 bg-yellow-500/10 border-yellow-500/30",
+  selected: "text-green-500 bg-green-500/10 border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.15)]",
+  rejected: "text-red-500 bg-red-500/10 border-red-500/30",
   hold: "text-blue-500 bg-blue-500/10 border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.15)]",
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE FIX: Restored Custom YouTube UI with Indestructible Skip Math
+// 🛡️ THE MASTER FIX: Blob RAM Fetcher + Unrestricted Custom YouTube UI
 const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
+  const [localSrc, setLocalSrc] = useState<string>("");
+  const [isFetchingBlob, setIsFetchingBlob] = useState(true);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -62,24 +65,64 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
 
+  // 1. Fetch video into RAM to bypass FastAPI HTTP Range request crashes
+  useEffect(() => {
+    let objectUrl = "";
+    let isMounted = true;
+
+    const loadVideoToRAM = async () => {
+      setIsFetchingBlob(true);
+      try {
+        const response = await fetch(src);
+        const blob = await response.blob();
+        if (!isMounted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setLocalSrc(objectUrl);
+      } catch (error) {
+        console.warn("Failed to fetch Blob, falling back to raw URL.");
+        if (isMounted) setLocalSrc(src);
+      } finally {
+        if (isMounted) setIsFetchingBlob(false);
+      }
+    };
+
+    loadVideoToRAM();
+
+    return () => {
+      isMounted = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src]);
+
+  // 2. Playback Controls
   const togglePlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) videoRef.current.pause();
-      else videoRef.current.play();
-      setIsPlaying(!isPlaying);
+    if (isFetchingBlob || !videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play().catch(e => console.error("Playback error:", e));
     }
+    setIsPlaying(!isPlaying);
   };
 
   const handleTimeUpdate = () => {
-    if (videoRef.current && !isScrubbing) {
-      const current = videoRef.current.currentTime;
-      setCurrentTime(current);
-      
-      const d = videoRef.current.duration;
-      // Safely update progress only if duration is a valid number
-      if (d && !isNaN(d) && d !== Infinity) {
-        setDuration(d);
-        setProgress((current / d) * 100);
+    const vid = videoRef.current;
+    if (!vid) return;
+
+    setCurrentTime(vid.currentTime);
+
+    // Dynamic Duration Extractor (Works perfectly with RAM Blobs)
+    let currentDuration = vid.duration;
+    if (isNaN(currentDuration) || currentDuration === Infinity || currentDuration === 0) {
+      if (vid.buffered && vid.buffered.length > 0) {
+        currentDuration = vid.buffered.end(vid.buffered.length - 1);
+      }
+    }
+
+    if (currentDuration > 0 && currentDuration !== Infinity) {
+      setDuration(currentDuration);
+      if (!isScrubbing) {
+        setProgress((vid.currentTime / currentDuration) * 100);
       }
     }
   };
@@ -87,22 +130,22 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newProgress = Number(e.target.value);
     setProgress(newProgress);
-    if (videoRef.current) {
-      const d = videoRef.current.duration;
-      // Only allow scrubbing if the browser successfully indexed the duration
-      if (d && !isNaN(d) && d !== Infinity) {
-        videoRef.current.currentTime = (newProgress / 100) * d;
-      }
+    if (videoRef.current && duration > 0) {
+      const newTime = (newProgress / 100) * duration;
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
     }
   };
 
   const skip = (amount: number) => {
     if (videoRef.current) {
-      // 🛡️ The Ultimate Math Fix: Just add the time natively. 
-      // Removed all Math.min() clamps that were resetting it to 00:00!
+      // Unrestricted Math (No Math.min upper limit clamp) to prevent 00:00 jump bugs
       const newTime = Math.max(0, videoRef.current.currentTime + amount);
       videoRef.current.currentTime = newTime;
       setCurrentTime(newTime);
+      if (duration > 0) {
+        setProgress((newTime / duration) * 100);
+      }
     }
   };
 
@@ -154,18 +197,27 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   };
 
   return (
-    <div ref={containerRef} className="relative group w-full bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
+    <div ref={containerRef} className="relative group bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
       
+      {/* 3. Smooth Loading Overlay */}
+      {isFetchingBlob && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm border border-primary/20">
+           <Loader2 className="w-10 h-10 animate-spin text-primary mb-3" />
+           <p className="text-xs font-mono font-bold tracking-widest text-primary animate-pulse">DECRYPTING SECURE STREAM...</p>
+        </div>
+      )}
+
       <video 
         ref={videoRef} 
-        src={src} 
-        className="w-full max-h-[600px] cursor-pointer outline-none" 
+        src={localSrc} 
+        className={`w-full max-h-[600px] cursor-pointer outline-none transition-opacity duration-500 ${isFetchingBlob ? 'opacity-0' : 'opacity-100'}`} 
         onClick={togglePlay} 
-        onTimeUpdate={handleTimeUpdate} 
-        preload="metadata"
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleTimeUpdate}
+        preload="auto"
       />
       
-      {!isPlaying && (
+      {!isPlaying && !isFetchingBlob && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/20" onClick={togglePlay}>
           <div className="w-16 h-16 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center backdrop-blur-md shadow-[0_0_20px_rgba(0,240,255,0.4)] pointer-events-auto cursor-pointer hover:scale-110 transition-transform">
             <Play className="w-8 h-8 ml-1" />
@@ -185,7 +237,8 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
             onMouseUp={() => setIsScrubbing(false)}
             onTouchStart={() => setIsScrubbing(true)}
             onTouchEnd={() => setIsScrubbing(false)}
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+            disabled={isFetchingBlob}
+            className={`absolute inset-0 w-full h-full opacity-0 z-10 ${isFetchingBlob ? 'cursor-not-allowed' : 'cursor-pointer'}`} 
           />
           <div className="absolute top-0 left-0 h-full bg-primary rounded-full pointer-events-none transition-all duration-75" style={{ width: `${progress}%` }}>
             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full scale-0 group-hover/progress:scale-100 transition-transform" />
@@ -194,14 +247,14 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
 
         <div className="flex items-center justify-between text-white">
           <div className="flex items-center gap-4">
-            <button onClick={togglePlay} className="hover:text-primary transition-colors">
+            <button onClick={togglePlay} disabled={isFetchingBlob} className="hover:text-primary transition-colors disabled:opacity-50">
               {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
             </button>
             
-            <button onClick={() => skip(-10)} className="hover:text-primary transition-colors" title="Rewind 10s">
+            <button onClick={() => skip(-10)} disabled={isFetchingBlob} className="hover:text-primary transition-colors disabled:opacity-50" title="Rewind 10s">
               <Rewind className="w-4 h-4" />
             </button>
-            <button onClick={() => skip(10)} className="hover:text-primary transition-colors" title="Forward 10s">
+            <button onClick={() => skip(10)} disabled={isFetchingBlob} className="hover:text-primary transition-colors disabled:opacity-50" title="Forward 10s">
               <FastForward className="w-4 h-4" />
             </button>
             
@@ -229,6 +282,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
                 className="bg-transparent text-white text-xs outline-none cursor-pointer font-medium appearance-none" 
                 value={playbackRate} 
                 onChange={handleSpeed}
+                disabled={isFetchingBlob}
               >
                 <option value="0.5" className="text-black">0.5x Speed</option>
                 <option value="1" className="text-black">1.0x Speed</option>
@@ -299,94 +353,94 @@ export default function ResultPage() {
   const SentimentIconComp = sentimentIcon[result.sentiment?.rating as keyof typeof sentimentIcon] || Meh;
   const sentClr = sentimentColor[result.sentiment?.rating as keyof typeof sentimentColor] || sentimentColor.Neutral;
   
-  // Parse video filenames and build correct URLs  
-  const rawVideoFiles = result.video_filename?.split(", ").filter(Boolean) || [];
-  const videoFiles = rawVideoFiles.map((f) => {
-    const cleanName = f.replace(/^\[.*?\]\s*/, "");
-    return { name: cleanName, url: `${API_BASE}/uploads/recordings/${encodeURIComponent(cleanName)}` };
-  });
+  const cleanVideoFilename = result.video_filename ? result.video_filename.replace("[UPLOADED] ", "").replace("[UPLOADED]", "").trim() : null;
+  const videoUrl = cleanVideoFilename ? `${API_BASE}/uploads/recordings/${encodeURIComponent(cleanVideoFilename)}` : null;
 
   return (
     <div className="min-h-screen bg-background nexus-grid pb-20">
       <Navbar />
-      <div className="container mx-auto px-6 pt-24 pb-16 max-w-5xl">
+      <div className="container mx-auto px-6 pt-24 max-w-5xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
           
           <motion.div variants={fadeUp} custom={0} className="space-y-4">
-            <Link
-              to="/dashboard"
-              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
-            >
+            <Link to="/dashboard" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors">
               <ArrowLeft className="w-4 h-4" />
               Back to Dashboard
             </Link>
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
               <div>
-                <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground">
+                <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
                   {result.candidateName}
                 </h1>
-                <p className="text-muted-foreground mt-1">
-                  {result.position} · Evaluated {result.date}
+                <p className="text-muted-foreground mt-1 text-lg">
+                  {result.position}
                 </p>
-                <p className="text-xs text-muted-foreground/60 font-mono mt-0.5">
-                  ID: {result.id}
-                </p>
+                <div className="flex items-center gap-3 mt-2">
+                  <p className="text-xs px-2 py-1 bg-muted rounded-md text-muted-foreground font-mono border border-border/50">
+                    ID: {result.id}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Evaluated on {result.date}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-3">
                 <RecommendationBadge recommendation={result.hiring_recommendation} />
-                <span className={`px-3 py-1 rounded-full text-xs font-medium border uppercase tracking-wider ${statusStyles[result.selection_status?.toLowerCase() || "pending"]}`}>
+                <span className={`px-4 py-1.5 rounded-full text-xs font-bold border uppercase tracking-wider ${statusStyles[result.selection_status?.toLowerCase() || "pending"]}`}>
                   {result.selection_status || "pending"}
                 </span>
               </div>
             </div>
           </motion.div>
 
-          <motion.div variants={fadeUp} custom={0.5} className="flex flex-wrap gap-3 p-4 glass rounded-xl border border-primary/10 shadow-sm">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleStatusChange("selected")}
-              className={`border-green-500/30 hover:bg-green-500/10 ${result.selection_status === "selected" ? "bg-green-500/10 text-green-500" : "text-muted-foreground"}`}
-            >
-              <UserCheck className="w-4 h-4 mr-1.5" /> Select
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleStatusChange("rejected")}
-              className={`border-red-500/30 hover:bg-red-500/10 ${result.selection_status === "rejected" ? "bg-red-500/10 text-red-500" : "text-muted-foreground"}`}
-            >
-              <UserX className="w-4 h-4 mr-1.5" /> Reject
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleStatusChange("hold")}
-              className={`border-blue-500/30 hover:bg-blue-500/10 ${result.selection_status === "hold" ? "bg-blue-500/10 text-blue-500" : "text-muted-foreground"}`}
-            >
-              <Clock className="w-4 h-4 mr-1.5" /> Hold
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleStatusChange("doubtful")}
-              className={`border-orange-500/30 hover:bg-orange-500/10 ${result.selection_status === "doubtful" ? "bg-orange-500/10 text-orange-500" : "text-muted-foreground"}`}
-            >
-              <HelpCircle className="w-4 h-4 mr-1.5" /> Doubtful
-            </Button>
+          <motion.div variants={fadeUp} custom={0.5} className="flex flex-wrap items-center justify-between gap-4 p-4 glass rounded-xl border border-primary/10 shadow-sm">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant={result.selection_status === "selected" ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleStatusChange("selected")}
+                className={result.selection_status === "selected" ? "bg-green-600 hover:bg-green-700 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]" : "hover:text-green-500 hover:border-green-500 hover:bg-green-500/10"}
+              >
+                <UserCheck className="w-4 h-4 mr-2" /> Select
+              </Button>
+              <Button
+                variant={result.selection_status === "rejected" ? "destructive" : "outline"}
+                size="sm"
+                onClick={() => handleStatusChange("rejected")}
+                className={result.selection_status === "rejected" ? "shadow-[0_0_10px_rgba(239,68,68,0.3)]" : "hover:text-red-500 hover:border-red-500 hover:bg-red-500/10"}
+              >
+                <UserX className="w-4 h-4 mr-2" /> Reject
+              </Button>
+              <Button
+                variant={result.selection_status === "hold" ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleStatusChange("hold")}
+                className={result.selection_status === "hold" ? "bg-blue-600 hover:bg-blue-700 text-white shadow-[0_0_10px_rgba(59,130,246,0.3)]" : "hover:text-blue-500 hover:border-blue-500 hover:bg-blue-500/10"}
+              >
+                <Clock className="w-4 h-4 mr-2" /> Hold
+              </Button>
+              <Button
+                variant={result.selection_status === "doubtful" ? "default" : "outline"}
+                size="sm"
+                onClick={() => handleStatusChange("doubtful")}
+                className={result.selection_status === "doubtful" ? "bg-orange-600 hover:bg-orange-700 text-white shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "hover:text-orange-500 hover:border-orange-500 hover:bg-orange-500/10"}
+              >
+                <HelpCircle className="w-4 h-4 mr-2" /> Doubtful
+              </Button>
 
-            {result.selection_status !== "pending" && (
-              <Button variant="ghost" size="sm" onClick={() => handleStatusChange("pending")} className="text-muted-foreground ml-2">
-                Reset
+              {result.selection_status !== "pending" && (
+                <Button variant="ghost" size="sm" onClick={() => handleStatusChange("pending")} className="text-muted-foreground ml-2">
+                  Reset
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={handleExport} className="text-muted-foreground hover:text-primary">
+                <Download className="w-4 h-4 mr-2" /> Export JSON
               </Button>
-            )}
-            
-            <div className="ml-auto flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleExport} className="text-muted-foreground">
-                <Download className="w-4 h-4 mr-1.5" /> Export JSON
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(result.id); toast.success("ID copied!"); }} className="text-muted-foreground">
-                <Copy className="w-4 h-4 mr-1.5" /> Copy ID
+              <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(result.id); toast.success("ID copied!"); }} className="text-muted-foreground hover:text-primary">
+                <Copy className="w-4 h-4 mr-2" /> Copy ID
               </Button>
             </div>
           </motion.div>
@@ -405,45 +459,52 @@ export default function ResultPage() {
 
           <motion.div variants={fadeUp} custom={1} className="glass rounded-xl p-6 border-l-4 border-l-primary shadow-sm">
             <div className="flex items-center gap-2 mb-3">
-              <Sparkles className="w-4 h-4 text-primary" />
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Executive Summary</h2>
+              <Sparkles className="w-5 h-5 text-primary" />
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Executive Summary</h2>
             </div>
-            <p className="text-muted-foreground leading-relaxed">{result.candidate_overview}</p>
+            <p className="text-muted-foreground leading-relaxed text-base">{result.candidate_overview}</p>
           </motion.div>
 
           <motion.div variants={fadeUp} custom={1.5} className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="glass rounded-xl p-6 border border-border/50 shadow-sm">
-              <div className="flex items-center gap-2 mb-4">
-                <SentimentIconComp className={`w-4 h-4 ${sentClr.split(" ")[0]}`} />
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Vocal Sentiment</h2>
+              <div className="flex justify-between items-start mb-4">
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <Smile className="w-4 h-4 text-muted-foreground" /> Vocal Sentiment
+                </h2>
+                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${sentClr}`}>
+                  <SentimentIconComp className="w-3.5 h-3.5" />
+                  {result.sentiment?.rating || "Neutral"}
+                </div>
               </div>
-              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${sentClr} mb-3 border`}>
-                <SentimentIconComp className="w-4 h-4" />
-                {result.sentiment?.rating || "Neutral"}
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed">{result.sentiment?.explanation || "No analysis available"}</p>
-            </div>
-            <div className="glass rounded-xl p-6 border border-border/50 shadow-sm">
-              <div className="flex items-center gap-2 mb-4">
-                <Shield className="w-4 h-4 text-primary" />
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Readiness Level</h2>
-              </div>
-              <p className="text-sm font-semibold text-foreground mb-2 px-3 py-1 rounded-full border bg-primary/10 text-primary border-primary/20 inline-block">
-                {result.candidate_status?.level || "Pending"}
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {result.sentiment?.explanation || "Vocal sentiment analysis was not able to extract definitive confidence markers from this transcript."}
               </p>
-              <p className="text-sm text-muted-foreground leading-relaxed">{result.candidate_status?.description || ""}</p>
+            </div>
+
+            <div className="glass rounded-xl p-6 border border-border/50 shadow-sm">
+              <div className="flex justify-between items-start mb-4">
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-muted-foreground" /> Readiness Level
+                </h2>
+                <div className="px-3 py-1 rounded-full text-xs font-bold border bg-accent/10 text-accent border-accent/20">
+                  {result.candidate_status?.level || "Pending"}
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                {result.candidate_status?.description || "No detailed readiness description provided by the evaluator."}
+              </p>
             </div>
           </motion.div>
 
           <motion.div variants={fadeUp} custom={2} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="glass rounded-xl p-6 flex flex-col items-center border border-border/50 shadow-sm">
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-6 self-start">
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider mb-6 self-start">
                 Performance Radar
               </h2>
               <RadarChart scores={result.scores} size={280} />
             </div>
             <div className="glass rounded-xl p-6 border border-border/50 shadow-sm">
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider mb-6">
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider mb-6">
                 Score Breakdown
               </h2>
               <div className="grid grid-cols-2 gap-6 place-items-center">
@@ -455,21 +516,19 @@ export default function ResultPage() {
             </div>
           </motion.div>
 
-          {/* 🛡️ THE FIX: Rendered as a single full-width Session Recording without grid constraints or question labels */}
-          {videoFiles.length > 0 && (
+          {videoUrl && (
             <motion.div variants={fadeUp} custom={2.5} className="glass rounded-xl p-6 border border-border/50 shadow-sm">
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Play className="w-4 h-4 text-primary" />
-                  <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Session Recording</h2>
-                </div>
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <Play className="w-4 h-4 text-primary" /> Session Recording
+                </h2>
                 <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-1 rounded border border-border/50">ForgePro Video Engine</span>
               </div>
+              
               <div className="w-full">
-                {videoFiles.map((vf, i) => (
-                  <ForgeProVideoPlayer key={i} src={vf.url} />
-                ))}
+                <ForgeProVideoPlayer src={videoUrl} />
               </div>
+              
             </motion.div>
           )}
 
@@ -477,7 +536,7 @@ export default function ResultPage() {
             <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6 border border-green-500/20 bg-gradient-to-b from-green-500/5 to-transparent shadow-sm">
               <div className="flex items-center gap-2 mb-6">
                 <CheckCircle2 className="w-5 h-5 text-green-500" />
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Identified Strengths</h2>
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Identified Strengths</h2>
               </div>
               <ul className="space-y-4">
                 {result.strengths.map((s, i) => (
@@ -488,10 +547,11 @@ export default function ResultPage() {
                 ))}
               </ul>
             </motion.div>
+            
             <motion.div variants={fadeUp} custom={4} className="glass rounded-xl p-6 border border-red-500/20 bg-gradient-to-b from-red-500/5 to-transparent shadow-sm">
               <div className="flex items-center gap-2 mb-6">
                 <AlertTriangle className="w-5 h-5 text-red-500" />
-                <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Red Flags & Gaps</h2>
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Red Flags & Gaps</h2>
               </div>
               <ul className="space-y-4">
                 {result.red_flags_or_weaknesses.map((w, i) => (
@@ -507,7 +567,7 @@ export default function ResultPage() {
           <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6 border-l-4 border-l-accent shadow-sm">
             <div className="flex items-center gap-2 mb-4">
               <HelpCircle className="w-5 h-5 text-accent" />
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Suggested Follow-Up Questions</h2>
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Suggested Follow-Up Questions</h2>
             </div>
             <p className="text-xs text-muted-foreground mb-4">Auto-generated by the ForgePro agent based on vague answers in the transcript.</p>
             <div className="space-y-3">
@@ -523,7 +583,7 @@ export default function ResultPage() {
           <motion.div variants={fadeUp} custom={6} className="glass rounded-xl p-6 border border-border/50 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
               <FileText className="w-5 h-5 text-primary" />
-              <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">Hiring Manager Justification</h2>
+              <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Hiring Manager Justification</h2>
             </div>
             <div className="p-4 rounded-lg bg-muted/20 text-foreground/90 leading-relaxed text-sm md:text-base whitespace-pre-wrap border border-border/50">
               {result.justification}
