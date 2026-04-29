@@ -140,7 +140,6 @@ export default function UploadAnalysisPage() {
     }, 800);
   };
 
-  // 🛡️ THE FIX: Smart DOCX Routing to the Backend
   const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -161,7 +160,7 @@ export default function UploadAnalysisPage() {
     try {
       if (ext === ".doc" || ext === ".docx") {
         toast.info("Sending DOCX to ForgePro Engine for extraction...");
-        const response: any = await uploadResume(file); // Call backend
+        const response: any = await uploadResume(file);
         if (response && response.extracted_text) {
           setResume(response.extracted_text);
           setResumeFileName(file.name);
@@ -280,7 +279,7 @@ export default function UploadAnalysisPage() {
               <div className="hidden sm:block absolute top-4 left-[10%] right-[10%] h-[1px] bg-border/50 -z-10" />
               {[
                 { step: "1", title: "Target Profile", desc: "Upload resume & set JD" },
-                { step: "2", title: "Upload Video", desc: "Provide recorded MP4/WebM" },
+                { step: "2", title: "Upload Video", desc: "Provide recorded videos" },
                 { step: "3", title: "Transcript", desc: "Add ForgePro Transcript" },
                 { step: "4", title: "ForgePro Check", desc: "Deep semantic analysis" },
                 { step: "5", title: "Deep Debrief", desc: "Full analytics & scoring" },
