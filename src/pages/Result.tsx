@@ -301,6 +301,60 @@ export default function ResultPage() {
     }
   };
 
+  // 🛡️ SVG Generator for Score Rings
+  const getRingSVG = (score: number, label: string, color: string) => {
+    const radius = 36;
+    const circumference = 2 * Math.PI * radius;
+    const offset = circumference - (score / 100) * circumference;
+    return `
+      <div style="text-align: center; width: 120px; margin: 10px;">
+        <svg width="100" height="100" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="${radius}" stroke="#e2e8f0" stroke-width="8" fill="none" />
+          <circle cx="50" cy="50" r="${radius}" stroke="${color}" stroke-width="8" fill="none"
+            stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"
+            stroke-linecap="round" transform="rotate(-90 50 50)" />
+          <text x="50" y="56" font-family="sans-serif" font-size="18" font-weight="bold" fill="#0f172a" text-anchor="middle">${score}</text>
+        </svg>
+        <div style="font-size: 13px; color: #475569; font-weight: 600; margin-top: 5px;">${label}</div>
+      </div>
+    `;
+  };
+
+  // 🛡️ SVG Generator for Radar Chart
+  const getRadarSVG = (scores: any) => {
+    const t = scores.technical_proficiency || 0;
+    const r = scores.relevance_to_jd || 0;
+    const c = scores.communication || 0;
+    const cf = scores.confidence_level || 0;
+
+    const ptT = `100,${100 - t * 0.8}`;
+    const ptR = `${100 + r * 0.8},100`;
+    const ptC = `100,${100 + c * 0.8}`;
+    const ptCf = `${100 - cf * 0.8},100`;
+
+    return `
+      <div style="text-align: center; width: 100%; margin: 15px auto;">
+        <svg width="220" height="220" viewBox="0 0 200 200" style="margin: 0 auto; display: block;">
+          <polygon points="100,20 180,100 100,180 20,100" fill="none" stroke="#cbd5e1" stroke-width="1"/>
+          <polygon points="100,40 160,100 100,160 40,100" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/>
+          <polygon points="100,60 140,100 100,140 60,100" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/>
+          <polygon points="100,80 120,100 100,120 80,100" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/>
+          <line x1="100" y1="20" x2="100" y2="180" stroke="#cbd5e1" stroke-width="1"/>
+          <line x1="20" y1="100" x2="180" y2="100" stroke="#cbd5e1" stroke-width="1"/>
+          <polygon points="${ptT} ${ptR} ${ptC} ${ptCf}" fill="rgba(0, 240, 255, 0.25)" stroke="#00b4d8" stroke-width="2.5"/>
+          <circle cx="100" cy="${100 - t * 0.8}" r="4.5" fill="#00b4d8" />
+          <circle cx="${100 + r * 0.8}" cy="100" r="4.5" fill="#00b4d8" />
+          <circle cx="100" cy="${100 + c * 0.8}" r="4.5" fill="#00b4d8" />
+          <circle cx="${100 - cf * 0.8}" cy="100" r="4.5" fill="#00b4d8" />
+          <text x="100" y="12" font-family="sans-serif" font-size="10" font-weight="bold" fill="#334155" text-anchor="middle">Technical</text>
+          <text x="185" y="104" font-family="sans-serif" font-size="10" font-weight="bold" fill="#334155" text-anchor="start">Relevance</text>
+          <text x="100" y="195" font-family="sans-serif" font-size="10" font-weight="bold" fill="#334155" text-anchor="middle">Comm</text>
+          <text x="15" y="104" font-family="sans-serif" font-size="10" font-weight="bold" fill="#334155" text-anchor="end">Confidence</text>
+        </svg>
+      </div>
+    `;
+  };
+
   const generateProfessionalHTML = () => {
     if (!result) return "";
     const sessionUrl = window.location.href;
@@ -311,26 +365,25 @@ export default function ResultPage() {
         <meta charset='utf-8'>
         <title>${result.candidateName} - ForgePro Evaluation</title>
         <style>
-          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1a1a1a; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 40px 20px; background: #ffffff; }
-          .header { text-align: center; border-bottom: 2px solid #00f0ff; padding-bottom: 20px; margin-bottom: 30px; }
-          .logo { font-size: 26px; font-weight: 900; color: #111; letter-spacing: 2px; }
-          .logo-accent { color: #00f0ff; }
-          h1 { color: #111; margin-bottom: 5px; font-size: 28px; }
-          .meta { color: #555; font-size: 14px; font-weight: 500; }
-          h2 { color: #111; border-bottom: 1px solid #eaeaea; padding-bottom: 8px; margin-top: 35px; font-size: 20px; }
-          .verdict-box { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 5px solid #00f0ff; padding: 20px; margin-bottom: 25px; border-radius: 6px; }
-          .verdict-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: bold; margin-bottom: 5px; }
-          .verdict-value { font-size: 24px; font-weight: bold; color: #0f172a; }
-          .scores { background: #f8fafc; padding: 20px; border-radius: 6px; border: 1px solid #e2e8f0; }
-          .scores ul { list-style: none; padding: 0; margin: 0; }
-          .scores li { margin-bottom: 10px; font-size: 15px; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px; }
-          .scores strong { color: #334155; display: inline-block; width: 220px; }
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1e293b; line-height: 1.6; max-width: 850px; margin: 0 auto; padding: 40px; background: #ffffff; }
+          .header { text-align: center; border-bottom: 2px solid #00b4d8; padding-bottom: 20px; margin-bottom: 30px; }
+          .logo { font-size: 26px; font-weight: 900; color: #0f172a; letter-spacing: 1.5px; }
+          .logo-accent { color: #00b4d8; }
+          h1 { color: #0f172a; margin-bottom: 5px; font-size: 32px; }
+          .meta { color: #64748b; font-size: 14px; font-weight: 500; }
+          h2 { color: #0f172a; border-bottom: 2px solid #f1f5f9; padding-bottom: 8px; margin-top: 40px; font-size: 20px; text-transform: uppercase; letter-spacing: 0.5px;}
+          .verdict-box { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 6px solid #00b4d8; padding: 25px; margin-bottom: 25px; border-radius: 8px; }
+          .verdict-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: 700; margin-bottom: 5px; }
+          .verdict-value { font-size: 26px; font-weight: 800; color: #0f172a; }
+          .dashboard-container { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; background: #f8fafc; padding: 25px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 20px; }
+          .rings-container { display: flex; flex-wrap: wrap; justify-content: center; width: 100%; max-width: 400px;}
+          .scores-text { width: 100%; margin-top: 20px; padding-top: 15px; border-top: 1px dashed #cbd5e1; }
           ul.list { padding-left: 20px; color: #334155; }
           ul.list li { margin-bottom: 8px; }
-          .justification { background: #f8fafc; padding: 20px; border-radius: 6px; font-style: italic; color: #475569; border: 1px solid #e2e8f0; }
-          .cta-box { text-align: center; margin-top: 50px; padding: 30px; background: #0f172a; border-radius: 8px; }
-          .cta-text { color: #cbd5e1; margin-bottom: 15px; font-size: 14px; }
-          .cta-btn { display: inline-block; background: #00f0ff; color: #0f172a; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: bold; font-size: 16px; }
+          .justification { background: #f8fafc; padding: 25px; border-radius: 8px; font-style: italic; color: #475569; border: 1px solid #e2e8f0; }
+          .cta-box { text-align: center; margin-top: 50px; padding: 35px; background: #0f172a; border-radius: 12px; }
+          .cta-text { color: #cbd5e1; margin-bottom: 20px; font-size: 15px; }
+          .cta-btn { display: inline-block; background: #00b4d8; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: bold; font-size: 16px; }
         </style>
       </head>
       <body>
@@ -342,21 +395,29 @@ export default function ResultPage() {
 
         <div class="verdict-box">
           <div class="verdict-title">Final Recommendation</div>
-          <div class="verdict-value">${result.hiring_recommendation} <span style="font-size: 16px; font-weight: normal; color: #64748b;">(${result.selection_status.toUpperCase()})</span></div>
+          <div class="verdict-value">${result.hiring_recommendation} <span style="font-size: 18px; font-weight: 600; color: #64748b;">(${result.selection_status.toUpperCase()})</span></div>
+          <div style="margin-top: 10px; font-size: 15px; color: #0f172a;"><strong>Readiness:</strong> ${result.candidate_status?.level}</div>
         </div>
 
         <h2>Executive Summary</h2>
-        <p style="color: #334155;">${result.candidate_overview}</p>
+        <p style="color: #334155; font-size: 15px;">${result.candidate_overview}</p>
 
-        <h2>Performance Metrics</h2>
-        <div class="scores">
-          <ul>
-            <li><strong>Overall Score:</strong> <span style="font-weight: bold; color: #00f0ff; font-size: 18px;">${result.scores.overall_score}/100</span></li>
-            <li><strong>Technical Proficiency:</strong> ${result.scores.technical_proficiency}/100</li>
-            <li><strong>Relevance to JD:</strong> ${result.scores.relevance_to_jd}/100</li>
-            <li><strong>Communication:</strong> ${result.scores.communication}/100</li>
-            <li><strong>Confidence Level:</strong> ${result.scores.confidence_level}/100</li>
-          </ul>
+        <h2>Performance Dashboard</h2>
+        <div class="dashboard-container">
+          <div style="flex: 1; min-width: 250px;">
+            ${getRadarSVG(result.scores)}
+          </div>
+          
+          <div class="rings-container">
+            ${getRingSVG(result.scores.technical_proficiency, "Technical", "#14b8a6")}
+            ${getRingSVG(result.scores.relevance_to_jd, "Relevance", "#8b5cf6")}
+            ${getRingSVG(result.scores.communication, "Communication", "#3b82f6")}
+            ${getRingSVG(result.scores.confidence_level || 0, "Confidence", "#f59e0b")}
+          </div>
+
+          <div class="scores-text">
+            <strong>Overall Score: <span style="color: #00b4d8;">${result.scores.overall_score}/100</span></strong>
+          </div>
         </div>
 
         <h2>Identified Strengths</h2>
@@ -375,7 +436,7 @@ export default function ResultPage() {
         </div>
 
         <div class="cta-box">
-          <div class="cta-text">Review the full AI telemetry, radar charts, and candidate video securely on the ForgePro dashboard.</div>
+          <div class="cta-text">Review the full AI telemetry, raw data, and candidate video securely on the ForgePro dashboard.</div>
           <a href="${sessionUrl}" class="cta-btn">▶ Access Secure Session Recording</a>
         </div>
       </body>
@@ -440,7 +501,7 @@ ${result.justification}
   };
 
   const exportPDF = () => {
-    toast.info("Generating PDF Document...");
+    toast.info("Generating beautiful PDF Document...");
     const element = document.createElement('div');
     element.innerHTML = generateProfessionalHTML();
     
@@ -449,7 +510,7 @@ ${result.justification}
     script.onload = () => {
       // @ts-ignore
       window.html2pdf().set({
-        margin: 10,
+        margin: [15, 10, 15, 10], // top, left, bottom, right
         filename: `${result?.candidateName.replace(/\s+/g, "_")}_ForgePro_Report.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true },
@@ -468,7 +529,6 @@ ${result.justification}
     a.click();
     URL.revokeObjectURL(url);
     setShowExportMenu(false);
-    toast.success(`Exported as ${ext.toUpperCase()}`);
   };
 
   if (loading) {
@@ -534,7 +594,6 @@ ${result.justification}
             </div>
           </motion.div>
 
-          {/* 🛡️ THE FIX: Added "relative z-50" to the Action Bar so the dropdown isn't blocked */}
           <motion.div variants={fadeUp} custom={0.5} className="relative z-50 flex flex-wrap items-center justify-between gap-4 p-4 glass rounded-xl border border-primary/10 shadow-sm">
             <div className="flex flex-wrap gap-2">
               <Button
