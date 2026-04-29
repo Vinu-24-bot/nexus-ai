@@ -174,7 +174,8 @@ async def transcribe_audio(file_path: str) -> str:
 
 async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000, groq_model: str = "llama-3.3-70b-versatile") -> dict:
     async with httpx.AsyncClient(timeout=60) as client:
-        payload = {"model": groq_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.2, "max_tokens": max_tokens}
+        # 🛡️ THE FIX: Temperature set to 0.0 for deterministic, reliable evaluation
+        payload = {"model": groq_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.0, "max_tokens": max_tokens}
         if force_json: payload["response_format"] = {"type": "json_object"}
         url = "https://api.groq.com/openai/v1/chat/completions"
         for attempt in range(3):
@@ -189,7 +190,11 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
 async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    if force_json: payload["generationConfig"] = {"responseMimeType": "application/json"}
+    
+    # 🛡️ THE FIX: Temperature set to 0.0 for Gemini as well
+    payload["generationConfig"] = {"temperature": 0.0}
+    if force_json: payload["generationConfig"]["responseMimeType"] = "application/json"
+    
     async with httpx.AsyncClient(timeout=60) as client:
         for attempt in range(3):
             resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
@@ -204,7 +209,8 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
 async def _call_groq_text(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=30) as client:
         url = "https://api.groq.com/openai/v1/chat/completions"
-        resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 1000})
+        # 🛡️ THE FIX: Temperature set to 0.0 for text generation too
+        resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.0, "max_tokens": 1000})
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
 
