@@ -6,7 +6,7 @@ import {
   HelpCircle, FileText, Sparkles, Loader2, Play, Pause,
   Smile, Meh, Frown, Shield, Download, Copy, UserCheck, UserX, ShieldAlert,
   Clock, Maximize, Minimize, Rewind, FastForward, Volume2, VolumeX, Settings,
-  VideoOff
+  VideoOff, ChevronDown
 } from "lucide-react";
 import { getEvaluation, updateSelectionStatus } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
@@ -266,6 +266,10 @@ export default function ResultPage() {
   const { id } = useParams();
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [loading, setLoading] = useState(true);
+  
+  // State for the Export Dropdown
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -276,6 +280,17 @@ export default function ResultPage() {
       })
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Handle clicking outside the export dropdown to close it
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleStatusChange = async (status: "selected" | "rejected" | "hold" | "doubtful" | "pending") => {
     if (!id || !result) return;
@@ -288,17 +303,177 @@ export default function ResultPage() {
     }
   };
 
-  const handleExport = () => {
+  // 🛡️ THE EXPORT ENGINE: Professional HTML generation for PDF/DOCX/HTML
+  const generateProfessionalHTML = () => {
+    if (!result) return "";
+    const sessionUrl = window.location.href;
+    
+    return `
+      <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+      <head>
+        <meta charset='utf-8'>
+        <title>${result.candidateName} - ForgePro Evaluation</title>
+        <style>
+          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1a1a1a; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 40px 20px; background: #ffffff; }
+          .header { text-align: center; border-bottom: 2px solid #00f0ff; padding-bottom: 20px; margin-bottom: 30px; }
+          .logo { font-size: 26px; font-weight: 900; color: #111; letter-spacing: 2px; }
+          .logo-accent { color: #00f0ff; }
+          h1 { color: #111; margin-bottom: 5px; font-size: 28px; }
+          .meta { color: #555; font-size: 14px; font-weight: 500; }
+          h2 { color: #111; border-bottom: 1px solid #eaeaea; padding-bottom: 8px; margin-top: 35px; font-size: 20px; }
+          .verdict-box { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 5px solid #00f0ff; padding: 20px; margin-bottom: 25px; border-radius: 6px; }
+          .verdict-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #64748b; font-weight: bold; margin-bottom: 5px; }
+          .verdict-value { font-size: 24px; font-weight: bold; color: #0f172a; }
+          .scores { background: #f8fafc; padding: 20px; border-radius: 6px; border: 1px solid #e2e8f0; }
+          .scores ul { list-style: none; padding: 0; margin: 0; }
+          .scores li { margin-bottom: 10px; font-size: 15px; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px; }
+          .scores strong { color: #334155; display: inline-block; width: 220px; }
+          ul.list { padding-left: 20px; color: #334155; }
+          ul.list li { margin-bottom: 8px; }
+          .justification { background: #f8fafc; padding: 20px; border-radius: 6px; font-style: italic; color: #475569; border: 1px solid #e2e8f0; }
+          .cta-box { text-align: center; margin-top: 50px; padding: 30px; background: #0f172a; border-radius: 8px; }
+          .cta-text { color: #cbd5e1; margin-bottom: 15px; font-size: 14px; }
+          .cta-btn { display: inline-block; background: #00f0ff; color: #0f172a; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: bold; font-size: 16px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="logo">BATS FORGE<span class="logo-accent">PRO</span></div>
+          <h1>${result.candidateName}</h1>
+          <div class="meta">Role: ${result.position} | ID: ${result.id} | Date: ${result.date}</div>
+        </div>
+
+        <div class="verdict-box">
+          <div class="verdict-title">Final Recommendation</div>
+          <div class="verdict-value">${result.hiring_recommendation} <span style="font-size: 16px; font-weight: normal; color: #64748b;">(${result.selection_status.toUpperCase()})</span></div>
+        </div>
+
+        <h2>Executive Summary</h2>
+        <p style="color: #334155;">${result.candidate_overview}</p>
+
+        <h2>Performance Metrics</h2>
+        <div class="scores">
+          <ul>
+            <li><strong>Overall Score:</strong> <span style="font-weight: bold; color: #00f0ff; font-size: 18px;">${result.scores.overall_score}/100</span></li>
+            <li><strong>Technical Proficiency:</strong> ${result.scores.technical_proficiency}/100</li>
+            <li><strong>Relevance to JD:</strong> ${result.scores.relevance_to_jd}/100</li>
+            <li><strong>Communication:</strong> ${result.scores.communication}/100</li>
+            <li><strong>Confidence Level:</strong> ${result.scores.confidence_level}/100</li>
+          </ul>
+        </div>
+
+        <h2>Identified Strengths</h2>
+        <ul class="list">
+          ${result.strengths.map(s => `<li>${s}</li>`).join('')}
+        </ul>
+
+        <h2>Red Flags & Gaps</h2>
+        <ul class="list">
+          ${result.red_flags_or_weaknesses.map(w => `<li>${w}</li>`).join('')}
+        </ul>
+
+        <h2>Manager Justification</h2>
+        <div class="justification">
+          ${result.justification}
+        </div>
+
+        <div class="cta-box">
+          <div class="cta-text">Review the full AI telemetry, radar charts, and candidate video securely on the ForgePro dashboard.</div>
+          <a href="${sessionUrl}" class="cta-btn">▶ Access Secure Session Recording</a>
+        </div>
+      </body>
+      </html>
+    `;
+  };
+
+  const exportJSON = () => {
     if (!result) return;
-    const data = JSON.stringify(result, null, 2);
-    const blob = new Blob([data], { type: "application/json" });
+    const dataToExport = { ...result, secure_session_link: window.location.href };
+    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: "application/json" });
+    downloadBlob(blob, "json");
+  };
+
+  const exportHTML = () => {
+    const blob = new Blob([generateProfessionalHTML()], { type: "text/html" });
+    downloadBlob(blob, "html");
+  };
+
+  const exportDOCX = () => {
+    // DOCX trick: Wrapping HTML in 'application/msword' makes MS Word parse it perfectly
+    const blob = new Blob(['\ufeff', generateProfessionalHTML()], { type: "application/msword" });
+    downloadBlob(blob, "doc");
+  };
+
+  const exportTXT = () => {
+    if (!result) return;
+    const text = `
+BATS FORGEPRO EVALUATION REPORT
+--------------------------------------------------
+Candidate: ${result.candidateName}
+Role: ${result.position}
+Date: ${result.date}
+Candidate ID: ${result.id}
+
+RECOMMENDATION: ${result.hiring_recommendation} (${result.selection_status.toUpperCase()})
+OVERALL SCORE: ${result.scores.overall_score}/100
+
+▶ VIEW SECURE SESSION RECORDING: ${window.location.href}
+--------------------------------------------------
+
+EXECUTIVE SUMMARY:
+${result.candidate_overview}
+
+SCORES:
+- Technical Proficiency: ${result.scores.technical_proficiency}/100
+- Relevance to JD: ${result.scores.relevance_to_jd}/100
+- Communication: ${result.scores.communication}/100
+- Confidence Level: ${result.scores.confidence_level}/100
+
+STRENGTHS:
+${result.strengths.map(s => `- ${s}`).join('\n')}
+
+RED FLAGS:
+${result.red_flags_or_weaknesses.map(w => `- ${w}`).join('\n')}
+
+JUSTIFICATION:
+${result.justification}
+    `.trim();
+    
+    const blob = new Blob([text], { type: "text/plain" });
+    downloadBlob(blob, "txt");
+  };
+
+  const exportPDF = () => {
+    toast.info("Generating PDF Document...");
+    const element = document.createElement('div');
+    element.innerHTML = generateProfessionalHTML();
+    
+    // Dynamically inject html2pdf to keep the build lightweight
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    script.onload = () => {
+      // @ts-ignore
+      window.html2pdf().set({
+        margin: 10,
+        filename: `${result?.candidateName.replace(/\s+/g, "_")}_ForgePro_Report.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      }).from(element).save().then(() => toast.success("PDF Downloaded successfully!"));
+    };
+    document.body.appendChild(script);
+  };
+
+  const downloadBlob = (blob: Blob, ext: string) => {
+    if (!result) return;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${result.id}_${result.candidateName.replace(/\s+/g, "_")}.json`;
+    a.download = `${result.candidateName.replace(/\s+/g, "_")}_ForgePro_Report.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success("Evaluation exported successfully!");
+    setShowExportMenu(false);
+    toast.success(`Exported as ${ext.toUpperCase()}`);
   };
 
   if (loading) {
@@ -342,7 +517,6 @@ export default function ResultPage() {
                   {result.position}
                 </p>
                 <div className="flex items-center gap-3 mt-2">
-                  {/* 🛡️ THE FIX: Interactive Click-to-Copy ID element */}
                   <button 
                     onClick={() => { navigator.clipboard.writeText(result.id); toast.success("Candidate ID copied!"); }}
                     className="flex items-center gap-1.5 text-xs px-2 py-1 bg-muted rounded-md text-muted-foreground font-mono border border-border/50 hover:bg-primary/10 hover:text-primary hover:border-primary/30 transition-all cursor-pointer group"
@@ -371,7 +545,7 @@ export default function ResultPage() {
                 variant={result.selection_status === "selected" ? "default" : "outline"}
                 size="sm"
                 onClick={() => handleStatusChange("selected")}
-                className={result.selection_status === "selected" ? "bg-nexus-green hover:bg-nexus-green/90 text-background shadow-[0_0_10px_rgba(34,197,94,0.3)]" : "hover:text-nexus-green hover:border-nexus-green hover:bg-nexus-green/10"}
+                className={result.selection_status === "selected" ? "bg-green-600 hover:bg-green-700 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]" : "hover:text-green-500 hover:border-green-500 hover:bg-green-500/10"}
               >
                 <UserCheck className="w-4 h-4 mr-2" /> Select
               </Button>
@@ -379,7 +553,7 @@ export default function ResultPage() {
                 variant={result.selection_status === "rejected" ? "destructive" : "outline"}
                 size="sm"
                 onClick={() => handleStatusChange("rejected")}
-                className={result.selection_status === "rejected" ? "shadow-[0_0_10px_rgba(239,68,68,0.3)]" : "hover:text-nexus-red hover:border-nexus-red hover:bg-nexus-red/10"}
+                className={result.selection_status === "rejected" ? "shadow-[0_0_10px_rgba(239,68,68,0.3)]" : "hover:text-red-500 hover:border-red-500 hover:bg-red-500/10"}
               >
                 <UserX className="w-4 h-4 mr-2" /> Reject
               </Button>
@@ -395,7 +569,7 @@ export default function ResultPage() {
                 variant={result.selection_status === "doubtful" ? "default" : "outline"}
                 size="sm"
                 onClick={() => handleStatusChange("doubtful")}
-                className={result.selection_status === "doubtful" ? "bg-nexus-amber hover:bg-nexus-amber/90 text-background shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "hover:text-nexus-amber hover:border-nexus-amber hover:bg-nexus-amber/10"}
+                className={result.selection_status === "doubtful" ? "bg-orange-600 hover:bg-orange-700 text-white shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "hover:text-orange-500 hover:border-orange-500 hover:bg-orange-500/10"}
               >
                 <HelpCircle className="w-4 h-4 mr-2" /> Doubtful
               </Button>
@@ -406,11 +580,37 @@ export default function ResultPage() {
                 </Button>
               )}
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={handleExport} className="text-muted-foreground hover:text-primary">
-                <Download className="w-4 h-4 mr-2" /> Export JSON
+            
+            {/* 🛡️ THE FIX: Professional Export Dropdown Engine */}
+            <div className="relative ml-auto" ref={dropdownRef}>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setShowExportMenu(!showExportMenu)} 
+                className="text-muted-foreground hover:text-primary transition-all"
+              >
+                <Download className="w-4 h-4 mr-1.5" /> Export <ChevronDown className="w-3 h-3 ml-1" />
               </Button>
-              {/* 🛡️ THE FIX: Redundant 'Copy ID' button removed here */}
+              
+              {showExportMenu && (
+                <div className="absolute right-0 mt-2 w-44 bg-card border border-border/50 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.5)] overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
+                  <button onClick={exportPDF} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
+                    PDF Document
+                  </button>
+                  <button onClick={exportDOCX} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
+                    Word (DOCX)
+                  </button>
+                  <button onClick={exportHTML} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
+                    HTML Webpage
+                  </button>
+                  <button onClick={exportTXT} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
+                    Plain Text
+                  </button>
+                  <button onClick={exportJSON} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors">
+                    Raw JSON
+                  </button>
+                </div>
+              )}
             </div>
           </motion.div>
 
@@ -503,30 +703,30 @@ export default function ResultPage() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6 border border-nexus-green/20 bg-gradient-to-b from-nexus-green/5 to-transparent shadow-sm">
+            <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6 border border-green-500/20 bg-gradient-to-b from-green-500/5 to-transparent shadow-sm">
               <div className="flex items-center gap-2 mb-6">
-                <CheckCircle2 className="w-5 h-5 text-nexus-green" />
+                <CheckCircle2 className="w-5 h-5 text-green-500" />
                 <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Identified Strengths</h2>
               </div>
               <ul className="space-y-4">
                 {result.strengths.map((s, i) => (
                   <li key={i} className="flex gap-3 text-sm text-foreground/90">
-                    <span className="w-1.5 h-1.5 rounded-full bg-nexus-green mt-2 shrink-0 shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 mt-2 shrink-0 shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
                     {s}
                   </li>
                 ))}
               </ul>
             </motion.div>
             
-            <motion.div variants={fadeUp} custom={4} className="glass rounded-xl p-6 border border-nexus-red/20 bg-gradient-to-b from-nexus-red/5 to-transparent shadow-sm">
+            <motion.div variants={fadeUp} custom={4} className="glass rounded-xl p-6 border border-red-500/20 bg-gradient-to-b from-red-500/5 to-transparent shadow-sm">
               <div className="flex items-center gap-2 mb-6">
-                <AlertTriangle className="w-5 h-5 text-nexus-red" />
+                <AlertTriangle className="w-5 h-5 text-red-500" />
                 <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Red Flags & Gaps</h2>
               </div>
               <ul className="space-y-4">
                 {result.red_flags_or_weaknesses.map((w, i) => (
                   <li key={i} className="flex gap-3 text-sm text-foreground/90">
-                    <span className="w-1.5 h-1.5 rounded-full bg-nexus-red mt-2 shrink-0 shadow-[0_0_5px_rgba(239,68,68,0.5)]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-2 shrink-0 shadow-[0_0_5px_rgba(239,68,68,0.5)]" />
                     {w}
                   </li>
                 ))}
@@ -534,16 +734,16 @@ export default function ResultPage() {
             </motion.div>
           </div>
 
-          <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6 border-l-4 border-l-nexus-purple shadow-sm">
+          <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6 border-l-4 border-l-accent shadow-sm">
             <div className="flex items-center gap-2 mb-4">
-              <HelpCircle className="w-5 h-5 text-nexus-purple" />
+              <HelpCircle className="w-5 h-5 text-accent" />
               <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Suggested Follow-Up Questions</h2>
             </div>
             <p className="text-xs text-muted-foreground mb-4">Auto-generated by the ForgePro agent based on vague answers in the transcript.</p>
             <div className="space-y-3">
               {result.dynamic_follow_up_questions.map((q, i) => (
                 <div key={i} className="flex gap-3 p-4 rounded-lg bg-muted/30 border border-border/50">
-                  <MessageSquare className="w-4 h-4 text-nexus-purple mt-0.5 shrink-0" />
+                  <MessageSquare className="w-4 h-4 text-accent mt-0.5 shrink-0" />
                   <span className="text-sm font-medium text-foreground/90">{q}</span>
                 </div>
               ))}
