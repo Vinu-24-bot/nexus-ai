@@ -5,7 +5,8 @@ import {
   ArrowLeft, CheckCircle2, AlertTriangle, MessageSquare,
   HelpCircle, FileText, Sparkles, Loader2, Play, Pause,
   Smile, Meh, Frown, Shield, Download, Copy, UserCheck, UserX, ShieldAlert,
-  Clock, Maximize, Minimize, Rewind, FastForward, Volume2, VolumeX, Settings
+  Clock, Maximize, Minimize, Rewind, FastForward, Volume2, VolumeX, Settings,
+  VideoOff
 } from "lucide-react";
 import { getEvaluation, updateSelectionStatus } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
@@ -34,20 +35,19 @@ const sentimentIcon = {
 };
 
 const sentimentColor = {
-  Positive: "text-green-500 bg-green-500/10 border-green-500/20",
-  Neutral: "text-blue-500 bg-blue-500/10 border-blue-500/20",
-  Negative: "text-red-500 bg-red-500/10 border-red-500/20",
+  Positive: "text-nexus-green bg-nexus-green/10 border-nexus-green/20",
+  Neutral: "text-nexus-amber bg-nexus-amber/10 border-nexus-amber/20",
+  Negative: "text-nexus-red bg-nexus-red/10 border-nexus-red/20",
 };
 
 const statusStyles: Record<string, string> = {
-  pending: "text-yellow-500 bg-yellow-500/10 border-yellow-500/30",
-  selected: "text-green-500 bg-green-500/10 border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.15)]",
-  rejected: "text-red-500 bg-red-500/10 border-red-500/30",
+  pending: "text-nexus-amber bg-nexus-amber/10 border-nexus-amber/30",
+  selected: "text-nexus-green bg-nexus-green/10 border-nexus-green/30 shadow-[0_0_10px_rgba(34,197,94,0.15)]",
+  rejected: "text-nexus-red bg-nexus-red/10 border-nexus-red/30",
   hold: "text-blue-500 bg-blue-500/10 border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.15)]",
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE FIX: Pure Streaming Player trusting the FastAPI Backend
 const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -61,40 +61,26 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
-  const [isBuffering, setIsBuffering] = useState(false);
+  const [hasError, setHasError] = useState(false);
 
   const togglePlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) videoRef.current.pause();
-      else videoRef.current.play();
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
-    const vid = e.currentTarget;
-    // Fix Chrome's WebM duration bug by seeking to the end.
-    // Because the backend now perfectly supports HTTP Range requests, this works instantly!
-    if (vid.duration === Infinity || isNaN(vid.duration)) {
-      vid.currentTime = 1e99;
-      vid.onseeked = () => {
-        vid.onseeked = null;
-        vid.currentTime = 0;
-      };
+    if (hasError || !videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
     } else {
-      setDuration(vid.duration);
+      videoRef.current.play().catch(() => setHasError(true));
     }
+    setIsPlaying(!isPlaying);
   };
 
   const handleTimeUpdate = () => {
+    if (hasError || !videoRef.current || isScrubbing) return;
+    
     const vid = videoRef.current;
-    if (!vid) return;
-
     setCurrentTime(vid.currentTime);
-
-    // Dynamically update duration if the metadata trick was still catching up
+    
     let d = vid.duration;
-    if (isNaN(d) || d === Infinity || d === 0) {
+    if (isNaN(d) || d === Infinity) {
       if (vid.buffered && vid.buffered.length > 0) {
         d = vid.buffered.end(vid.buffered.length - 1);
       }
@@ -102,9 +88,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
 
     if (d > 0 && d !== Infinity) {
       setDuration(d);
-      if (!isScrubbing) {
-        setProgress((vid.currentTime / d) * 100);
-      }
+      setProgress((vid.currentTime / d) * 100);
     }
   };
 
@@ -112,16 +96,17 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
     const newProgress = Number(e.target.value);
     setProgress(newProgress);
     if (videoRef.current && duration > 0) {
-      videoRef.current.currentTime = (newProgress / 100) * duration;
+      const newTime = (newProgress / 100) * duration;
+      videoRef.current.currentTime = newTime;
+      setCurrentTime(newTime);
     }
   };
 
   const skip = (amount: number) => {
-    if (videoRef.current) {
-      const newTime = Math.max(0, videoRef.current.currentTime + amount);
-      videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
-    }
+    if (hasError || !videoRef.current) return;
+    const newTime = Math.max(0, videoRef.current.currentTime + amount);
+    videoRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
   };
 
   const toggleMute = () => {
@@ -171,24 +156,28 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
+  if (hasError) {
+    return (
+      <div className="relative group w-full aspect-video bg-muted/30 rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-destructive/30 border-dashed">
+        <VideoOff className="w-10 h-10 text-destructive/50 mb-3" />
+        <p className="text-sm font-semibold text-foreground tracking-wide">Video Unavailable</p>
+        <p className="text-xs text-muted-foreground mt-1 max-w-sm text-center px-4">
+          This recording was deleted from the server storage (likely due to a backend redeployment on a free tier host). Please configure Cloud Storage in your backend.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} className="relative group w-full bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
       
-      {isBuffering && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
-          <Loader2 className="w-8 h-8 animate-spin text-primary opacity-80" />
-        </div>
-      )}
-
       <video 
         ref={videoRef} 
         src={src} 
         className="w-full max-h-[600px] cursor-pointer outline-none" 
         onClick={togglePlay} 
-        onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate} 
-        onWaiting={() => setIsBuffering(true)}
-        onCanPlay={() => setIsBuffering(false)}
+        onError={() => setHasError(true)} 
         preload="metadata"
       />
       
@@ -202,7 +191,6 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
 
       <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 pt-12 transition-opacity duration-300 ${isPlaying && !isScrubbing ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
         
-        {/* Playback Scrubber */}
         <div className="relative w-full h-1.5 bg-white/20 rounded-full mb-3 cursor-pointer group/progress">
           <input 
             type="range" min="0" max="100" step="0.1"
@@ -326,11 +314,12 @@ export default function ResultPage() {
   const SentimentIconComp = sentimentIcon[result.sentiment?.rating as keyof typeof sentimentIcon] || Meh;
   const sentClr = sentimentColor[result.sentiment?.rating as keyof typeof sentimentColor] || sentimentColor.Neutral;
   
-  // Directly point the player to the Backend Streaming Endpoint
+  // Directly point the player to the Backend Streaming Endpoint or Absolute Hugging Face URL
   const rawVideoFiles = result.video_filename?.split(", ").filter(Boolean) || [];
   const videoFiles = rawVideoFiles.map((f) => {
     const cleanName = f.replace(/^\[.*?\]\s*/, "");
-    return { name: cleanName, url: `${API_BASE}/api/stream/${encodeURIComponent(cleanName)}` };
+    const url = cleanName.startsWith("http") ? cleanName : `${API_BASE}/api/stream/${encodeURIComponent(cleanName)}`;
+    return { name: cleanName.split("/").pop() || cleanName, url };
   });
 
   return (
@@ -377,7 +366,7 @@ export default function ResultPage() {
                 variant={result.selection_status === "selected" ? "default" : "outline"}
                 size="sm"
                 onClick={() => handleStatusChange("selected")}
-                className={result.selection_status === "selected" ? "bg-green-600 hover:bg-green-700 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]" : "hover:text-green-500 hover:border-green-500 hover:bg-green-500/10"}
+                className={result.selection_status === "selected" ? "bg-nexus-green hover:bg-nexus-green/90 text-background shadow-[0_0_10px_rgba(34,197,94,0.3)]" : "hover:text-nexus-green hover:border-nexus-green hover:bg-nexus-green/10"}
               >
                 <UserCheck className="w-4 h-4 mr-2" /> Select
               </Button>
@@ -385,7 +374,7 @@ export default function ResultPage() {
                 variant={result.selection_status === "rejected" ? "destructive" : "outline"}
                 size="sm"
                 onClick={() => handleStatusChange("rejected")}
-                className={result.selection_status === "rejected" ? "shadow-[0_0_10px_rgba(239,68,68,0.3)]" : "hover:text-red-500 hover:border-red-500 hover:bg-red-500/10"}
+                className={result.selection_status === "rejected" ? "shadow-[0_0_10px_rgba(239,68,68,0.3)]" : "hover:text-nexus-red hover:border-nexus-red hover:bg-nexus-red/10"}
               >
                 <UserX className="w-4 h-4 mr-2" /> Reject
               </Button>
@@ -401,7 +390,7 @@ export default function ResultPage() {
                 variant={result.selection_status === "doubtful" ? "default" : "outline"}
                 size="sm"
                 onClick={() => handleStatusChange("doubtful")}
-                className={result.selection_status === "doubtful" ? "bg-orange-600 hover:bg-orange-700 text-white shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "hover:text-orange-500 hover:border-orange-500 hover:bg-orange-500/10"}
+                className={result.selection_status === "doubtful" ? "bg-nexus-amber hover:bg-nexus-amber/90 text-background shadow-[0_0_10px_rgba(249,115,22,0.3)]" : "hover:text-nexus-amber hover:border-nexus-amber hover:bg-nexus-amber/10"}
               >
                 <HelpCircle className="w-4 h-4 mr-2" /> Doubtful
               </Button>
@@ -463,7 +452,7 @@ export default function ResultPage() {
                 <h2 className="text-sm font-bold text-foreground uppercase tracking-wider flex items-center gap-2">
                   <Shield className="w-4 h-4 text-muted-foreground" /> Readiness Level
                 </h2>
-                <div className="px-3 py-1 rounded-full text-xs font-bold border bg-accent/10 text-accent border-accent/20">
+                <div className="px-3 py-1 rounded-full text-xs font-bold border bg-primary/10 text-primary border-primary/20 inline-block">
                   {result.candidate_status?.level || "Pending"}
                 </div>
               </div>
@@ -511,30 +500,30 @@ export default function ResultPage() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6 border border-green-500/20 bg-gradient-to-b from-green-500/5 to-transparent shadow-sm">
+            <motion.div variants={fadeUp} custom={3} className="glass rounded-xl p-6 border border-nexus-green/20 bg-gradient-to-b from-nexus-green/5 to-transparent shadow-sm">
               <div className="flex items-center gap-2 mb-6">
-                <CheckCircle2 className="w-5 h-5 text-green-500" />
+                <CheckCircle2 className="w-5 h-5 text-nexus-green" />
                 <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Identified Strengths</h2>
               </div>
               <ul className="space-y-4">
                 {result.strengths.map((s, i) => (
                   <li key={i} className="flex gap-3 text-sm text-foreground/90">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 mt-2 shrink-0 shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-nexus-green mt-2 shrink-0 shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
                     {s}
                   </li>
                 ))}
               </ul>
             </motion.div>
             
-            <motion.div variants={fadeUp} custom={4} className="glass rounded-xl p-6 border border-red-500/20 bg-gradient-to-b from-red-500/5 to-transparent shadow-sm">
+            <motion.div variants={fadeUp} custom={4} className="glass rounded-xl p-6 border border-nexus-red/20 bg-gradient-to-b from-nexus-red/5 to-transparent shadow-sm">
               <div className="flex items-center gap-2 mb-6">
-                <AlertTriangle className="w-5 h-5 text-red-500" />
+                <AlertTriangle className="w-5 h-5 text-nexus-red" />
                 <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Red Flags & Gaps</h2>
               </div>
               <ul className="space-y-4">
                 {result.red_flags_or_weaknesses.map((w, i) => (
                   <li key={i} className="flex gap-3 text-sm text-foreground/90">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 mt-2 shrink-0 shadow-[0_0_5px_rgba(239,68,68,0.5)]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-nexus-red mt-2 shrink-0 shadow-[0_0_5px_rgba(239,68,68,0.5)]" />
                     {w}
                   </li>
                 ))}
@@ -542,16 +531,16 @@ export default function ResultPage() {
             </motion.div>
           </div>
 
-          <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6 border-l-4 border-l-accent shadow-sm">
+          <motion.div variants={fadeUp} custom={5} className="glass rounded-xl p-6 border-l-4 border-l-nexus-purple shadow-sm">
             <div className="flex items-center gap-2 mb-4">
-              <HelpCircle className="w-5 h-5 text-accent" />
+              <HelpCircle className="w-5 h-5 text-nexus-purple" />
               <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Suggested Follow-Up Questions</h2>
             </div>
             <p className="text-xs text-muted-foreground mb-4">Auto-generated by the ForgePro agent based on vague answers in the transcript.</p>
             <div className="space-y-3">
               {result.dynamic_follow_up_questions.map((q, i) => (
                 <div key={i} className="flex gap-3 p-4 rounded-lg bg-muted/30 border border-border/50">
-                  <MessageSquare className="w-4 h-4 text-accent mt-0.5 shrink-0" />
+                  <MessageSquare className="w-4 h-4 text-nexus-purple mt-0.5 shrink-0" />
                   <span className="text-sm font-medium text-foreground/90">{q}</span>
                 </div>
               ))}

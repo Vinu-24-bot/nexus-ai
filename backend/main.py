@@ -107,6 +107,40 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
     except Exception:
         return False
 
+# 🛡️ THE FIX: 100% Free Hugging Face Dataset Storage Engine
+def upload_to_hf(file_path: Path, filename: str) -> str:
+    hf_token = os.getenv("HF_TOKEN")
+    hf_repo_id = os.getenv("HF_REPO_ID") # e.g., "username/forgepro-recordings"
+
+    if not hf_token or not hf_repo_id:
+        return None  # Falls back to local storage if keys are missing
+
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        
+        repo_path = f"recordings/{filename}"
+        
+        # Uploads silently to your HF Dataset
+        api.upload_file(
+            path_or_fileobj=str(file_path),
+            path_in_repo=repo_path,
+            repo_id=hf_repo_id,
+            repo_type="dataset",
+            token=hf_token
+        )
+        
+        # Generates the raw, streamable download link from HF Cloudfront
+        cloud_url = f"https://huggingface.co/datasets/{hf_repo_id}/resolve/main/{repo_path}"
+        return cloud_url
+        
+    except ImportError:
+        print("[BATS ForgePro] huggingface_hub not installed. Skipping cloud backup.")
+        return None
+    except Exception as e:
+        print(f"[BATS ForgePro] HF Upload failed: {e}")
+        return None
+
 def send_system_email(to_email: str, subject: str, body: str):
     gas_url = os.getenv("GOOGLE_SCRIPT_URL")
     if not gas_url:
@@ -319,7 +353,6 @@ async def upload_resume(file: UploadFile = File(...)):
             import io
             doc = docx.Document(io.BytesIO(content))
             
-            # 🛡️ THE FIX: Upgraded DOCX extraction to include text from hidden tables!
             text_parts = []
             for p in doc.paragraphs:
                 if p.text.strip(): text_parts.append(p.text.strip())
@@ -333,7 +366,6 @@ async def upload_resume(file: UploadFile = File(...)):
         except ImportError:
             extracted_text = "[DOCX extraction requires python-docx.]"
 
-    # 🛡️ THE FIX: Removed the slow LLM JSON parser call. It now instantly returns the raw text!
     return ResumeUploadResponse(
         filename=safe_name, 
         path=str(file_path), 
@@ -372,14 +404,21 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
         final_transcript = req.transcript
         
         actual_video_filename = req.video_filename.replace("[UPLOADED]", "").strip() if req.video_filename else None
+        final_video_storage = req.video_filename
         
         if actual_video_filename:
             video_path = RECORDINGS_DIR / actual_video_filename
             if video_path.exists():
+                # Process local audio extraction and transcription
                 audio_path = RECORDINGS_DIR / f"{actual_video_filename}.mp3"
                 if extract_audio(str(video_path), str(audio_path)):
                     try: final_transcript = await transcribe_audio(str(audio_path))
                     except: pass
+
+                # 🛡️ Push to HF Dataset to prevent Render deletion
+                cloud_url = upload_to_hf(video_path, actual_video_filename)
+                if cloud_url:
+                    final_video_storage = f"[UPLOADED] {cloud_url}"
 
         behavior_data = {}
         clean_remarks = req.remarks or "Completed normally."
@@ -396,7 +435,7 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
         evaluation = Evaluation(
             id=candidate_id, candidate_name=req.candidate_name, position=req.position,
             job_description=req.job_description, resume=req.resume, transcript=final_transcript,
-            video_filename=req.video_filename, remarks=clean_remarks, 
+            video_filename=final_video_storage, remarks=clean_remarks, 
             candidate_overview=ai_result.get("candidate_overview", ""), scores=ai_result.get("scores", {}),
             sentiment=ai_result.get("sentiment", {"rating": "Neutral", "explanation": ""}),
             candidate_status=ai_result.get("candidate_status", {"level": "Moderate Confidence", "description": ""}),
