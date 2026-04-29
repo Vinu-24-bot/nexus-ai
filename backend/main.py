@@ -1,5 +1,5 @@
 """
-BATS ForgePro Interview Evaluator - Enterprise FastAPI Backend
+BATS ForgePro Interview Evaluator - Enterprise FastAPI Backend (Low-Memory Edition)
 """
 
 import os
@@ -9,9 +9,12 @@ import shutil
 import hashlib
 import subprocess
 import httpx
+import gc
+import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
+from concurrent.futures import ThreadPoolExecutor
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, BackgroundTasks, Request
@@ -99,29 +102,29 @@ def save_result_file(eval_id: str, candidate_name: str, result_data: dict):
         json.dump(result_data, f, indent=2, ensure_ascii=False)
     return str(filepath)
 
+# 🛡️ THE FIX: Restricted ffmpeg to 1 thread to prevent RAM spikes and OOM crashes
 def extract_audio(video_path: str, audio_path: str) -> bool:
     try:
-        command = ["ffmpeg", "-i", video_path, "-q:a", "0", "-map", "a", audio_path, "-y"]
+        command = ["ffmpeg", "-threads", "1", "-i", video_path, "-q:a", "0", "-map", "a", audio_path, "-y"]
         subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[BATS] Audio Extraction Error: {e}")
         return False
 
-# 🛡️ THE FIX: 100% Free Hugging Face Dataset Storage Engine
-def upload_to_hf(file_path: Path, filename: str) -> str:
+# 🛡️ THE FIX: Synchronous HF Upload function (Will be run in a thread pool below)
+def upload_to_hf_sync(file_path: Path, filename: str) -> str:
     hf_token = os.getenv("HF_TOKEN")
-    hf_repo_id = os.getenv("HF_REPO_ID") # e.g., "username/forgepro-recordings"
+    hf_repo_id = os.getenv("HF_REPO_ID")
 
     if not hf_token or not hf_repo_id:
-        return None  # Falls back to local storage if keys are missing
+        return None
 
     try:
         from huggingface_hub import HfApi
         api = HfApi()
-        
         repo_path = f"recordings/{filename}"
         
-        # Uploads silently to your HF Dataset
         api.upload_file(
             path_or_fileobj=str(file_path),
             path_in_repo=repo_path,
@@ -130,13 +133,7 @@ def upload_to_hf(file_path: Path, filename: str) -> str:
             token=hf_token
         )
         
-        # Generates the raw, streamable download link from HF Cloudfront
-        cloud_url = f"https://huggingface.co/datasets/{hf_repo_id}/resolve/main/{repo_path}"
-        return cloud_url
-        
-    except ImportError:
-        print("[BATS ForgePro] huggingface_hub not installed. Skipping cloud backup.")
-        return None
+        return f"https://huggingface.co/datasets/{hf_repo_id}/resolve/main/{repo_path}"
     except Exception as e:
         print(f"[BATS ForgePro] HF Upload failed: {e}")
         return None
@@ -144,24 +141,14 @@ def upload_to_hf(file_path: Path, filename: str) -> str:
 def send_system_email(to_email: str, subject: str, body: str):
     gas_url = os.getenv("GOOGLE_SCRIPT_URL")
     if not gas_url:
-        print(f"[BATS EMAIL FATAL] Missing GOOGLE_SCRIPT_URL. Cannot send to {to_email}.")
         return
 
-    payload = {
-        "to": to_email,
-        "subject": subject,
-        "body": body
-    }
-
+    payload = {"to": to_email, "subject": subject, "body": body}
     try:
         with httpx.Client(timeout=15.0) as client:
-            response = client.post(gas_url, json=payload)
-            if response.status_code == 200:
-                print(f"[BATS EMAIL SUCCESS] Delivered via Google Webhook to: {to_email}")
-            else:
-                print(f"[BATS EMAIL WARNING] Google Webhook returned: {response.status_code} - {response.text}")
-    except Exception as e:
-        print(f"[BATS EMAIL CRASH] Webhook Request failed: {e}")
+            client.post(gas_url, json=payload)
+    except Exception:
+        pass
 
 @app.get("/")
 async def root():
@@ -223,26 +210,11 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
     db.commit()
     db.refresh(new_session)
     
-    frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app")
-    frontend_url = frontend_url.rstrip('/')
+    frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app").rstrip('/')
     interview_link = f"{frontend_url}/interview/{new_session.id}"
+    talent_name = getattr(req, "talent_associate_name", None) or "The ForgePro Team"
 
-    talent_name = getattr(req, "talent_associate_name", None)
-    if not talent_name or str(talent_name).strip() == "":
-        talent_name = "The ForgePro Team"
-
-    candidate_body = f"""Hello {req.candidate_name},
-
-You have been invited to a BATS ForgePro Initial Screening for the {req.position} role ({req.interview_level}).
-
-Your Talent Associate, {talent_name}, has set up a secure interview vault for you. 
-Please ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.
-
-Start Interview: {interview_link}
-
-Best regards,
-{talent_name}
-BATS ForgePro Talent Acquisition"""
+    candidate_body = f"""Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro Initial Screening for the {req.position} role ({req.interview_level}).\n\nYour Talent Associate, {talent_name}, has set up a secure interview vault for you.\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest regards,\n{talent_name}\nBATS ForgePro Talent Acquisition"""
 
     background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
 
@@ -256,15 +228,9 @@ BATS ForgePro Talent Acquisition"""
 @app.get("/api/sessions/{session_id}")
 async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
-    
-    if not session: 
-        raise HTTPException(status_code=404, detail="This interview link does not exist.")
-    
-    if datetime.utcnow() - session.created_at > timedelta(hours=24):
-        raise HTTPException(status_code=403, detail="This interview link has expired (24-hour limit). Please contact your recruiter.")
-        
-    if session.status != "pending":
-        raise HTTPException(status_code=403, detail="This interview session has already been attempted or completed and is now permanently locked.")
+    if not session: raise HTTPException(status_code=404, detail="This interview link does not exist.")
+    if datetime.utcnow() - session.created_at > timedelta(hours=24): raise HTTPException(status_code=403, detail="This interview link has expired (24-hour limit). Please contact your recruiter.")
+    if session.status != "pending": raise HTTPException(status_code=403, detail="This interview session has already been attempted or completed and is now permanently locked.")
 
     return { "id": session.id, "candidate_name": session.candidate_name, "position": session.position, "job_description": session.job_description, "resume_text": session.resume_text, "interview_level": session.interview_level, "status": session.status }
 
@@ -281,18 +247,15 @@ async def update_session_status(session_id: str, request: Request, background_ta
     db.commit()
 
     if session.recruiter_email:
-        frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app")
-        frontend_url = frontend_url.rstrip('/')
+        frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app").rstrip('/')
         dashboard_link = f"{frontend_url}/dashboard"
         
         if status == "started":
             body = f"Alert: {session.candidate_name} has just joined the interview room and started their secure camera/screen-share.\n\nYou can monitor the active pipeline here: {dashboard_link}"
             background_tasks.add_task(send_system_email, session.recruiter_email, f"🟢 Started: {session.candidate_name}", body)
-            
         elif status == "completed":
             is_cheat = "SECURITY BREACH" in remarks
             is_leave = "left early" in remarks
-            
             if is_cheat:
                 subject = f"🚨 SECURITY TERMINATION: {session.candidate_name}"
                 body = f"URGENT ALERT: The interview for {session.candidate_name} was automatically TERMINATED by the BATS Anti-Cheat System.\n\nReason: {remarks}\n\nClick the link below to view the incident logs and dashboard:\n{dashboard_link}"
@@ -302,7 +265,6 @@ async def update_session_status(session_id: str, request: Request, background_ta
             else:
                 subject = f"✅ Session Concluded: {session.candidate_name}"
                 body = f"Update: {session.candidate_name} has successfully submitted their interview session.\n\nBATS ForgePro is finalizing the video processing and technical evaluation. Click the link below to view the results and export the data directly from your dashboard:\n{dashboard_link}"
-                
             background_tasks.add_task(send_system_email, session.recruiter_email, subject, body)
 
     return {"message": f"Status updated to {status}", "candidate": session.candidate_name}
@@ -321,6 +283,7 @@ async def upload_video(video: UploadFile = File(...)):
     safe_name = f"{timestamp}_{video.filename}"
     file_path = RECORDINGS_DIR / safe_name
     with open(file_path, "wb") as f: shutil.copyfileobj(video.file, f)
+    gc.collect() # 🛡️ RAM Flush
     return {"filename": safe_name, "path": f"recordings/{safe_name}", "size": file_path.stat().st_size, "timestamp": timestamp}
 
 @app.post("/api/upload-resume", response_model=ResumeUploadResponse)
@@ -352,26 +315,20 @@ async def upload_resume(file: UploadFile = File(...)):
             import docx
             import io
             doc = docx.Document(io.BytesIO(content))
-            
             text_parts = []
             for p in doc.paragraphs:
                 if p.text.strip(): text_parts.append(p.text.strip())
-                
             for table in doc.tables:
                 for row in table.rows:
                     row_text = " | ".join([cell.text.strip() for cell in row.cells if cell.text.strip()])
                     if row_text: text_parts.append(row_text)
-                    
             extracted_text = "\n".join(text_parts)
         except ImportError:
             extracted_text = "[DOCX extraction requires python-docx.]"
 
-    return ResumeUploadResponse(
-        filename=safe_name, 
-        path=str(file_path), 
-        extracted_text=extracted_text, 
-        size=len(content)
-    )
+    del content
+    gc.collect() # 🛡️ RAM Flush
+    return ResumeUploadResponse(filename=safe_name, path=str(file_path), extracted_text=extracted_text, size=file_path.stat().st_size)
 
 @app.post("/api/generate-questions")
 async def generate_questions(req: QuestionGenerationRequest):
@@ -402,23 +359,26 @@ async def acknowledge_answer(req: AcknowledgmentRequest):
 async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db)):
     try:
         final_transcript = req.transcript
-        
         actual_video_filename = req.video_filename.replace("[UPLOADED]", "").strip() if req.video_filename else None
         final_video_storage = req.video_filename
         
         if actual_video_filename:
             video_path = RECORDINGS_DIR / actual_video_filename
             if video_path.exists():
-                # Process local audio extraction and transcription
                 audio_path = RECORDINGS_DIR / f"{actual_video_filename}.mp3"
                 if extract_audio(str(video_path), str(audio_path)):
-                    try: final_transcript = await transcribe_audio(str(audio_path))
-                    except: pass
+                    try: 
+                        final_transcript = await transcribe_audio(str(audio_path))
+                    except: 
+                        pass
 
-                # 🛡️ Push to HF Dataset to prevent Render deletion
-                cloud_url = upload_to_hf(video_path, actual_video_filename)
+                # 🛡️ THE FIX: Offload HF Upload to a background thread so it doesn't freeze FastAPI/Render
+                cloud_url = await asyncio.to_thread(upload_to_hf_sync, video_path, actual_video_filename)
                 if cloud_url:
                     final_video_storage = f"[UPLOADED] {cloud_url}"
+
+        # 🛡️ Aggressive RAM Flush before the heavy AI Evaluation
+        gc.collect()
 
         behavior_data = {}
         clean_remarks = req.remarks or "Completed normally."
@@ -450,6 +410,8 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
 
         response_data = db_to_response(evaluation)
         save_result_file(evaluation.id, evaluation.candidate_name, response_data)
+        
+        gc.collect() # Final flush
         return response_data
 
     except ValueError as e:
