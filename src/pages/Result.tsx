@@ -267,7 +267,6 @@ export default function ResultPage() {
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // State for the Export Dropdown
   const [showExportMenu, setShowExportMenu] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -281,7 +280,6 @@ export default function ResultPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  // Handle clicking outside the export dropdown to close it
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -303,7 +301,6 @@ export default function ResultPage() {
     }
   };
 
-  // 🛡️ THE EXPORT ENGINE: Professional HTML generation for PDF/DOCX/HTML
   const generateProfessionalHTML = () => {
     if (!result) return "";
     const sessionUrl = window.location.href;
@@ -399,7 +396,6 @@ export default function ResultPage() {
   };
 
   const exportDOCX = () => {
-    // DOCX trick: Wrapping HTML in 'application/msword' makes MS Word parse it perfectly
     const blob = new Blob(['\ufeff', generateProfessionalHTML()], { type: "application/msword" });
     downloadBlob(blob, "doc");
   };
@@ -448,7 +444,6 @@ ${result.justification}
     const element = document.createElement('div');
     element.innerHTML = generateProfessionalHTML();
     
-    // Dynamically inject html2pdf to keep the build lightweight
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
     script.onload = () => {
@@ -539,7 +534,8 @@ ${result.justification}
             </div>
           </motion.div>
 
-          <motion.div variants={fadeUp} custom={0.5} className="flex flex-wrap items-center justify-between gap-4 p-4 glass rounded-xl border border-primary/10 shadow-sm">
+          {/* 🛡️ THE FIX: Added "relative z-50" to the Action Bar so the dropdown isn't blocked */}
+          <motion.div variants={fadeUp} custom={0.5} className="relative z-50 flex flex-wrap items-center justify-between gap-4 p-4 glass rounded-xl border border-primary/10 shadow-sm">
             <div className="flex flex-wrap gap-2">
               <Button
                 variant={result.selection_status === "selected" ? "default" : "outline"}
@@ -581,7 +577,6 @@ ${result.justification}
               )}
             </div>
             
-            {/* 🛡️ THE FIX: Professional Export Dropdown Engine */}
             <div className="relative ml-auto" ref={dropdownRef}>
               <Button 
                 variant="outline" 
