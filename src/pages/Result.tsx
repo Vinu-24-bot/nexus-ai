@@ -314,7 +314,6 @@ export default function ResultPage() {
   const SentimentIconComp = sentimentIcon[result.sentiment?.rating as keyof typeof sentimentIcon] || Meh;
   const sentClr = sentimentColor[result.sentiment?.rating as keyof typeof sentimentColor] || sentimentColor.Neutral;
   
-  // Directly point the player to the Backend Streaming Endpoint or Absolute Hugging Face URL
   const rawVideoFiles = result.video_filename?.split(", ").filter(Boolean) || [];
   const videoFiles = rawVideoFiles.map((f) => {
     const cleanName = f.replace(/^\[.*?\]\s*/, "");
@@ -343,9 +342,15 @@ export default function ResultPage() {
                   {result.position}
                 </p>
                 <div className="flex items-center gap-3 mt-2">
-                  <p className="text-xs px-2 py-1 bg-muted rounded-md text-muted-foreground font-mono border border-border/50">
+                  {/* 🛡️ THE FIX: Interactive Click-to-Copy ID element */}
+                  <button 
+                    onClick={() => { navigator.clipboard.writeText(result.id); toast.success("Candidate ID copied!"); }}
+                    className="flex items-center gap-1.5 text-xs px-2 py-1 bg-muted rounded-md text-muted-foreground font-mono border border-border/50 hover:bg-primary/10 hover:text-primary hover:border-primary/30 transition-all cursor-pointer group"
+                    title="Copy ID to Clipboard"
+                  >
                     ID: {result.id}
-                  </p>
+                    <Copy className="w-3 h-3 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  </button>
                   <p className="text-xs text-muted-foreground">
                     Evaluated on {result.date}
                   </p>
@@ -405,9 +410,7 @@ export default function ResultPage() {
               <Button variant="outline" size="sm" onClick={handleExport} className="text-muted-foreground hover:text-primary">
                 <Download className="w-4 h-4 mr-2" /> Export JSON
               </Button>
-              <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(result.id); toast.success("ID copied!"); }} className="text-muted-foreground hover:text-primary">
-                <Copy className="w-4 h-4 mr-2" /> Copy ID
-              </Button>
+              {/* 🛡️ THE FIX: Redundant 'Copy ID' button removed here */}
             </div>
           </motion.div>
 
