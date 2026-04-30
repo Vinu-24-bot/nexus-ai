@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, Square, ChevronRight, Loader2, Focus, ScanFace, Activity,
   Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck,
-  Eye, MousePointerClick, Keyboard, LogOut
+  Eye, MousePointerClick, Keyboard, LogOut, Timer
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -119,7 +119,7 @@ export default function InterviewPage() {
   const [aiMessage, setAiMessage] = useState("");
   
   const [liveTranscript, setLiveTranscript] = useState("");
-  const liveTranscriptRef = useRef(""); // 🛡️ THE FIX: Real-time memory to prevent auto-submit data loss
+  const liveTranscriptRef = useRef(""); 
   const [accumulatedTranscript, setAccumulatedTranscript] = useState(""); 
   
   const [totalElapsed, setTotalElapsed] = useState(0);
@@ -130,6 +130,11 @@ export default function InterviewPage() {
   const [terminationReason, setTerminationReason] = useState("");
   const [telemetry, setTelemetry] = useState({ faces: 1, liveness: 99, lipSync: true, mask: false });
   const [maskWarnings, setMaskWarnings] = useState(0);
+
+  // 🛡️ THE UPGRADE: Behavioral Latency Memory Tracking
+  const questionEndTimeRef = useRef(0);
+  const [currentLatencyDisplay, setCurrentLatencyDisplay] = useState("0.0s");
+  const latenciesRef = useRef<number[]>([]);
 
   const [rating, setRating] = useState(0);
   const [feedbackText, setFeedbackText] = useState("");
@@ -515,7 +520,16 @@ export default function InterviewPage() {
     
     // @ts-ignore
     recognition.onresult = (event) => {
-      lastSpeechRef.current = Date.now(); 
+      const now = Date.now();
+      
+      // 🛡️ THE UPGRADE: Track exact latency (hesitation) before they spoke
+      if (lastSpeechRef.current === recordingStartRef.current) {
+        const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
+        setCurrentLatencyDisplay(`${latencySecs}s`);
+        latenciesRef.current.push(parseFloat(latencySecs));
+      }
+
+      lastSpeechRef.current = now; 
       
       let interim = ""; let allFinal = "";
       for (let i = 0; i < event.results.length; i++) {
@@ -526,7 +540,6 @@ export default function InterviewPage() {
       
       const newText = (allFinal + interim).trim();
       
-      // 🛡️ THE FIX: Directly update the Ref instantly to prevent data loss on rapid clicks
       liveTranscriptRef.current = newText;
       setLiveTranscript(newText);
       
@@ -561,7 +574,6 @@ export default function InterviewPage() {
     if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
     
-    // 🛡️ THE FIX: Grab strictly from the Ref, NOT the lagging React state
     const currentText = liveTranscriptRef.current.trim();
     liveTranscriptRef.current = "";
     setLiveTranscript("");
@@ -574,6 +586,9 @@ export default function InterviewPage() {
     await speakText(questionText, voiceGender);
     setIsSpeaking(false);
     setAiMessage("");
+    // 🛡️ THE UPGRADE: Mark exactly when the AI finishes speaking
+    questionEndTimeRef.current = Date.now();
+    setCurrentLatencyDisplay("0.0s");
     setIsRecording(true);
     startSpeechRecognition();
   }, [voiceGender, startSpeechRecognition]);
@@ -631,6 +646,7 @@ export default function InterviewPage() {
     setAiMessage("");
 
     if (!isSufficient) {
+        questionEndTimeRef.current = Date.now();
         setIsRecording(true);
         startSpeechRecognition();
         return; 
@@ -640,11 +656,15 @@ export default function InterviewPage() {
     setAccumulatedTranscript(""); 
 
     if (introPhase) {
-      setIntroPhase(false); setCurrentQ(0); setIsRecording(true); startSpeechRecognition(); return;
+      setIntroPhase(false); setCurrentQ(0); 
+      questionEndTimeRef.current = Date.now();
+      setIsRecording(true); startSpeechRecognition(); return;
     }
 
     if (currentQ < totalQuestions - 1) {
-      setCurrentQ(nextIndex); setIsRecording(true); startSpeechRecognition();
+      setCurrentQ(nextIndex); 
+      questionEndTimeRef.current = Date.now();
+      setIsRecording(true); startSpeechRecognition();
     } else {
       finalizeInterviewAndUpload();
     }
@@ -707,13 +727,18 @@ export default function InterviewPage() {
         } catch {}
       }
 
+      // 🛡️ THE UPGRADE: Calculate average hesitation/latency and send to Backend Math Engine
+      const validLatencies = latenciesRef.current.filter(l => l > 0);
+      const avgLatency = validLatencies.length > 0 ? (validLatencies.reduce((a,b)=>a+b,0) / validLatencies.length).toFixed(1) : 0;
+
       const baseReason = forcedTerminationReason || "Completed normally.";
       const metricsPayload = JSON.stringify({
          tab_switches: clickWarningsRef.current,
          esc_presses: escWarningsRef.current,
          liveness_score: telemetry.liveness,
          faces_detected: telemetry.faces,
-         lip_sync_failed: !telemetry.lipSync
+         lip_sync_failed: !telemetry.lipSync,
+         avg_latency: parseFloat(avgLatency as string)
       });
       const hybridRemarks = `${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
@@ -892,9 +917,12 @@ export default function InterviewPage() {
                 <span className="text-muted-foreground">LIP SYNC</span>
                 <span className={telemetry.lipSync ? "text-green-500" : "text-destructive animate-pulse"}>{telemetry.lipSync ? "VERIFIED" : "FAILED"}</span>
               </div>
+              {/* 🛡️ THE UPGRADE: Live Latency Display */}
               <div className="flex justify-between items-center p-2 rounded bg-muted/50">
-                <span className="text-muted-foreground">FOCUS</span>
-                <span className="text-green-500">LOCKED</span>
+                <span className="text-muted-foreground flex items-center gap-1" title="Hesitation before answering">
+                  <Timer className="w-3 h-3" /> LATENCY
+                </span>
+                <span className={parseFloat(currentLatencyDisplay) > 2.0 ? "text-nexus-amber" : "text-green-500"}>{currentLatencyDisplay}</span>
               </div>
             </div>
           </div>
