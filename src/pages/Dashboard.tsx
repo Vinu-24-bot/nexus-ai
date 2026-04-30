@@ -146,19 +146,15 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
+  // 🛡️ THE FIX: Correctly filtered Selected Candidates based ONLY on Recruiter Status, not AI Recommendation
   const initialScreeningData = results.filter(r => !r.video_filename || !String(r.video_filename).includes("[UPLOADED]"));
   const l1TechRoundData = results.filter(r => r.video_filename && String(r.video_filename).includes("[UPLOADED]"));
-  const selectedData = results.filter(r => ["Strong Hire", "Lean Hire", "Selected"].includes(r.hiring_recommendation || ""));
-
-  let activeData: EvaluationResult[] = [];
-  if (activeTab === "initial") activeData = initialScreeningData;
-  else if (activeTab === "l1") activeData = l1TechRoundData;
-  else if (activeTab === "selected") activeData = selectedData;
+  const selectedData = results.filter(r => r.selection_status?.toLowerCase() === "selected");
 
   const calculateStats = (data: EvaluationResult[]) => {
     const total = data.length;
     const avg_score = total > 0 ? Math.round(data.reduce((s, r) => s + (r.scores?.overall_score || 0), 0) / total) : 0;
-    const strong_hires = data.filter((r) => ["Strong Hire", "Lean Hire", "Selected"].includes(r.hiring_recommendation || "")).length;
+    const strong_hires = data.filter((r) => ["Strong Hire", "Lean Hire"].includes(r.hiring_recommendation || "")).length;
     
     let pipeline_health = "Awaiting Data";
     if (total > 0) {
@@ -172,6 +168,11 @@ export default function DashboardPage() {
 
     return { total, avg_score, strong_hires, pipeline_health, top_scorer };
   };
+
+  let activeData: EvaluationResult[] = [];
+  if (activeTab === "initial") activeData = initialScreeningData;
+  else if (activeTab === "l1") activeData = l1TechRoundData;
+  else if (activeTab === "selected") activeData = selectedData;
 
   const displayStats = calculateStats(activeData);
 
