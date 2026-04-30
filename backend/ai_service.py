@@ -17,6 +17,8 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+# ─── UTILITY FUNCTIONS ──────────────────────────────────────
+
 def format_prompt(template: str, **kwargs) -> str:
     prompt = template
     for key, value in kwargs.items():
@@ -49,13 +51,15 @@ def _validate_result(result: dict) -> dict:
             raise ValueError(f"Missing required field: {field}")
     return result
 
+# ─── ENTERPRISE PROMPTS (RESTORED RAG ENGINE) ───────────
+
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
-You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, and the Interview Transcript.
+You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, the Interview Transcript, and the Behavioral Telemetry.
 
 *** ENTERPRISE EVALUATION PROTOCOL ***
-1. HYBRID MATCHING: If the [INTERVIEW_TRANSCRIPT] contains "(Pre-recorded interview video uploaded" or is very brief, this is an L1 Tech Round. You MUST heavily weigh the [CANDIDATE_RESUME] against the [JOB_DESCRIPTION] to grant their technical and relevance scores. Do NOT score them 0.
-2. LIVE INTERVIEW: If the transcript contains a full conversation, evaluate their spoken communication, confidence, and ability to answer questions clearly. 
-3. SCORING: Provide a highly accurate, fair, and justified score out of 100. Focus on technical competence.
+1. HYBRID MATCHING: heavily weigh the [CANDIDATE_RESUME] against the [JOB_DESCRIPTION] to grant technical scores.
+2. BEHAVIORAL ANALYSIS: Analyze the candidate's spoken communication. If the Telemetry shows high "avg_latency" (pausing before speaking), factor this into a lower Confidence Score.
+3. SCORING: Provide a highly accurate, fair, and justified score out of 100. 
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
@@ -69,7 +73,7 @@ Synthesize the findings reliably. Output ONLY valid JSON matching this exact str
   },
   "sentiment": {
     "rating": "Positive | Neutral | Negative",
-    "explanation": "Deep analysis of the candidate's tone, pacing, and emotional confidence."
+    "explanation": "Deep analysis of the candidate's tone, pacing, hesitation, and emotional confidence."
   },
   "candidate_status": {
     "level": "Strong Confidence | Moderate Confidence | Low Confidence | Needs Improvement",
@@ -79,7 +83,7 @@ Synthesize the findings reliably. Output ONLY valid JSON matching this exact str
   "red_flags_or_weaknesses": ["Specific technical gap or discrepancy 1", "Specific weakness 2"],
   "dynamic_follow_up_questions": ["Hard follow-up question based on their profile"],
   "hiring_recommendation": "Strong Hire | Lean Hire | Reject",
-  "justification": "A highly reliable, accurate, and detailed 2-paragraph explanation explicitly citing the candidate's resume and interview to justify the verdict."
+  "justification": "A highly reliable, accurate, and detailed 2-paragraph explanation explicitly citing the candidate's resume, interview, and response latency to justify the verdict."
 }
 
 [JOB_DESCRIPTION]
@@ -120,7 +124,7 @@ Output ONLY valid JSON:
 {resume}
 """
 
-# 🛡️ THE FIX: Smart, conversational logic rules so the AI accepts normal introductions
+# 🛡️ THE UPGRADE: Added Psychological Fillers for Maximum Realism
 DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite, highly realistic AI technical interviewer.
 You are conducting a live voice interview, mimicking a real Senior Engineer perfectly.
 
@@ -130,14 +134,15 @@ Next Question queued: {next_question}
 
 Your goal is to keep the interview flowing smoothly. 
 Analyze the Candidate's Answer:
-1. INTRODUCTIONS: If the answer is a greeting or introduction (e.g., "Hi, my name is...", "Hello, I am a developer"), warmly acknowledge it and IMMEDIATELY ask the [Next Question queued]. Set "is_sufficient": true.
-2. NORMAL ANSWERS: If they provide any valid response to the question, acknowledge it naturally and IMMEDIATELY ask the [Next Question queued]. Set "is_sufficient": true.
-3. SKIPS: If they say "I don't know" or "skip", say "No problem, let's move on," and ask the [Next Question queued]. Set "is_sufficient": true.
-4. SILENCE/EMPTY: If the answer is literally "<SILENCE>", completely empty, or they explicitly ask for a minute, say "I didn't quite catch that. Take your time..." Set "is_sufficient": false.
+1. CONVERSATIONAL FILLERS: You MUST start your response with a natural human filler based on their answer (e.g., "Hmm, interesting...", "Right, so...", "I see...", "Got it..."). Do not sound like a robot.
+2. INTRODUCTIONS: If the answer is a greeting or introduction, warmly acknowledge it with a filler and IMMEDIATELY ask the [Next Question queued]. Set "is_sufficient": true.
+3. NORMAL ANSWERS: If they provide a valid response, acknowledge it naturally with a filler and ask the [Next Question queued]. Set "is_sufficient": true.
+4. SKIPS: If they say "I don't know" or "skip", say "No problem, let's move on," and ask the [Next Question queued]. Set "is_sufficient": true.
+5. SILENCE: If the answer is literally "<SILENCE>" or empty, say "I didn't quite catch that. Take your time..." Set "is_sufficient": false.
 
 Output ONLY valid JSON:
 {
-  "response_text": "The exact words you will speak.",
+  "response_text": "The exact words you will speak, including the human filler.",
   "is_sufficient": true
 }
 """
@@ -154,6 +159,8 @@ Extract unstructured text into this JSON format accurately.
 Raw Text:
 {raw_text}
 """
+
+# ─── API CALLS ──────────────────────────────────────
 
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
@@ -240,6 +247,11 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
             "hiring_recommendation": "Reject",
             "justification": "Zero-Tolerance Engine Activated: Security Protocol violated. Score locked to 0."
         }
+
+    # 🛡️ THE UPGRADE: Inject Latency Metadata into Transcript for Deep Scoring
+    avg_latency = behavior_data.get("avg_latency", 0)
+    if avg_latency > 0:
+        clean_transcript += f"\n\n[BEHAVIORAL METADATA]: The candidate took an average of {avg_latency} seconds to start speaking after being asked a question. Factor this hesitation into their confidence score."
 
     safe_resume = resume[:5000]
     safe_jd = job_description[:4000]
