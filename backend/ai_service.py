@@ -12,6 +12,13 @@ import httpx
 import re
 from dotenv import load_dotenv
 
+# 🛡️ PHASE 2 UPGRADE: Edge-TTS Engine Integration (Ready for main.py router)
+try:
+    import edge_tts
+    EDGE_TTS_AVAILABLE = True
+except ImportError:
+    EDGE_TTS_AVAILABLE = False
+
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
@@ -124,7 +131,6 @@ Output ONLY valid JSON:
 {resume}
 """
 
-# 🛡️ THE UPGRADE: Added Psychological Fillers for Maximum Realism
 DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite, highly realistic AI technical interviewer.
 You are conducting a live voice interview, mimicking a real Senior Engineer perfectly.
 
@@ -161,6 +167,21 @@ Raw Text:
 """
 
 # ─── API CALLS ──────────────────────────────────────
+
+async def generate_speech_audio(text: str, gender: str = "female") -> bytes:
+    """Generates hyper-realistic neural TTS audio using Microsoft Edge-TTS."""
+    if not EDGE_TTS_AVAILABLE:
+        raise RuntimeError("edge_tts is not installed. To use neural voices, run: pip install edge-tts")
+        
+    voice = "en-US-JennyNeural" if gender == "female" else "en-US-GuyNeural"
+    communicate = edge_tts.Communicate(text, voice=voice, rate="+5%")
+    
+    audio_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+            
+    return audio_data
 
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
@@ -248,7 +269,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
             "justification": "Zero-Tolerance Engine Activated: Security Protocol violated. Score locked to 0."
         }
 
-    # 🛡️ THE UPGRADE: Inject Latency Metadata into Transcript for Deep Scoring
     avg_latency = behavior_data.get("avg_latency", 0)
     if avg_latency > 0:
         clean_transcript += f"\n\n[BEHAVIORAL METADATA]: The candidate took an average of {avg_latency} seconds to start speaking after being asked a question. Factor this hesitation into their confidence score."
