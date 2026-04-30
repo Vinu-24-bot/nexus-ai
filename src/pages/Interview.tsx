@@ -71,14 +71,20 @@ function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
   return bestMatch || voices.find(v => v.lang.startsWith("en")) || voices[0];
 }
 
+// 🛡️ THE FIX: Added AbortController to prevent backend sleep from freezing the interview
 function speakText(text: string, gender: "female" | "male"): Promise<void> {
   return new Promise(async (resolve) => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 second max wait for Edge-TTS
+
       const res = await fetch(`${API_URL}/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, gender })
+        body: JSON.stringify({ text, gender }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       
       if (!res.ok) throw new Error("TTS failed");
       
@@ -89,16 +95,20 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
       audio.onended = () => { (window as any).currentActiveAudio = null; resolve(); };
       audio.onerror = () => { (window as any).currentActiveAudio = null; fallbackSpeak(text, gender, resolve); };
       
-      audio.play().catch(() => {
-        (window as any).currentActiveAudio = null;
-        fallbackSpeak(text, gender, resolve);
-      });
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+          playPromise.catch(() => {
+              (window as any).currentActiveAudio = null;
+              fallbackSpeak(text, gender, resolve);
+          });
+      }
     } catch (e) {
       fallbackSpeak(text, gender, resolve);
     }
   });
 }
 
+// 🛡️ THE FIX: Bulletproofed the native fallback so it never hangs if voices are unavailable
 function fallbackSpeak(text: string, gender: "female" | "male", resolve: () => void) {
   if (!window.speechSynthesis) { resolve(); return; }
   window.speechSynthesis.cancel();
@@ -107,12 +117,16 @@ function fallbackSpeak(text: string, gender: "female" | "male", resolve: () => v
   const voice = getVoice(gender);
   if (voice) utterance.voice = voice;
   
-  utterance.rate = 0.95; 
+  utterance.rate = 1.0; 
   utterance.pitch = gender === "female" ? 1.05 : 0.95;
   utterance.volume = 1;
-  utterance.lang = "en-US";
-  utterance.onend = () => resolve();
-  utterance.onerror = () => resolve();
+  
+  // Safety timeout in case browser TTS gets stuck
+  const maxDuration = Math.max(3000, text.length * 60); 
+  const safetyTimeout = setTimeout(() => { resolve(); }, maxDuration);
+
+  utterance.onend = () => { clearTimeout(safetyTimeout); resolve(); };
+  utterance.onerror = () => { clearTimeout(safetyTimeout); resolve(); };
   window.speechSynthesis.speak(utterance);
 }
 
@@ -152,7 +166,6 @@ export default function InterviewPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
   
-  // 🛡️ THE HYBRID FIX: State to explicitly display the STT engine for the user
   const [sttEngine, setSttEngine] = useState<"Deepgram Nova-2" | "Web Speech API">("Initializing...");
   
   const [liveTranscript, setLiveTranscript] = useState("");
@@ -276,12 +289,13 @@ export default function InterviewPage() {
     };
   }, []);
 
+  // 🛡️ THE FIX: Explicitly turning on video feed during both "scanning" and "interview" stages
   useEffect(() => {
-    if (interviewStep === "interview" && videoRef.current && streamRef.current) {
+    if ((interviewStep === "interview" || interviewStep === "scanning") && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
       videoRef.current.play().catch(() => {});
     }
-  }, [interviewStep]);
+  }, [interviewStep, streamRef.current]);
 
   const handleForceEndInterview = useCallback(async (isEarlyLeave = false, reason = "") => {
     if (isTerminatingRef.current) return;
@@ -500,21 +514,17 @@ export default function InterviewPage() {
     if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
     setInterviewStep("scanning");
     
-    if (videoRef.current && streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => {});
-    }
-
     startSecurityTelemetry();
     await speakText("Activating security vault. Scanning face mesh and environment.", voiceGender);
     
+    // 🛡️ THE FIX: Reduced scanning animation time to a snappy 1 second
     setTimeout(() => {
       if (telemetry.mask) {
         handleSecurityViolation("Mask detected", true);
       } else {
         startActualInterview();
       }
-    }, 2000);
+    }, 1000);
   };
 
   const startActualInterview = async () => {
@@ -572,7 +582,6 @@ export default function InterviewPage() {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      // 🛡️ THE FIX: Reduced auto-submit silence timer to 4.5 seconds for a fast-paced interview
       else if (timeSinceLastSpeech > 4500) {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
@@ -784,15 +793,25 @@ export default function InterviewPage() {
     let dynamicResponse = "";
     let isSufficient = true;
 
+    // 🛡️ THE FIX: Added AbortController to the analysis request so it never freezes
     try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 sec max wait for LLM
+        
         const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: nextQText })
+            body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: nextQText }),
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
+        
         const ackData = await ackRes.json();
         dynamicResponse = ackData.response_text || ("Okay. " + nextQText);
         isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
-    } catch (err) { dynamicResponse = "Got it. " + nextQText; }
+    } catch (err) { 
+        dynamicResponse = "Understood. " + nextQText; 
+        isSufficient = true; 
+    }
 
     if (isSufficient) {
       setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
@@ -1134,7 +1153,6 @@ export default function InterviewPage() {
                   <Mic className={`w-4 h-4 ${isRecording && !isSpeaking ? "text-green-500 animate-pulse" : "text-muted-foreground"}`} />
                   <span className="text-sm font-bold text-foreground uppercase tracking-wider">Live Transcript</span>
                 </div>
-                {/* 🛡️ THE HYBRID FIX: STT Engine Tracker UI */}
                 <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 px-2 py-0.5 rounded border border-border/50" title="Active Speech Engine">
                    <Cpu className="w-3 h-3 text-primary" /> {sttEngine}
                 </span>
