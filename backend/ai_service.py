@@ -127,7 +127,7 @@ Output ONLY valid JSON:
 {resume}
 """
 
-# 🛡️ THE MERCOR UPGRADE: Active Listener Agent. The AI must prove it understood the candidate before moving on.
+# 🛡️ THE FIX: Forcefully instructed the AI to set "is_sufficient: true" for ALL skips and silences to guarantee the interview moves ahead
 DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite AI technical interviewer.
 You are having a live conversation. You must act like a highly intelligent, empathetic human engineering manager.
 
@@ -136,12 +136,13 @@ Context of the conversation:
 - The Candidate's exact answer: {answer}
 - The next planned topic on your list: {next_question}
 
-YOUR GOAL: Be an Active Listener. Do not just blindly read the next question.
+YOUR GOAL: Be an Active Listener. Keep the interview flowing smoothly and naturally.
 
 RULES:
-1. IF EXTREMELY VAGUE OR SHORT: If their answer is very short (under 2 sentences) and misses the point, set "is_sufficient": false. Generate a "response_text" asking them to elaborate or clarify. Do NOT ask the next planned topic.
-2. IF DETAILED AND VALID: Set "is_sufficient": true. Generate a "response_text" where you first ACKNOWLEDGE a specific technical detail they just said (to prove you were listening), and then seamlessly pivot into asking the {next_question}. (Keep your response under 3 sentences).
-3. IF THEY SKIP: If they say "I don't know" or "skip", set "is_sufficient": true. Generate a "response_text" saying "No problem, we can skip that. Moving on, [insert next_question here]".
+1. IF THEY SKIP OR DON'T KNOW: If the candidate says "I don't know", "skip", or gives up, you MUST set "is_sufficient": true. Acknowledge gracefully (e.g., "No worries at all, let's move on.") and IMMEDIATELY ask the {next_question}.
+2. IF SILENCE: If the answer is exactly "<SILENCE>", you MUST set "is_sufficient": true. Say "Let's go ahead and move to the next topic." and ask the {next_question}.
+3. IF DETAILED AND VALID: Set "is_sufficient": true. Acknowledge a specific technical detail they just said, and seamlessly pivot into asking the {next_question}.
+4. IF EXTREMELY VAGUE OR SHORT (but not a skip): If the answer is under 5 words and completely misses the point (like "um", "well"), set "is_sufficient": false. Ask them to clarify. Do NOT ask the next planned topic.
 
 Output ONLY valid JSON:
 {
@@ -312,7 +313,6 @@ async def get_answer_acknowledgment(question: str, answer: str, next_question: s
     next_q_text = next_question if next_question else "Thank the candidate and conclude this section."
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_q_text)
     try:
-        # We use the fast 8b model here because we need it to process in under 1 second to keep the interview flow snappy
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=800, groq_model="llama-3.1-8b-instant")
     except Exception as e:
         return {"response_text": f"Got it. {next_q_text}", "is_sufficient": True}
