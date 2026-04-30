@@ -2,9 +2,9 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
-  Mic, Square, ChevronRight, Loader2, Focus, ScanFace, Activity,
+  Mic, ChevronRight, Loader2, ScanFace, Activity,
   Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck,
-  Eye, MousePointerClick, Keyboard, LogOut, Timer
+  Eye, Keyboard, LogOut, Timer
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,6 +19,10 @@ interface LocationState { candidateName: string; position: string; jobDescriptio
 interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob | null; }
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
+
+declare global {
+  interface Window { currentActiveAudio: HTMLAudioElement | null; }
+}
 
 const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number }) => (
   <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-border/50">
@@ -80,7 +84,6 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
       
       const blob = await res.blob();
       const audio = new Audio(URL.createObjectURL(blob));
-      
       (window as any).currentActiveAudio = audio;
       
       audio.onended = () => { (window as any).currentActiveAudio = null; resolve(); };
@@ -427,7 +430,7 @@ export default function InterviewPage() {
           setCurrentLatencyDisplay("0.0s");
           setIsRecording(true);
           startSpeechRecognition();
-          toast.info("🎙️ You interrupted the interviewer. Mic is open.");
+          toast.info("🎙️ You interrupted the interviewer.");
         }
       } else {
         consecutiveSpeechFramesRef.current = 0;
@@ -501,13 +504,14 @@ export default function InterviewPage() {
     startSecurityTelemetry();
     await speakText("Activating security vault. Scanning face mesh and environment.", voiceGender);
     
+    // 🛡️ THE FIX: Sped up Face Scan logic to 2 seconds for a snappier feel
     setTimeout(() => {
       if (telemetry.mask) {
         handleSecurityViolation("Mask detected", true);
       } else {
         startActualInterview();
       }
-    }, 5000);
+    }, 2000);
   };
 
   const startActualInterview = async () => {
@@ -546,7 +550,6 @@ export default function InterviewPage() {
     });
   }, []);
 
-  // 🛡️ THE FIX: Bulletproof STT Fallback & Accumulation Engine
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     liveTranscriptRef.current = "";
@@ -572,77 +575,10 @@ export default function InterviewPage() {
       }
     }, 1000);
 
-    const handleSpeechIntent = (text: string) => {
-        const tLower = text.toLowerCase().trim();
-        const isExactSkip = tLower === "skip" || tLower === "i don't know";
-        
-        if (isExactSkip && !isHandlingSubmitRef.current) {
-            isHandlingSubmitRef.current = true; 
-            setTimeout(() => {
-               const btn = document.getElementById("auto-submit-btn");
-               if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
-            }, 500);
-        }
-    };
-
-    const startNative = () => {
-        // @ts-ignore
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            toast.error("Speech recognition not supported in this browser. Please use Chrome.");
-            return;
-        }
-
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = "en-US";
-        
-        let nativeFinalAccumulator = "";
-
-        // @ts-ignore
-        recognition.onresult = (event) => {
-            const now = Date.now();
-            if (lastSpeechRef.current === recordingStartRef.current) {
-                const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
-                setCurrentLatencyDisplay(`${latencySecs}s`);
-                latenciesRef.current.push(parseFloat(latencySecs));
-            }
-            lastSpeechRef.current = now; 
-            
-            let interim = "";
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    nativeFinalAccumulator += event.results[i][0].transcript + " ";
-                } else {
-                    interim += event.results[i][0].transcript;
-                }
-            }
-            
-            const fullText = (nativeFinalAccumulator + interim).trim();
-            liveTranscriptRef.current = fullText;
-            setLiveTranscript(fullText);
-            handleSpeechIntent(fullText);
-        };
-        
-        recognition.onerror = (event: any) => {
-            if (event.error === 'network' || event.error === 'audio-capture') {
-                const btn = document.getElementById("auto-submit-btn");
-                if (btn && !isHandlingSubmitRef.current) { btn.dataset.reason = "MIC_ERROR"; btn.click(); }
-            }
-        };
-        
-        recognition.onend = () => { 
-            if (isRecordingRef.current) { try { recognition.start(); } catch {} } 
-        };
-        
-        recognition.start();
-        recognitionRef.current = recognition;
-    };
-
     if (DEEPGRAM_API_KEY && streamRef.current) {
         try {
-            const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&interim_results=true&endpointing=500', ['token', DEEPGRAM_API_KEY]);
+            // 🛡️ THE FIX: Deepgram WebSocket now uses smart_format and reduced endpointing (300ms) for high accuracy
+            const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&interim_results=true&endpointing=300', ['token', DEEPGRAM_API_KEY]);
             dgSocketRef.current = socket;
             
             let finalTranscriptAccumulator = "";
@@ -650,16 +586,10 @@ export default function InterviewPage() {
 
             socket.onopen = () => {
                 isSocketReady = true;
-                
-                // 🛡️ THE FIX: Strictly isolate ONLY the audio track so Deepgram doesn't crash on video
                 const audioTrack = streamRef.current?.getAudioTracks()[0];
-                if (!audioTrack) {
-                    startNative();
-                    return;
-                }
+                if (!audioTrack) { startNativeSpeechRecognition(); return; }
                 
                 const audioStream = new MediaStream([audioTrack]);
-                
                 try {
                     const recorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
                     dgRecorderRef.current = recorder;
@@ -669,7 +599,7 @@ export default function InterviewPage() {
                     recorder.start(250); 
                 } catch (err) {
                     socket.close();
-                    startNative();
+                    startNativeSpeechRecognition();
                 }
             };
 
@@ -691,30 +621,98 @@ export default function InterviewPage() {
                         const fullText = finalTranscriptAccumulator.trim();
                         liveTranscriptRef.current = fullText;
                         setLiveTranscript(fullText);
-                        handleSpeechIntent(transcript);
                     } else {
                         const interimText = (finalTranscriptAccumulator + transcript).trim();
                         liveTranscriptRef.current = interimText;
                         setLiveTranscript(interimText);
                     }
+
+                    const tLower = transcript.toLowerCase();
+                    const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
+                    const isStalling = tLower === "give me a minute" || tLower === "let me think";
+
+                    if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
+                        isHandlingSubmitRef.current = true; 
+                        setTimeout(() => {
+                           const btn = document.getElementById("auto-submit-btn");
+                           if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
+                        }, 500);
+                    }
                 }
             };
             
-            socket.onclose = () => {
-                if (!isSocketReady && !isHandlingSubmitRef.current) startNative();
-            };
-
-            socket.onerror = () => {
-                if (!isSocketReady && !isHandlingSubmitRef.current) startNative();
-            };
+            socket.onclose = () => { if (!isSocketReady && !isHandlingSubmitRef.current) startNativeSpeechRecognition(); };
+            socket.onerror = () => { if (!isSocketReady && !isHandlingSubmitRef.current) startNativeSpeechRecognition(); };
             
         } catch (e) {
-            startNative();
+            startNativeSpeechRecognition();
         }
     } else {
-        startNative();
+        startNativeSpeechRecognition();
     }
   }, []);
+
+  const startNativeSpeechRecognition = () => {
+    // @ts-ignore
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error("Speech recognition not supported in this browser.");
+      return;
+    }
+    
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    
+    // @ts-ignore
+    recognition.onresult = (event) => {
+      const now = Date.now();
+      
+      if (lastSpeechRef.current === recordingStartRef.current) {
+        const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
+        setCurrentLatencyDisplay(`${latencySecs}s`);
+        latenciesRef.current.push(parseFloat(latencySecs));
+      }
+
+      lastSpeechRef.current = now; 
+      
+      let interim = ""; let allFinal = "";
+      for (let i = 0; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) allFinal += transcript + " ";
+        else interim += transcript;
+      }
+      
+      const newText = (allFinal + interim).trim();
+      
+      liveTranscriptRef.current = newText;
+      setLiveTranscript(newText);
+      
+      const tLower = newText.toLowerCase();
+      const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
+      const isStalling = tLower === "give me a minute" || tLower === "let me think";
+
+      if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
+          isHandlingSubmitRef.current = true;
+          setTimeout(() => {
+             const btn = document.getElementById("auto-submit-btn");
+             if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
+          }, 500);
+      }
+    };
+    
+    recognition.onerror = (event: any) => {
+       if (event.error === 'network' || event.error === 'no-speech' || event.error === 'audio-capture') {
+          const btn = document.getElementById("auto-submit-btn");
+          if (btn && !isHandlingSubmitRef.current) { btn.dataset.reason = "MIC_ERROR"; btn.click(); }
+       }
+    };
+    recognition.onend = () => { if (isRecordingRef.current) { try { recognition.start(); } catch {} } };
+    
+    recognition.start();
+    recognitionRef.current = recognition;
+  };
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false; 
@@ -781,34 +779,54 @@ export default function InterviewPage() {
     let nextQData = finalQuestionsList[nextIndex];
     let nextQText = nextQData ? nextQData.question : "Okay, that concludes all the technical questions.";
 
-    let dynamicResponse = "Got it. Let's move on.";
-    let isSufficient = true;
+    // 🛡️ THE FIX: Optimistic Fast-Path (Eliminates LLM Latency by 100% for standard answers)
+    const wordCount = totalAnswerSoFar.trim().split(/\s+/).length;
+    const isSkipping = totalAnswerSoFar.toLowerCase().includes("skip") || totalAnswerSoFar.toLowerCase().includes("don't know");
 
-    try {
-        const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: nextQText })
-        });
-        const ackData = await ackRes.json();
-        dynamicResponse = ackData.response_text || ("Okay. " + nextQText);
-        isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
-    } catch (err) { dynamicResponse = "Understood. " + nextQText; }
-
-    if (isSufficient) {
-      setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
-      setAccumulatedTranscript(""); 
-
-      if (introPhase) {
-        setIntroPhase(false); setCurrentQ(0);
-      } else if (currentQ < totalQuestions - 1) {
-        setCurrentQ(nextIndex); 
-      } else {
-        finalizeInterviewAndUpload();
-        return;
-      }
-    }
+    let dynamicResponse = "";
 
     setIsSpeaking(true);
+    setAiMessage("Processing..."); 
+
+    if (wordCount < 4 && !isSkipping && totalAnswerSoFar !== "<SILENCE>") {
+        try {
+            const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: nextQText })
+            });
+            const ackData = await ackRes.json();
+            dynamicResponse = ackData.response_text || ("Could you elaborate on that?");
+            
+            if (ackData.is_sufficient === false) {
+                setAiMessage(dynamicResponse);
+                await speakText(dynamicResponse, voiceGender);
+                setIsSpeaking(false);
+                isSpeakingRef.current = false;
+                setAiMessage("");
+                questionEndTimeRef.current = Date.now();
+                setIsRecording(true);
+                startSpeechRecognition();
+                return;
+            }
+        } catch (err) { dynamicResponse = "Got it. " + nextQText; }
+    } else {
+        const fillers = ["Got it. ", "Understood. ", "Makes sense. ", "Alright. "];
+        const filler = introPhase ? "Great to meet you. " : (isSkipping ? "No problem. " : fillers[Math.floor(Math.random() * fillers.length)]);
+        dynamicResponse = filler + nextQText;
+    }
+
+    setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
+    setAccumulatedTranscript(""); 
+
+    if (introPhase) {
+      setIntroPhase(false); setCurrentQ(0);
+    } else if (currentQ < totalQuestions - 1) {
+      setCurrentQ(nextIndex); 
+    } else {
+      finalizeInterviewAndUpload();
+      return;
+    }
+
     isSpeakingRef.current = true;
     setAiMessage(dynamicResponse);
     await speakText(dynamicResponse, voiceGender);
@@ -1044,118 +1062,116 @@ export default function InterviewPage() {
     );
   }
 
+  // 🛡️ THE FIX: UI upgrade - Cinematic View, Stacked Layout, Professional aesthetic
   return (
     <div className="min-h-screen bg-background nexus-grid">
       <CandidateHeader isLive={true} strikes={cheatStrikes} />
       <button id="auto-submit-btn" className="hidden" onClick={handleAnswerSubmit}></button>
 
-      <div className="container mx-auto px-6 pt-32 pb-16 max-w-5xl flex flex-col lg:flex-row gap-6">
+      <div className="container mx-auto px-6 pt-24 pb-16 max-w-6xl flex flex-col gap-6">
         
-        {/* Telemetry Sidebar */}
-        <div className="lg:w-64 shrink-0 space-y-4">
-          <div className="glass rounded-xl p-4 border border-primary/20">
-            <h3 className="text-xs font-bold text-primary uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Activity className="w-4 h-4" /> Live Telemetry
-            </h3>
-            <div className="space-y-3 font-mono text-xs">
-              <div className="flex justify-between items-center p-2 rounded bg-muted/50">
-                <span className="text-muted-foreground">LIVENESS</span>
-                <span className={telemetry.liveness > 80 ? "text-green-500" : "text-nexus-amber"}>{telemetry.liveness}%</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded bg-muted/50">
-                <span className="text-muted-foreground">FACES DETECTED</span>
-                <span className={telemetry.faces === 1 ? "text-green-500" : "text-destructive animate-pulse"}>{telemetry.faces}</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded bg-muted/50">
-                <span className="text-muted-foreground">LIP SYNC</span>
-                <span className={telemetry.lipSync ? "text-green-500" : "text-destructive animate-pulse"}>{telemetry.lipSync ? "VERIFIED" : "FAILED"}</span>
-              </div>
-              <div className="flex justify-between items-center p-2 rounded bg-muted/50">
-                <span className="text-muted-foreground flex items-center gap-1" title="Hesitation before answering">
-                  <Timer className="w-3 h-3" /> LATENCY
-                </span>
-                <span className={parseFloat(currentLatencyDisplay) > 2.0 ? "text-nexus-amber" : "text-green-500"}>{currentLatencyDisplay}</span>
-              </div>
-            </div>
+        {/* Top Header Row */}
+        <motion.div initial="hidden" animate="visible" className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-display font-bold text-foreground">Interviewing: {candidateName}</h1>
+            <p className="text-muted-foreground mt-1">{position}</p>
           </div>
-          
-          <Button 
-            variant="destructive" 
-            className="w-full bg-destructive/10 text-destructive hover:bg-destructive/20 border border-destructive/30"
-            onClick={() => handleForceEndInterview(true, "Candidate manually ended the interview.")}
-          >
-            <LogOut className="w-4 h-4 mr-2" /> End Interview
-          </Button>
-
-        </div>
-
-        {/* Main Interview Area */}
-        <motion.div initial="hidden" animate="visible" className="flex-1 space-y-6">
-          <motion.div variants={fadeUp} className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div><h1 className="text-xl font-display font-bold text-foreground">Interviewing: {candidateName}</h1></div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-muted"><Clock className="w-3.5 h-3.5" /><span className="text-sm font-mono font-bold">{formatTime(Math.max(0, timeRemaining))}</span></div>
-                <span className="text-2xl font-mono font-bold text-primary">{introPhase ? "Intro" : `${currentQ + 1}/${totalQuestions}`}</span>
-              </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-muted border border-border/50">
+              <Clock className="w-4 h-4 text-primary" />
+              <span className="text-sm font-mono font-bold text-foreground">{formatTime(Math.max(0, timeRemaining))}</span>
             </div>
-            <div className="w-full h-2 bg-muted rounded-full overflow-hidden"><motion.div className="h-full bg-primary rounded-full" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 0.3 }} /></div>
-          </motion.div>
-          
-          {aiMessage && isSpeaking && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-4 border-l-4 border-nexus-amber">
-              <div className="flex items-center gap-2 mb-2"><Volume2 className="w-4 h-4 text-nexus-amber animate-pulse" /><span className="text-xs font-semibold text-nexus-amber uppercase tracking-wider">ForgePro Interviewer</span></div>
-              <p className="text-sm text-foreground leading-relaxed">{aiMessage}</p>
-            </motion.div>
-          )}
-
-          {currentQuestion && (
-            <AnimatePresence mode="wait">
-              <motion.div key={currentQ} initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -40 }} className="glass rounded-xl p-6 space-y-4">
-                <p className="text-lg font-medium text-foreground leading-relaxed">{currentQuestion.question}</p>
-              </motion.div>
-            </AnimatePresence>
-          )}
-
-          <div className="glass rounded-xl p-6 space-y-4">
-            <div className="relative rounded-lg overflow-hidden bg-muted aspect-video border border-primary/20 shadow-[0_0_15px_rgba(0,240,255,0.1)]">
-              <video ref={videoRef} muted playsInline className="w-full h-full object-cover block" style={{ transform: "scaleX(-1)" }} />
-              
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-56 border-2 border-primary/40 rounded-lg pointer-events-none">
-                <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-primary"></div>
-                <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-primary"></div>
-                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-primary"></div>
-                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-primary"></div>
-              </div>
-
-              {isRecording && <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/80 text-primary-foreground text-[10px] font-medium"><span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" /> REC</div>}
-            </div>
-            
-            <div className="flex flex-col gap-2">
-              {isRecording && !isSpeaking && (
-                 <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
-                   <Mic className="w-4 h-4 text-green-500" /> Listening...
-                 </div>
-              )}
-              {liveTranscript && (
-                <div className="rounded-lg bg-muted/50 p-4 max-h-32 overflow-y-auto">
-                  <div className="flex items-center gap-2 mb-2"><Mic className="w-3.5 h-3.5 text-primary" /><span className="text-xs font-medium text-foreground">Live Transcript</span></div>
-                  <p className="text-sm text-muted-foreground">{liveTranscript}</p>
-                </div>
-              )}
-            </div>
-            
-            <div className="flex items-center justify-between">
-              {isRecording ? (
-                 <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground hover:bg-primary/90">
-                   <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
-                 </Button>
-              ) : (
-                 <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>
-              )}
-            </div>
+            <Button 
+              variant="destructive" size="sm"
+              className="bg-destructive/10 text-destructive hover:bg-destructive/20 border border-destructive/30"
+              onClick={() => handleForceEndInterview(true, "Candidate manually ended the interview.")}
+            >
+              <LogOut className="w-4 h-4 mr-2" /> End
+            </Button>
           </div>
         </motion.div>
+
+        {/* Progress Bar */}
+        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+          <motion.div className="h-full bg-primary rounded-full" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 0.3 }} />
+        </div>
+
+        {/* 🛡️ THE FIX: Cinematic Centered Video View */}
+        <div className="w-full max-w-4xl mx-auto mt-4 mb-2">
+          <div className="relative rounded-2xl overflow-hidden bg-black aspect-video border border-primary/20 shadow-[0_0_50px_rgba(0,240,255,0.15)] ring-1 ring-white/5">
+            <video ref={videoRef} muted playsInline className="w-full h-full object-cover block" style={{ transform: "scaleX(-1)" }} />
+            
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-56 h-64 border-2 border-primary/30 rounded-xl pointer-events-none">
+              <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-primary"></div>
+              <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-primary"></div>
+              <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-primary"></div>
+              <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-primary"></div>
+            </div>
+
+            {isRecording && (
+              <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-white text-xs font-bold tracking-widest shadow-lg">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]" /> REC
+              </div>
+            )}
+            
+            <div className="absolute bottom-4 left-4 flex gap-2">
+              <span className="bg-black/60 backdrop-blur-md text-xs px-2.5 py-1 rounded-md text-white/90 font-mono border border-white/10">LIVENESS: {telemetry.liveness}%</span>
+              <span className="bg-black/60 backdrop-blur-md text-xs px-2.5 py-1 rounded-md text-white/90 font-mono border border-white/10 flex items-center gap-1"><Timer className="w-3 h-3"/> {currentLatencyDisplay}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Lower Grid: Question & Transcript */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto w-full">
+          
+          <div className="lg:col-span-2 space-y-4">
+            {aiMessage && isSpeaking && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-5 border-l-4 border-nexus-amber shadow-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <Volume2 className="w-4 h-4 text-nexus-amber animate-pulse" />
+                  <span className="text-xs font-bold text-nexus-amber uppercase tracking-wider">ForgePro Interviewer</span>
+                </div>
+                <p className="text-base text-foreground leading-relaxed">{aiMessage}</p>
+              </motion.div>
+            )}
+
+            {currentQuestion && !isSpeaking && (
+              <AnimatePresence mode="wait">
+                <motion.div key={currentQ} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="glass rounded-xl p-6 shadow-sm border border-border/50">
+                  <span className="text-xs font-bold text-primary uppercase tracking-wider mb-2 block">Question {currentQ + 1} of {totalQuestions}</span>
+                  <p className="text-lg font-medium text-foreground leading-relaxed">{currentQuestion.question}</p>
+                </motion.div>
+              </AnimatePresence>
+            )}
+          </div>
+
+          <div className="lg:col-span-1 space-y-4">
+            <div className="glass rounded-xl p-5 border border-border/50 shadow-sm h-full flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Mic className={`w-4 h-4 ${isRecording && !isSpeaking ? "text-green-500 animate-pulse" : "text-muted-foreground"}`} />
+                  <span className="text-sm font-bold text-foreground uppercase tracking-wider">Live Transcript</span>
+                </div>
+                {isRecording && !isSpeaking && <span className="text-[10px] bg-green-500/10 text-green-500 px-2 py-0.5 rounded border border-green-500/20 font-bold animate-pulse">LISTENING</span>}
+              </div>
+              
+              <div className="flex-1 bg-background/50 rounded-lg p-4 border border-border/30 min-h-[120px] max-h-[160px] overflow-y-auto mb-4">
+                <p className="text-sm text-muted-foreground/80 leading-relaxed">{liveTranscript || "Waiting for audio..."}</p>
+              </div>
+
+              {isRecording ? (
+                 <Button onClick={handleAnswerSubmit} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
+                   <Send className="w-4 h-4 mr-2" /> Submit Answer
+                 </Button>
+              ) : (
+                 <Button disabled variant="outline" className="w-full border-border/50 bg-muted/30">
+                   <Loader2 className="w-4 h-4 animate-spin mr-2" /> Processing...
+                 </Button>
+              )}
+            </div>
+          </div>
+
+        </div>
       </div>
     </div>
   );
