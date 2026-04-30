@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, ChevronRight, Loader2, ScanFace, Activity,
   Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck,
-  Eye, Keyboard, LogOut, Timer
+  Eye, Keyboard, LogOut, Timer, Cpu
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -151,6 +151,9 @@ export default function InterviewPage() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
+  
+  // 🛡️ THE HYBRID FIX: State to explicitly display the STT engine for the user
+  const [sttEngine, setSttEngine] = useState<"Deepgram Nova-2" | "Web Speech API">("Initializing...");
   
   const [liveTranscript, setLiveTranscript] = useState("");
   const liveTranscriptRef = useRef(""); 
@@ -569,12 +572,81 @@ export default function InterviewPage() {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      // 🛡️ THE FIX: Set auto-submit watchdog to exactly 8 seconds to prevent lingering delays
-      else if (timeSinceLastSpeech > 8000) {
+      // 🛡️ THE FIX: Reduced auto-submit silence timer to 4.5 seconds for a fast-paced interview
+      else if (timeSinceLastSpeech > 4500) {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
-    }, 1000);
+    }, 500);
+
+    const handleSpeechIntent = (text: string) => {
+        const tLower = text.toLowerCase().trim();
+        const isExactSkip = tLower === "skip" || tLower.includes("next question") || tLower.includes("i don't know") || tLower.includes("not sure") || tLower.includes("move ahead") || tLower.includes("move on");
+        
+        if (isExactSkip && !isHandlingSubmitRef.current) {
+            isHandlingSubmitRef.current = true; 
+            setTimeout(() => {
+               const btn = document.getElementById("auto-submit-btn");
+               if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
+            }, 300);
+        }
+    };
+
+    const startNative = () => {
+        setSttEngine("Web Speech API");
+        // @ts-ignore
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            toast.error("Speech recognition not supported in this browser. Please use Chrome.");
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+        
+        let nativeFinalAccumulator = "";
+
+        // @ts-ignore
+        recognition.onresult = (event) => {
+            const now = Date.now();
+            if (lastSpeechRef.current === recordingStartRef.current) {
+                const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
+                setCurrentLatencyDisplay(`${latencySecs}s`);
+                latenciesRef.current.push(parseFloat(latencySecs));
+            }
+            lastSpeechRef.current = now; 
+            
+            let interim = "";
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    nativeFinalAccumulator += event.results[i][0].transcript + " ";
+                } else {
+                    interim += event.results[i][0].transcript;
+                }
+            }
+            
+            const fullText = (nativeFinalAccumulator + interim).trim();
+            liveTranscriptRef.current = fullText;
+            setLiveTranscript(fullText);
+            handleSpeechIntent(fullText);
+        };
+        
+        recognition.onerror = (event: any) => {
+            if (event.error === 'network' || event.error === 'audio-capture') {
+                const btn = document.getElementById("auto-submit-btn");
+                if (btn && !isHandlingSubmitRef.current) { btn.dataset.reason = "MIC_ERROR"; btn.click(); }
+            }
+        };
+        
+        recognition.onend = () => { 
+            if (isRecordingRef.current) { try { recognition.start(); } catch {} } 
+        };
+        
+        recognition.start();
+        recognitionRef.current = recognition;
+    };
 
     if (DEEPGRAM_API_KEY && streamRef.current) {
         try {
@@ -586,8 +658,9 @@ export default function InterviewPage() {
 
             socket.onopen = () => {
                 isSocketReady = true;
+                setSttEngine("Deepgram Nova-2");
                 const audioTrack = streamRef.current?.getAudioTracks()[0];
-                if (!audioTrack) { startNativeSpeechRecognition(); return; }
+                if (!audioTrack) { startNative(); return; }
                 
                 const audioStream = new MediaStream([audioTrack]);
                 try {
@@ -599,7 +672,7 @@ export default function InterviewPage() {
                     recorder.start(250); 
                 } catch (err) {
                     socket.close();
-                    startNativeSpeechRecognition();
+                    startNative();
                 }
             };
 
@@ -621,99 +694,25 @@ export default function InterviewPage() {
                         const fullText = finalTranscriptAccumulator.trim();
                         liveTranscriptRef.current = fullText;
                         setLiveTranscript(fullText);
+                        handleSpeechIntent(transcript);
                     } else {
                         const interimText = (finalTranscriptAccumulator + transcript).trim();
                         liveTranscriptRef.current = interimText;
                         setLiveTranscript(interimText);
                     }
-
-                    const tLower = transcript.toLowerCase();
-                    // 🛡️ THE FIX: Broadened regex to ruthlessly catch any skip/don't know variation instantly
-                    const isSkipping = tLower === "skip" || tLower.includes("next question") || tLower.includes("i don't know") || tLower.includes("not sure") || tLower.includes("move ahead") || tLower.includes("move on");
-                    const isStalling = tLower === "give me a minute" || tLower === "let me think";
-
-                    if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
-                        isHandlingSubmitRef.current = true; 
-                        setTimeout(() => {
-                           const btn = document.getElementById("auto-submit-btn");
-                           if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
-                        }, 500);
-                    }
                 }
             };
             
-            socket.onclose = () => { if (!isSocketReady && !isHandlingSubmitRef.current) startNativeSpeechRecognition(); };
-            socket.onerror = () => { if (!isSocketReady && !isHandlingSubmitRef.current) startNativeSpeechRecognition(); };
+            socket.onclose = () => { if (!isSocketReady && !isHandlingSubmitRef.current) startNative(); };
+            socket.onerror = () => { if (!isSocketReady && !isHandlingSubmitRef.current) startNative(); };
             
         } catch (e) {
-            startNativeSpeechRecognition();
+            startNative();
         }
     } else {
-        startNativeSpeechRecognition();
+        startNative();
     }
   }, []);
-
-  const startNativeSpeechRecognition = () => {
-    // @ts-ignore
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      toast.error("Speech recognition not supported in this browser.");
-      return;
-    }
-    
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-    
-    // @ts-ignore
-    recognition.onresult = (event) => {
-      const now = Date.now();
-      
-      if (lastSpeechRef.current === recordingStartRef.current) {
-        const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
-        setCurrentLatencyDisplay(`${latencySecs}s`);
-        latenciesRef.current.push(parseFloat(latencySecs));
-      }
-
-      lastSpeechRef.current = now; 
-      
-      let interim = ""; let allFinal = "";
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) allFinal += transcript + " ";
-        else interim += transcript;
-      }
-      
-      const newText = (allFinal + interim).trim();
-      
-      liveTranscriptRef.current = newText;
-      setLiveTranscript(newText);
-      
-      const tLower = newText.toLowerCase();
-      const isSkipping = tLower === "skip" || tLower.includes("next question") || tLower.includes("i don't know") || tLower.includes("not sure") || tLower.includes("move ahead") || tLower.includes("move on");
-      const isStalling = tLower === "give me a minute" || tLower === "let me think";
-
-      if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
-          isHandlingSubmitRef.current = true;
-          setTimeout(() => {
-             const btn = document.getElementById("auto-submit-btn");
-             if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
-          }, 500);
-      }
-    };
-    
-    recognition.onerror = (event: any) => {
-       if (event.error === 'network' || event.error === 'no-speech' || event.error === 'audio-capture') {
-          const btn = document.getElementById("auto-submit-btn");
-          if (btn && !isHandlingSubmitRef.current) { btn.dataset.reason = "MIC_ERROR"; btn.click(); }
-       }
-    };
-    recognition.onend = () => { if (isRecordingRef.current) { try { recognition.start(); } catch {} } };
-    
-    recognition.start();
-    recognitionRef.current = recognition;
-  };
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false; 
@@ -793,7 +792,7 @@ export default function InterviewPage() {
         const ackData = await ackRes.json();
         dynamicResponse = ackData.response_text || ("Okay. " + nextQText);
         isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
-    } catch (err) { dynamicResponse = "Understood. " + nextQText; }
+    } catch (err) { dynamicResponse = "Got it. " + nextQText; }
 
     if (isSufficient) {
       setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
@@ -1135,7 +1134,10 @@ export default function InterviewPage() {
                   <Mic className={`w-4 h-4 ${isRecording && !isSpeaking ? "text-green-500 animate-pulse" : "text-muted-foreground"}`} />
                   <span className="text-sm font-bold text-foreground uppercase tracking-wider">Live Transcript</span>
                 </div>
-                {isRecording && !isSpeaking && <span className="text-[10px] bg-green-500/10 text-green-500 px-2 py-0.5 rounded border border-green-500/20 font-bold animate-pulse">LISTENING</span>}
+                {/* 🛡️ THE HYBRID FIX: STT Engine Tracker UI */}
+                <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 px-2 py-0.5 rounded border border-border/50" title="Active Speech Engine">
+                   <Cpu className="w-3 h-3 text-primary" /> {sttEngine}
+                </span>
               </div>
               
               <div className="flex-1 bg-background/50 rounded-lg p-4 border border-border/30 min-h-[120px] max-h-[160px] overflow-y-auto mb-4">
