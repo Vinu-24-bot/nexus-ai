@@ -12,6 +12,7 @@ import { submitEvaluation, uploadVideo } from "@/lib/api";
 import { toast } from "sonner";
 
 const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api";
+const DEEPGRAM_API_KEY = import.meta.env.VITE_DEEPGRAM_API_KEY || "";
 
 interface InterviewQuestion { id: number; question: string; category: string; difficulty: string; }
 interface LocationState { candidateName: string; position: string; jobDescription: string; resume: string; questions: InterviewQuestion[]; voiceGender: "female" | "male"; durationMinutes: number; }
@@ -19,7 +20,6 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-// 🛡️ Global typing for active audio stream reference so VAD can pause it
 declare global {
   interface Window { currentActiveAudio: HTMLAudioElement | null; }
 }
@@ -51,7 +51,26 @@ const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number
   </header>
 );
 
-// 🛡️ THE UPGRADE: Edge-TTS Backend Fetcher with Browser Fallback
+function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) return null;
+  const femaleKeywords = ["female", "woman", "jenny", "samantha", "karen", "zira", "victoria"];
+  const maleKeywords = ["male", "man", "guy", "david", "mark", "daniel", "james"];
+  
+  let bestMatch: SpeechSynthesisVoice | null = null;
+  let highestScore = -1;
+
+  for (const v of voices) {
+    if (!v.lang.startsWith("en")) continue;
+    const name = v.name.toLowerCase();
+    let score = 0;
+    if ((gender === "female" ? femaleKeywords : maleKeywords).some(k => name.includes(k))) score += 2;
+    if (name.includes("google") || name.includes("neural") || name.includes("premium")) score += 5; 
+    if (score > highestScore) { highestScore = score; bestMatch = v; }
+  }
+  return bestMatch || voices.find(v => v.lang.startsWith("en")) || voices[0];
+}
+
 function speakText(text: string, gender: "female" | "male"): Promise<void> {
   return new Promise(async (resolve) => {
     try {
@@ -174,7 +193,11 @@ export default function InterviewPage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   
-  const recognitionRef = useRef<any>(null);
+  // 🛡️ PHASE 3: Deepgram Integration Refs
+  const recognitionRef = useRef<any>(null); // For WebSpeech Fallback
+  const dgSocketRef = useRef<WebSocket | null>(null); // For Deepgram
+  const dgRecorderRef = useRef<MediaRecorder | null>(null); // For audio streaming
+  
   const isRecordingRef = useRef(false); 
   const fullRecordingChunksRef = useRef<Blob[]>([]);
   const fullRecorderRef = useRef<MediaRecorder | null>(null);
@@ -254,6 +277,8 @@ export default function InterviewPage() {
       if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
       if (securityLoopRef.current) cancelAnimationFrame(securityLoopRef.current);
       if (recognitionRef.current) recognitionRef.current.stop();
+      if (dgSocketRef.current) dgSocketRef.current.close();
+      if (dgRecorderRef.current) dgRecorderRef.current.stop();
       if (audioContextRef.current) audioContextRef.current.close();
     };
   }, []);
@@ -271,6 +296,8 @@ export default function InterviewPage() {
 
     if (isRecordingRef.current) {
       if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} }
+      if (dgSocketRef.current) { try { dgSocketRef.current.close(); } catch {} }
+      if (dgRecorderRef.current) { try { dgRecorderRef.current.stop(); } catch {} }
     }
     
     finalizeInterviewAndUpload(reason || (isEarlyLeave ? "Candidate left early manually." : "Time Expired."));
@@ -396,7 +423,7 @@ export default function InterviewPage() {
       const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
       const isSpeakingLoudly = audioLevel > 20;
 
-      // 🛡️ THE UPGRADE: Audio Stream Killer
+      // 🛡️ VAD Barge-In Engine
       if (isSpeakingRef.current && audioLevel > 12) {
         consecutiveSpeechFramesRef.current += 1;
         if (consecutiveSpeechFramesRef.current > 15) { 
@@ -534,6 +561,7 @@ export default function InterviewPage() {
     });
   }, []);
 
+  // 🛡️ PHASE 3: Hybrid Deepgram WebSocket & Native Fallback Engine
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     liveTranscriptRef.current = "";
@@ -559,6 +587,75 @@ export default function InterviewPage() {
       }
     }, 1000);
 
+    if (DEEPGRAM_API_KEY && streamRef.current) {
+        // --- DEEPGRAM WEBSOCKET ENGINE ---
+        try {
+            const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&interim_results=true&endpointing=500', ['token', DEEPGRAM_API_KEY]);
+            dgSocketRef.current = socket;
+            
+            let finalTranscriptAccumulator = "";
+
+            socket.onopen = () => {
+                const recorder = new MediaRecorder(streamRef.current as MediaStream, { mimeType: 'audio/webm' });
+                dgRecorderRef.current = recorder;
+                recorder.addEventListener('dataavailable', event => {
+                    if (event.data.size > 0 && socket.readyState === 1) socket.send(event.data);
+                });
+                recorder.start(250); 
+            };
+
+            socket.onmessage = (message) => {
+                const received = JSON.parse(message.data);
+                const transcript = received.channel?.alternatives[0]?.transcript;
+
+                if (transcript) {
+                    const now = Date.now();
+                    if (lastSpeechRef.current === recordingStartRef.current) {
+                        const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
+                        setCurrentLatencyDisplay(`${latencySecs}s`);
+                        latenciesRef.current.push(parseFloat(latencySecs));
+                    }
+                    lastSpeechRef.current = now;
+
+                    if (received.is_final) {
+                        finalTranscriptAccumulator += transcript + " ";
+                        const fullText = finalTranscriptAccumulator.trim();
+                        liveTranscriptRef.current = fullText;
+                        setLiveTranscript(fullText);
+                    } else {
+                        const interimText = (finalTranscriptAccumulator + transcript).trim();
+                        liveTranscriptRef.current = interimText;
+                        setLiveTranscript(interimText);
+                    }
+
+                    const tLower = transcript.toLowerCase();
+                    const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("no idea") || tLower.includes("move on") || tLower.includes("next question");
+                    const isStalling = tLower.includes("give me a minute") || tLower.includes("hold on") || tLower.includes("let me think");
+
+                    if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
+                        setTimeout(() => {
+                           const btn = document.getElementById("auto-submit-btn");
+                           if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
+                        }, 1000);
+                    }
+                }
+            };
+            
+            socket.onerror = () => {
+                // Failsafe to Native STT if websocket crashes
+                if (!isHandlingSubmitRef.current) startNativeSpeechRecognition();
+            };
+            
+        } catch (e) {
+            startNativeSpeechRecognition();
+        }
+    } else {
+        // --- NATIVE BROWSER FALLBACK ---
+        startNativeSpeechRecognition();
+    }
+  }, []);
+
+  const startNativeSpeechRecognition = () => {
     // @ts-ignore
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -619,11 +716,20 @@ export default function InterviewPage() {
     
     recognition.start();
     recognitionRef.current = recognition;
-  }, []);
+  };
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false; 
     if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
+    
+    if (dgRecorderRef.current) {
+        dgRecorderRef.current.stop();
+        dgRecorderRef.current = null;
+    }
+    if (dgSocketRef.current) {
+        dgSocketRef.current.close();
+        dgSocketRef.current = null;
+    }
     if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
     
     const currentText = liveTranscriptRef.current.trim();
@@ -981,6 +1087,7 @@ export default function InterviewPage() {
           >
             <LogOut className="w-4 h-4 mr-2" /> End Interview
           </Button>
+
         </div>
 
         <motion.div initial="hidden" animate="visible" className="flex-1 space-y-6">
