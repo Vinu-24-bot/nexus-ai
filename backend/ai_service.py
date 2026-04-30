@@ -17,8 +17,6 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# ─── UTILITY FUNCTIONS ──────────────────────────────────────
-
 def format_prompt(template: str, **kwargs) -> str:
     prompt = template
     for key, value in kwargs.items():
@@ -50,8 +48,6 @@ def _validate_result(result: dict) -> dict:
         if field not in result:
             raise ValueError(f"Missing required field: {field}")
     return result
-
-# ─── ENTERPRISE PROMPTS (RESTORED RAG ENGINE) ───────────
 
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, and the Interview Transcript.
@@ -124,8 +120,7 @@ Output ONLY valid JSON:
 {resume}
 """
 
-JD_GENERATION_PROMPT = """Generate a detailed, professional Job Description for: {position}. Output plain text only."""
-
+# 🛡️ THE FIX: Smart, conversational logic rules so the AI accepts normal introductions
 DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite, highly realistic AI technical interviewer.
 You are conducting a live voice interview, mimicking a real Senior Engineer perfectly.
 
@@ -133,11 +128,12 @@ Question you just asked: {question}
 Candidate's Answer: {answer}
 Next Question queued: {next_question}
 
-Decide EXACTLY what to say next based on these Edge Cases:
-- Silence / "Give me a minute": Say "Take your time" (is_sufficient=false).
-- Skip / "I don't know": Say "No problem, let's move on" and ask [Next Question queued] (is_sufficient=true).
-- Weak Answer: Say "Could you elaborate on that?" (is_sufficient=false).
-- Normal Answer: Acknowledge naturally and ask [Next Question queued] (is_sufficient=true).
+Your goal is to keep the interview flowing smoothly. 
+Analyze the Candidate's Answer:
+1. INTRODUCTIONS: If the answer is a greeting or introduction (e.g., "Hi, my name is...", "Hello, I am a developer"), warmly acknowledge it and IMMEDIATELY ask the [Next Question queued]. Set "is_sufficient": true.
+2. NORMAL ANSWERS: If they provide any valid response to the question, acknowledge it naturally and IMMEDIATELY ask the [Next Question queued]. Set "is_sufficient": true.
+3. SKIPS: If they say "I don't know" or "skip", say "No problem, let's move on," and ask the [Next Question queued]. Set "is_sufficient": true.
+4. SILENCE/EMPTY: If the answer is literally "<SILENCE>", completely empty, or they explicitly ask for a minute, say "I didn't quite catch that. Take your time..." Set "is_sufficient": false.
 
 Output ONLY valid JSON:
 {
@@ -159,8 +155,6 @@ Raw Text:
 {raw_text}
 """
 
-# ─── API CALLS ──────────────────────────────────────
-
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
     async with httpx.AsyncClient(timeout=120) as client:
@@ -174,7 +168,6 @@ async def transcribe_audio(file_path: str) -> str:
 
 async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 4000, groq_model: str = "llama-3.3-70b-versatile") -> dict:
     async with httpx.AsyncClient(timeout=60) as client:
-        # 🛡️ THE FIX: Temperature set to 0.0 for deterministic, reliable evaluation
         payload = {"model": groq_model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.0, "max_tokens": max_tokens}
         if force_json: payload["response_format"] = {"type": "json_object"}
         url = "https://api.groq.com/openai/v1/chat/completions"
@@ -190,8 +183,6 @@ async def _call_groq(prompt: str, force_json: bool = False, max_tokens: int = 40
 async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    
-    # 🛡️ THE FIX: Temperature set to 0.0 for Gemini as well
     payload["generationConfig"] = {"temperature": 0.0}
     if force_json: payload["generationConfig"]["responseMimeType"] = "application/json"
     
@@ -209,7 +200,6 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
 async def _call_groq_text(prompt: str) -> str:
     async with httpx.AsyncClient(timeout=30) as client:
         url = "https://api.groq.com/openai/v1/chat/completions"
-        # 🛡️ THE FIX: Temperature set to 0.0 for text generation too
         resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}, json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.0, "max_tokens": 1000})
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
@@ -227,8 +217,6 @@ async def _call_ai_cascade(prompt: str, force_json: bool = False, max_tokens: in
         except Exception as e: errors.append(f"Gemini Error: {e}")
     raise ValueError(f"All AI Cascade providers failed: {'; '.join(errors)}")
 
-# ─── PUBLIC EXPORTS ──────────────────────────────────────
-
 async def parse_resume_to_json(raw_text: str) -> dict:
     safe_text = re.sub(r'[^\x20-\x7E\n\r\t\|]', ' ', raw_text)[:6000]
     prompt = format_prompt(RESUME_PARSER_PROMPT, raw_text=safe_text)
@@ -240,7 +228,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     clean_transcript = transcript.replace("(No speech detected)", "").strip()
     is_breach = "[SYSTEM LOG]: SECURITY BREACH" in transcript
 
-    # 1. SECURITY VAULT
     if is_breach:
         return {
             "candidate_overview": "Session automatically rejected. Candidate triggered the Anti-Cheat Security Vault.",
@@ -254,14 +241,12 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
             "justification": "Zero-Tolerance Engine Activated: Security Protocol violated. Score locked to 0."
         }
 
-    # 2. ELITE RAG EVALUATION
     safe_resume = resume[:5000]
     safe_jd = job_description[:4000]
     prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=clean_transcript)
     result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
     result = _validate_result(result)
 
-    # 3. APPLY CV TELEMETRY PENALTIES 
     tab_switches = behavior_data.get("tab_switches", 0)
     esc_presses = behavior_data.get("esc_presses", 0)
     liveness = behavior_data.get("liveness_score", 99)
@@ -277,7 +262,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     if cv_penalty > 0:
         result["justification"] += f"\n\n[SECURITY METRICS]: Candidate incurred a telemetry penalty. Esc presses: {esc_presses}, Tab switches: {tab_switches}."
 
-    # Recalculate Overall safely
     t = result["scores"]["technical_proficiency"]
     r = result["scores"]["relevance_to_jd"]
     c = result["scores"]["communication"]
