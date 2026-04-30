@@ -86,9 +86,12 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
       const audio = new Audio(URL.createObjectURL(blob));
       window.currentActiveAudio = audio;
       
-      audio.onended = () => resolve();
-      audio.onerror = () => resolve();
+      // 🛡️ THE FIX: Strict Promise resolution to prevent overlapping audio
+      audio.onended = () => { window.currentActiveAudio = null; resolve(); };
+      audio.onerror = () => { window.currentActiveAudio = null; fallbackSpeak(text, gender, resolve); };
+      
       audio.play().catch(() => {
+        window.currentActiveAudio = null;
         fallbackSpeak(text, gender, resolve);
       });
     } catch (e) {
@@ -102,22 +105,9 @@ function fallbackSpeak(text: string, gender: "female" | "male", resolve: () => v
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   
-  const voices = window.speechSynthesis.getVoices();
-  const femaleKeywords = ["female", "woman", "jenny", "samantha", "karen", "zira", "victoria"];
-  const maleKeywords = ["male", "man", "guy", "david", "mark", "daniel", "james"];
+  const voice = getVoice(gender);
+  if (voice) utterance.voice = voice;
   
-  let bestMatch: SpeechSynthesisVoice | null = null;
-  let highestScore = -1;
-  for (const v of voices) {
-    if (!v.lang.startsWith("en")) continue;
-    const name = v.name.toLowerCase();
-    let score = 0;
-    if ((gender === "female" ? femaleKeywords : maleKeywords).some(k => name.includes(k))) score += 2;
-    if (name.includes("google") || name.includes("neural") || name.includes("premium")) score += 5; 
-    if (score > highestScore) { highestScore = score; bestMatch = v; }
-  }
-  
-  if (bestMatch) utterance.voice = bestMatch;
   utterance.rate = 0.95; 
   utterance.pitch = gender === "female" ? 1.05 : 0.95;
   utterance.volume = 1;
@@ -193,10 +183,9 @@ export default function InterviewPage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   
-  // 🛡️ PHASE 3: Deepgram Integration Refs
-  const recognitionRef = useRef<any>(null); // For WebSpeech Fallback
-  const dgSocketRef = useRef<WebSocket | null>(null); // For Deepgram
-  const dgRecorderRef = useRef<MediaRecorder | null>(null); // For audio streaming
+  const recognitionRef = useRef<any>(null); 
+  const dgSocketRef = useRef<WebSocket | null>(null); 
+  const dgRecorderRef = useRef<MediaRecorder | null>(null); 
   
   const isRecordingRef = useRef(false); 
   const fullRecordingChunksRef = useRef<Blob[]>([]);
@@ -269,6 +258,7 @@ export default function InterviewPage() {
       if (window.currentActiveAudio) {
         window.currentActiveAudio.pause();
         window.currentActiveAudio.currentTime = 0;
+        window.currentActiveAudio = null;
       }
       window.speechSynthesis.cancel();
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
@@ -423,10 +413,10 @@ export default function InterviewPage() {
       const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
       const isSpeakingLoudly = audioLevel > 20;
 
-      // 🛡️ VAD Barge-In Engine
-      if (isSpeakingRef.current && audioLevel > 12) {
+      // 🛡️ THE FIX: Raised VAD Threshold to 25 and frames to 30 to prevent Speaker Echo from triggering Interruption
+      if (isSpeakingRef.current && audioLevel > 25) {
         consecutiveSpeechFramesRef.current += 1;
-        if (consecutiveSpeechFramesRef.current > 15) { 
+        if (consecutiveSpeechFramesRef.current > 30) { 
           if (window.currentActiveAudio) {
             window.currentActiveAudio.pause();
             window.currentActiveAudio.currentTime = 0;
@@ -561,7 +551,6 @@ export default function InterviewPage() {
     });
   }, []);
 
-  // 🛡️ PHASE 3: Hybrid Deepgram WebSocket & Native Fallback Engine
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     liveTranscriptRef.current = "";
@@ -581,14 +570,14 @@ export default function InterviewPage() {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      else if (timeSinceLastSpeech > 12000) {
+      // 🛡️ THE FIX: Increased Silence Timeout to 25 seconds to give candidate time to think
+      else if (timeSinceLastSpeech > 25000) {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
     }, 1000);
 
     if (DEEPGRAM_API_KEY && streamRef.current) {
-        // --- DEEPGRAM WEBSOCKET ENGINE ---
         try {
             const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&interim_results=true&endpointing=500', ['token', DEEPGRAM_API_KEY]);
             dgSocketRef.current = socket;
@@ -629,20 +618,21 @@ export default function InterviewPage() {
                     }
 
                     const tLower = transcript.toLowerCase();
-                    const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("no idea") || tLower.includes("move on") || tLower.includes("next question");
-                    const isStalling = tLower.includes("give me a minute") || tLower.includes("hold on") || tLower.includes("let me think");
+                    const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
+                    const isStalling = tLower === "give me a minute" || tLower === "let me think";
 
+                    // 🛡️ THE FIX: Immediately block duplicate Intent triggers
                     if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
+                        isHandlingSubmitRef.current = true; 
                         setTimeout(() => {
                            const btn = document.getElementById("auto-submit-btn");
                            if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
-                        }, 1000);
+                        }, 500);
                     }
                 }
             };
             
             socket.onerror = () => {
-                // Failsafe to Native STT if websocket crashes
                 if (!isHandlingSubmitRef.current) startNativeSpeechRecognition();
             };
             
@@ -650,7 +640,6 @@ export default function InterviewPage() {
             startNativeSpeechRecognition();
         }
     } else {
-        // --- NATIVE BROWSER FALLBACK ---
         startNativeSpeechRecognition();
     }
   }, []);
@@ -693,16 +682,16 @@ export default function InterviewPage() {
       setLiveTranscript(newText);
       
       const tLower = newText.toLowerCase();
-      const isSkipping = tLower.includes("don't know") || tLower.includes("skip") || tLower.includes("no idea") || tLower.includes("move on") || tLower.includes("next question");
-      const isStalling = tLower.includes("give me a minute") || tLower.includes("hold on") || tLower.includes("let me think");
+      const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
+      const isStalling = tLower === "give me a minute" || tLower === "let me think";
 
-      if (isSkipping || isStalling) {
-         if (!isHandlingSubmitRef.current) {
-            setTimeout(() => {
-               const btn = document.getElementById("auto-submit-btn");
-               if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
-            }, 1000);
-         }
+      // 🛡️ THE FIX: Immediately block duplicate Intent triggers
+      if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
+          isHandlingSubmitRef.current = true;
+          setTimeout(() => {
+             const btn = document.getElementById("auto-submit-btn");
+             if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
+          }, 500);
       }
     };
     
@@ -1053,6 +1042,7 @@ export default function InterviewPage() {
 
       <div className="container mx-auto px-6 pt-32 pb-16 max-w-5xl flex flex-col lg:flex-row gap-6">
         
+        {/* Telemetry Sidebar */}
         <div className="lg:w-64 shrink-0 space-y-4">
           <div className="glass rounded-xl p-4 border border-primary/20">
             <h3 className="text-xs font-bold text-primary uppercase tracking-widest mb-4 flex items-center gap-2">
@@ -1090,6 +1080,7 @@ export default function InterviewPage() {
 
         </div>
 
+        {/* Main Interview Area */}
         <motion.div initial="hidden" animate="visible" className="flex-1 space-y-6">
           <motion.div variants={fadeUp} className="space-y-3">
             <div className="flex items-center justify-between">
