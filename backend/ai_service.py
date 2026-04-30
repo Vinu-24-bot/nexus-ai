@@ -23,8 +23,6 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# ─── UTILITY FUNCTIONS ──────────────────────────────────────
-
 def format_prompt(template: str, **kwargs) -> str:
     prompt = template
     for key, value in kwargs.items():
@@ -56,8 +54,6 @@ def _validate_result(result: dict) -> dict:
         if field not in result:
             raise ValueError(f"Missing required field: {field}")
     return result
-
-# ─── ENTERPRISE PROMPTS (RESTORED RAG ENGINE) ───────────
 
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, the Interview Transcript, and the Behavioral Telemetry.
@@ -131,25 +127,25 @@ Output ONLY valid JSON:
 {resume}
 """
 
-DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite, highly realistic AI technical interviewer.
-You are conducting a live voice interview, mimicking a real Senior Engineer perfectly.
+# 🛡️ THE MERCOR UPGRADE: Active Listener Agent. The AI must prove it understood the candidate before moving on.
+DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite AI technical interviewer.
+You are having a live conversation. You must act like a highly intelligent, empathetic human engineering manager.
 
-Question you just asked: {question}
-Candidate's Answer: {answer}
-Next Question queued: {next_question}
+Context of the conversation:
+- The question you just asked: {question}
+- The Candidate's exact answer: {answer}
+- The next planned topic on your list: {next_question}
 
-Your goal is to keep the interview flowing smoothly. 
-Analyze the Candidate's Answer:
-1. CONVERSATIONAL FILLERS: Start your response with a natural human filler (e.g., "Hmm, interesting...", "Right, so...", "Got it...").
-2. INTRODUCTIONS: If the answer is a greeting or introduction, warmly acknowledge it and IMMEDIATELY ask the [Next Question queued]. Set "is_sufficient": true.
-3. VERY SHORT/NOISE: If the answer is extremely short (under 5 words) and DOES NOT directly answer the question (e.g. just "um", "ah", "well"), DO NOT SKIP. Say "Could you elaborate on that?" and set "is_sufficient": false.
-4. NORMAL ANSWERS: If they provide a valid response, acknowledge it naturally and ask the [Next Question queued]. Set "is_sufficient": true.
-5. SKIPS: If they say "I don't know" or "skip", say "No problem, let's move on," and ask the [Next Question queued]. Set "is_sufficient": true.
-6. SILENCE: If the answer is literally "<SILENCE>" or completely empty, say "Take your time, let me know when you're ready." Set "is_sufficient": false.
+YOUR GOAL: Be an Active Listener. Do not just blindly read the next question.
+
+RULES:
+1. IF EXTREMELY VAGUE OR SHORT: If their answer is very short (under 2 sentences) and misses the point, set "is_sufficient": false. Generate a "response_text" asking them to elaborate or clarify. Do NOT ask the next planned topic.
+2. IF DETAILED AND VALID: Set "is_sufficient": true. Generate a "response_text" where you first ACKNOWLEDGE a specific technical detail they just said (to prove you were listening), and then seamlessly pivot into asking the {next_question}. (Keep your response under 3 sentences).
+3. IF THEY SKIP: If they say "I don't know" or "skip", set "is_sufficient": true. Generate a "response_text" saying "No problem, we can skip that. Moving on, [insert next_question here]".
 
 Output ONLY valid JSON:
 {
-  "response_text": "The exact words you will speak, including the human filler.",
+  "response_text": "Your highly conversational, contextual response.",
   "is_sufficient": true
 }
 """
@@ -167,10 +163,7 @@ Raw Text:
 {raw_text}
 """
 
-# ─── API CALLS ──────────────────────────────────────
-
 async def generate_speech_audio(text: str, gender: str = "female") -> bytes:
-    """Generates hyper-realistic neural TTS audio using Microsoft Edge-TTS."""
     if not EDGE_TTS_AVAILABLE:
         raise RuntimeError("edge_tts is not installed. To use neural voices, run: pip install edge-tts")
         
@@ -319,6 +312,7 @@ async def get_answer_acknowledgment(question: str, answer: str, next_question: s
     next_q_text = next_question if next_question else "Thank the candidate and conclude this section."
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_q_text)
     try:
+        # We use the fast 8b model here because we need it to process in under 1 second to keep the interview flow snappy
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=800, groq_model="llama-3.1-8b-instant")
     except Exception as e:
-        return {"response_text": f"Got it. Let's move on. {next_q_text}", "is_sufficient": True}
+        return {"response_text": f"Got it. {next_q_text}", "is_sufficient": True}
