@@ -146,9 +146,9 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Correctly filtered Selected Candidates based ONLY on Recruiter Status, not AI Recommendation
-  const initialScreeningData = results.filter(r => !r.video_filename || !String(r.video_filename).includes("[UPLOADED]"));
-  const l1TechRoundData = results.filter(r => r.video_filename && String(r.video_filename).includes("[UPLOADED]"));
+  // 🛡️ THE FIX: Strict Payload Matching so Live Interviews never bleed into L1 Tech Rounds
+  const l1TechRoundData = results.filter(r => r.transcript && r.transcript.includes("Pre-recorded interview"));
+  const initialScreeningData = results.filter(r => !r.transcript || !r.transcript.includes("Pre-recorded interview"));
   const selectedData = results.filter(r => r.selection_status?.toLowerCase() === "selected");
 
   const calculateStats = (data: EvaluationResult[]) => {
@@ -278,7 +278,8 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {debriefMatrix && debriefMatrix.enterprise_debrief_matrix && activeTab !== "selected" && (
+                {/* 🛡️ THE FIX: Hidden Debrief Matrix from Initial Screening Tab completely */}
+                {debriefMatrix && debriefMatrix.enterprise_debrief_matrix && activeTab === "l1" && (
                    <div className="glass rounded-xl overflow-hidden border border-primary/20 shadow-sm">
                      <div className="bg-muted/50 px-6 py-5 border-b border-border flex justify-between items-center">
                        <h2 className="text-base md:text-lg font-bold text-foreground tracking-wide flex items-center gap-3">

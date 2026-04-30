@@ -20,10 +20,6 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-declare global {
-  interface Window { currentActiveAudio: HTMLAudioElement | null; }
-}
-
 const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number }) => (
   <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-border/50">
     <div className="container mx-auto px-6 h-16 flex items-center justify-between">
@@ -84,14 +80,15 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
       
       const blob = await res.blob();
       const audio = new Audio(URL.createObjectURL(blob));
-      window.currentActiveAudio = audio;
       
-      // 🛡️ THE FIX: Strict Promise resolution to prevent overlapping audio
-      audio.onended = () => { window.currentActiveAudio = null; resolve(); };
-      audio.onerror = () => { window.currentActiveAudio = null; fallbackSpeak(text, gender, resolve); };
+      // 🛡️ THE FIX: Safely attaching to window without triggering TypeScript global scope errors
+      (window as any).currentActiveAudio = audio;
+      
+      audio.onended = () => { (window as any).currentActiveAudio = null; resolve(); };
+      audio.onerror = () => { (window as any).currentActiveAudio = null; fallbackSpeak(text, gender, resolve); };
       
       audio.play().catch(() => {
-        window.currentActiveAudio = null;
+        (window as any).currentActiveAudio = null;
         fallbackSpeak(text, gender, resolve);
       });
     } catch (e) {
@@ -255,10 +252,10 @@ export default function InterviewPage() {
 
   useEffect(() => {
     return () => {
-      if (window.currentActiveAudio) {
-        window.currentActiveAudio.pause();
-        window.currentActiveAudio.currentTime = 0;
-        window.currentActiveAudio = null;
+      if ((window as any).currentActiveAudio) {
+        (window as any).currentActiveAudio.pause();
+        (window as any).currentActiveAudio.currentTime = 0;
+        (window as any).currentActiveAudio = null;
       }
       window.speechSynthesis.cancel();
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
@@ -413,14 +410,14 @@ export default function InterviewPage() {
       const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
       const isSpeakingLoudly = audioLevel > 20;
 
-      // 🛡️ THE FIX: Raised VAD Threshold to 25 and frames to 30 to prevent Speaker Echo from triggering Interruption
+      // 🛡️ VAD Barge-In Engine
       if (isSpeakingRef.current && audioLevel > 25) {
         consecutiveSpeechFramesRef.current += 1;
         if (consecutiveSpeechFramesRef.current > 30) { 
-          if (window.currentActiveAudio) {
-            window.currentActiveAudio.pause();
-            window.currentActiveAudio.currentTime = 0;
-            window.currentActiveAudio = null;
+          if ((window as any).currentActiveAudio) {
+            (window as any).currentActiveAudio.pause();
+            (window as any).currentActiveAudio.currentTime = 0;
+            (window as any).currentActiveAudio = null;
           }
           window.speechSynthesis.cancel();
           isSpeakingRef.current = false;
@@ -570,8 +567,7 @@ export default function InterviewPage() {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      // 🛡️ THE FIX: Increased Silence Timeout to 25 seconds to give candidate time to think
-      else if (timeSinceLastSpeech > 25000) {
+      else if (timeSinceLastSpeech > 45000) {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
@@ -621,7 +617,6 @@ export default function InterviewPage() {
                     const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
                     const isStalling = tLower === "give me a minute" || tLower === "let me think";
 
-                    // 🛡️ THE FIX: Immediately block duplicate Intent triggers
                     if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
                         isHandlingSubmitRef.current = true; 
                         setTimeout(() => {
@@ -685,7 +680,6 @@ export default function InterviewPage() {
       const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
       const isStalling = tLower === "give me a minute" || tLower === "let me think";
 
-      // 🛡️ THE FIX: Immediately block duplicate Intent triggers
       if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
           isHandlingSubmitRef.current = true;
           setTimeout(() => {
