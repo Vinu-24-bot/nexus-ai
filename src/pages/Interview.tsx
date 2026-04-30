@@ -19,6 +19,11 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
+// 🛡️ Global typing for active audio stream reference so VAD can pause it
+declare global {
+  interface Window { currentActiveAudio: HTMLAudioElement | null; }
+}
+
 const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number }) => (
   <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-border/50">
     <div className="container mx-auto px-6 h-16 flex items-center justify-between">
@@ -46,15 +51,44 @@ const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number
   </header>
 );
 
-function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
+// 🛡️ THE UPGRADE: Edge-TTS Backend Fetcher with Browser Fallback
+function speakText(text: string, gender: "female" | "male"): Promise<void> {
+  return new Promise(async (resolve) => {
+    try {
+      const res = await fetch(`${API_URL}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, gender })
+      });
+      
+      if (!res.ok) throw new Error("TTS failed");
+      
+      const blob = await res.blob();
+      const audio = new Audio(URL.createObjectURL(blob));
+      window.currentActiveAudio = audio;
+      
+      audio.onended = () => resolve();
+      audio.onerror = () => resolve();
+      audio.play().catch(() => {
+        fallbackSpeak(text, gender, resolve);
+      });
+    } catch (e) {
+      fallbackSpeak(text, gender, resolve);
+    }
+  });
+}
+
+function fallbackSpeak(text: string, gender: "female" | "male", resolve: () => void) {
+  if (!window.speechSynthesis) { resolve(); return; }
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  
   const voices = window.speechSynthesis.getVoices();
-  if (voices.length === 0) return null;
   const femaleKeywords = ["female", "woman", "jenny", "samantha", "karen", "zira", "victoria"];
   const maleKeywords = ["male", "man", "guy", "david", "mark", "daniel", "james"];
   
   let bestMatch: SpeechSynthesisVoice | null = null;
   let highestScore = -1;
-
   for (const v of voices) {
     if (!v.lang.startsWith("en")) continue;
     const name = v.name.toLowerCase();
@@ -63,24 +97,15 @@ function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
     if (name.includes("google") || name.includes("neural") || name.includes("premium")) score += 5; 
     if (score > highestScore) { highestScore = score; bestMatch = v; }
   }
-  return bestMatch || voices.find(v => v.lang.startsWith("en")) || voices[0];
-}
-
-function speakText(text: string, gender: "female" | "male"): Promise<void> {
-  return new Promise((resolve) => {
-    if (!window.speechSynthesis) { resolve(); return; }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voice = getVoice(gender);
-    if (voice) utterance.voice = voice;
-    utterance.rate = 0.95; 
-    utterance.pitch = gender === "female" ? 1.05 : 0.95;
-    utterance.volume = 1;
-    utterance.lang = "en-US";
-    utterance.onend = () => resolve();
-    utterance.onerror = () => resolve();
-    window.speechSynthesis.speak(utterance);
-  });
+  
+  if (bestMatch) utterance.voice = bestMatch;
+  utterance.rate = 0.95; 
+  utterance.pitch = gender === "female" ? 1.05 : 0.95;
+  utterance.volume = 1;
+  utterance.lang = "en-US";
+  utterance.onend = () => resolve();
+  utterance.onerror = () => resolve();
+  window.speechSynthesis.speak(utterance);
 }
 
 const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | null) => {
@@ -135,7 +160,6 @@ export default function InterviewPage() {
   const [currentLatencyDisplay, setCurrentLatencyDisplay] = useState("0.0s");
   const latenciesRef = useRef<number[]>([]);
 
-  // 🛡️ THE UPGRADE: VAD Barge-In Engine Refs
   const isSpeakingRef = useRef(false);
   const consecutiveSpeechFramesRef = useRef(0);
 
@@ -218,10 +242,11 @@ export default function InterviewPage() {
   }, [sessionId, state, navigate]);
 
   useEffect(() => {
-    const loadVoices = () => { window.speechSynthesis.getVoices(); };
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
     return () => {
+      if (window.currentActiveAudio) {
+        window.currentActiveAudio.pause();
+        window.currentActiveAudio.currentTime = 0;
+      }
       window.speechSynthesis.cancel();
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -371,11 +396,16 @@ export default function InterviewPage() {
       const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
       const isSpeakingLoudly = audioLevel > 20;
 
-      // 🛡️ THE UPGRADE: Full-Duplex VAD Barge-In Engine
+      // 🛡️ THE UPGRADE: Audio Stream Killer
       if (isSpeakingRef.current && audioLevel > 12) {
         consecutiveSpeechFramesRef.current += 1;
-        if (consecutiveSpeechFramesRef.current > 15) { // ~250ms sustained speech
-          window.speechSynthesis.cancel(); // Instantly kill TTS
+        if (consecutiveSpeechFramesRef.current > 15) { 
+          if (window.currentActiveAudio) {
+            window.currentActiveAudio.pause();
+            window.currentActiveAudio.currentTime = 0;
+            window.currentActiveAudio = null;
+          }
+          window.speechSynthesis.cancel();
           isSpeakingRef.current = false;
           setIsSpeaking(false);
           setAiMessage("Oh, go ahead...");
@@ -660,7 +690,6 @@ export default function InterviewPage() {
         isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
     } catch (err) { dynamicResponse = "Understood. " + nextQText; }
 
-    // 🛡️ THE FIX: Force state update BEFORE AI speaks to prevent data loss on interruption
     if (isSufficient) {
       setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
       setAccumulatedTranscript(""); 
