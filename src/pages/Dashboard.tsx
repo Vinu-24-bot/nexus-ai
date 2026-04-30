@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { getEvaluations, getStats, checkBackendHealth, compareCandidates } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
 import Navbar from "@/components/Navbar";
@@ -32,7 +32,6 @@ interface Feedback {
   comments: string;
 }
 
-// 🛡️ THE FIX: Custom Enterprise Status Badge supporting Hold & Doubtful
 const StatusBadge = ({ status }: { status: string }) => {
   let colorClass = "bg-muted text-muted-foreground border-border";
   
@@ -57,13 +56,13 @@ const StatusBadge = ({ status }: { status: string }) => {
 };
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [results, setResults] = useState<EvaluationResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [debriefMatrix, setDebriefMatrix] = useState<any>(null);
 
-  // Split Pipeline Tabs
   const [activeTab, setActiveTab] = useState<"initial" | "l1" | "selected" | "feedback">("initial");
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
   const [pinnedFeedbacks, setPinnedFeedbacks] = useState<(number|string)[]>([]);
@@ -147,7 +146,6 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Deep String Matching Logic to isolate Uploads vs Live Sessions
   const initialScreeningData = results.filter(r => !r.video_filename || !String(r.video_filename).includes("[UPLOADED]"));
   const l1TechRoundData = results.filter(r => r.video_filename && String(r.video_filename).includes("[UPLOADED]"));
   const selectedData = results.filter(r => ["Strong Hire", "Lean Hire", "Selected"].includes(r.hiring_recommendation || ""));
@@ -157,7 +155,6 @@ export default function DashboardPage() {
   else if (activeTab === "l1") activeData = l1TechRoundData;
   else if (activeTab === "selected") activeData = selectedData;
 
-  // 🛡️ THE FIX: Dynamic Stats Calculation based on Active Data
   const calculateStats = (data: EvaluationResult[]) => {
     const total = data.length;
     const avg_score = total > 0 ? Math.round(data.reduce((s, r) => s + (r.scores?.overall_score || 0), 0) / total) : 0;
@@ -203,7 +200,6 @@ export default function DashboardPage() {
             </div>
           </motion.div>
 
-          {/* Pipeline Split Tabs */}
           <div className="flex items-center gap-2 border-b border-border/50 pb-4 mt-6 overflow-x-auto hide-scrollbar">
             <button 
               onClick={() => setActiveTab("initial")}
@@ -240,7 +236,6 @@ export default function DashboardPage() {
             {(activeTab === "initial" || activeTab === "l1" || activeTab === "selected") && (
               <motion.div key="overview-tabs" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8">
                 
-                {/* Dynamic Stats Row */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="glass rounded-xl p-5 border-l-4 border-l-primary/50 shadow-sm">
                     <div className="flex justify-between items-start mb-2">
@@ -282,7 +277,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* 🛡️ THE FIX: Highly Readable Executive Debrief Matrix Header */}
                 {debriefMatrix && debriefMatrix.enterprise_debrief_matrix && activeTab !== "selected" && (
                    <div className="glass rounded-xl overflow-hidden border border-primary/20 shadow-sm">
                      <div className="bg-muted/50 px-6 py-5 border-b border-border flex justify-between items-center">
@@ -332,7 +326,6 @@ export default function DashboardPage() {
                    </div>
                 )}
 
-                {/* Filtered Results List */}
                 <div className="space-y-4">
                   <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
                     {activeTab === "initial" ? "Recent Initial Screenings" : activeTab === "l1" ? "Recent L1 Tech Rounds" : "Selected Candidates Roster"}
@@ -350,28 +343,27 @@ export default function DashboardPage() {
                   ) : (
                     <div className="grid gap-3">
                       {activeData.slice(0, 15).map((result) => (
-                        <div key={result.id}>
-                          <Link
-                            to={`/result/${result.id}`}
-                            className="glass rounded-xl p-5 flex flex-col md:flex-row md:items-center gap-4 hover:border-primary/40 transition-all duration-200 group block relative overflow-hidden shadow-sm"
-                          >
-                            <div className="flex-1 min-w-0 z-10">
-                              <div className="flex items-center gap-3 mb-1">
-                                <h3 className="font-semibold text-foreground truncate text-lg">{result.candidateName}</h3>
-                                <StatusBadge status={result.hiring_recommendation || "Pending"} />
-                              </div>
-                              <p className="text-sm text-muted-foreground">{result.position} · Evaluated on {result.date}</p>
-                              <p className="text-[10px] text-muted-foreground/40 font-mono mt-1">ID: {result.id}</p>
+                        <div 
+                          key={result.id}
+                          onClick={() => navigate(`/result/${result.id}`)}
+                          className="cursor-pointer glass rounded-xl p-5 flex flex-col md:flex-row md:items-center gap-4 hover:border-primary/40 transition-all duration-200 group block relative overflow-hidden shadow-sm"
+                        >
+                          <div className="flex-1 min-w-0 z-10">
+                            <div className="flex items-center gap-3 mb-1">
+                              <h3 className="font-semibold text-foreground truncate text-lg group-hover:text-primary transition-colors">{result.candidateName}</h3>
+                              <StatusBadge status={result.hiring_recommendation || "Pending"} />
                             </div>
-                            <div className="flex items-center gap-6 z-10">
-                              <div className="text-right hidden sm:block">
-                                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Confidence</p>
-                                <p className="text-sm font-medium text-foreground">{result.scores?.confidence_level || 0}%</p>
-                              </div>
-                              <ScoreRing score={result.scores?.overall_score || 0} label="Overall" size={64} />
-                              <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors transform group-hover:translate-x-1" />
+                            <p className="text-sm text-muted-foreground">{result.position} · Evaluated on {result.date}</p>
+                            <p className="text-[10px] text-muted-foreground/40 font-mono mt-1">ID: {result.id}</p>
+                          </div>
+                          <div className="flex items-center gap-6 z-10">
+                            <div className="text-right hidden sm:block">
+                              <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Confidence</p>
+                              <p className="text-sm font-medium text-foreground">{result.scores?.confidence_level || 0}%</p>
                             </div>
-                          </Link>
+                            <ScoreRing score={result.scores?.overall_score || 0} label="Overall" size={64} />
+                            <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors transform group-hover:translate-x-1" />
+                          </div>
                         </div>
                       ))}
                     </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { 
   Search, Download, RefreshCcw, Trash2, ArrowRight, 
@@ -21,6 +21,7 @@ const fadeUp = {
 };
 
 export default function HistoryPage() {
+  const navigate = useNavigate();
   const [evaluations, setEvaluations] = useState<EvaluationResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -63,7 +64,8 @@ export default function HistoryPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation(); 
     if (!window.confirm("Are you sure you want to permanently delete this evaluation?")) return;
     try {
       await deleteEvaluation(id);
@@ -402,14 +404,15 @@ export default function HistoryPage() {
               {filteredEvals.map((ev, i) => (
                 <motion.div 
                   key={ev.id} variants={fadeUp} custom={i}
-                  className="glass p-5 rounded-xl border border-border/50 hover:border-primary/30 transition-all shadow-sm flex flex-col md:flex-row items-center gap-6 group"
+                  onClick={() => navigate(`/result/${ev.id}`)}
+                  className="cursor-pointer glass p-5 rounded-xl border border-border/50 hover:border-primary/50 transition-all shadow-sm flex flex-col md:flex-row items-center gap-6 group"
                 >
                   <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
                     <User className="w-5 h-5 text-primary" />
                   </div>
                   
                   <div className="flex-1 text-center md:text-left">
-                    <h3 className="text-lg font-bold text-foreground">{ev.candidateName}</h3>
+                    <h3 className="text-lg font-bold text-foreground group-hover:text-primary transition-colors">{ev.candidateName}</h3>
                     <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 text-sm text-muted-foreground mt-1">
                       <span>{ev.position}</span>
                       <span>•</span>
@@ -429,24 +432,23 @@ export default function HistoryPage() {
                     <RecommendationBadge recommendation={ev.hiring_recommendation} />
                     
                     <div className="text-center shrink-0 w-16">
-                      <div className="text-2xl font-black text-foreground">{ev.scores?.overall_score || 0}</div>
+                      <div className="text-2xl font-black text-foreground group-hover:text-primary transition-colors">{ev.scores?.overall_score || 0}</div>
                     </div>
 
                     <div className="flex items-center gap-2 border-l border-border/50 pl-6">
                       <button 
-                        onClick={() => handleDelete(ev.id)}
+                        onClick={(e) => handleDelete(e, ev.id)}
                         className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
                         title="Delete Evaluation"
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>
-                      <Link 
-                        to={`/result/${ev.id}`}
-                        className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors group-hover:text-primary group-hover:translate-x-1"
+                      <div 
+                        className="p-2 text-muted-foreground rounded-lg transition-colors group-hover:text-primary group-hover:translate-x-1"
                         title="View Full Report"
                       >
                         <ArrowRight className="w-5 h-5" />
-                      </Link>
+                      </div>
                     </div>
                   </div>
                 </motion.div>

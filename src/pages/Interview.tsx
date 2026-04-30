@@ -119,6 +119,7 @@ export default function InterviewPage() {
   const [aiMessage, setAiMessage] = useState("");
   
   const [liveTranscript, setLiveTranscript] = useState("");
+  const liveTranscriptRef = useRef(""); // 🛡️ THE FIX: Real-time memory to prevent auto-submit data loss
   const [accumulatedTranscript, setAccumulatedTranscript] = useState(""); 
   
   const [totalElapsed, setTotalElapsed] = useState(0);
@@ -452,7 +453,7 @@ export default function InterviewPage() {
     totalTimerRef.current = setInterval(() => setTotalElapsed((t) => t + 1), 1000);
     
     setTimeout(async () => {
-      const introText = `Identity verified. Hello ${candidateName}. Your screen and camera are secured. Please introduce yourself.`;
+      const introText = `Identity verified. Hello ${candidateName}. Your screen and camera are secured. Please introduce yourself and state your role.`;
       await speakAndRecord(introText);
     }, 800);
   };
@@ -477,6 +478,7 @@ export default function InterviewPage() {
 
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
+    liveTranscriptRef.current = "";
     isRecordingRef.current = true;
     isHandlingSubmitRef.current = false;
     recordingStartRef.current = Date.now();
@@ -521,7 +523,11 @@ export default function InterviewPage() {
         if (event.results[i].isFinal) allFinal += transcript + " ";
         else interim += transcript;
       }
+      
       const newText = (allFinal + interim).trim();
+      
+      // 🛡️ THE FIX: Directly update the Ref instantly to prevent data loss on rapid clicks
+      liveTranscriptRef.current = newText;
       setLiveTranscript(newText);
       
       const tLower = newText.toLowerCase();
@@ -555,10 +561,12 @@ export default function InterviewPage() {
     if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} recognitionRef.current = null; }
     
-    const currentText = liveTranscript.trim();
+    // 🛡️ THE FIX: Grab strictly from the Ref, NOT the lagging React state
+    const currentText = liveTranscriptRef.current.trim();
+    liveTranscriptRef.current = "";
     setLiveTranscript("");
     return currentText;
-  }, [liveTranscript]);
+  }, []);
 
   const speakAndRecord = useCallback(async (questionText: string) => {
     setIsSpeaking(true);
@@ -642,7 +650,6 @@ export default function InterviewPage() {
     }
   }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, finalQuestionsList, voiceGender, startSpeechRecognition]);
 
-  // 🛡️ THE HYBRID UPGRADE: Passing exact CV metrics to the backend math engine
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
     isTerminatingRef.current = true;
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
@@ -700,7 +707,6 @@ export default function InterviewPage() {
         } catch {}
       }
 
-      // 🛡️ SECRET CV TELEMETRY PACKAGER
       const baseReason = forcedTerminationReason || "Completed normally.";
       const metricsPayload = JSON.stringify({
          tab_switches: clickWarningsRef.current,
@@ -962,7 +968,7 @@ export default function InterviewPage() {
             
             <div className="flex items-center justify-between">
               {isRecording ? (
-                 <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground">
+                 <Button onClick={handleAnswerSubmit} className="bg-primary text-primary-foreground hover:bg-primary/90">
                    <Send className="w-4 h-4 mr-2" /> Submit Answer <ChevronRight className="w-4 h-4 ml-1" />
                  </Button>
               ) : (
