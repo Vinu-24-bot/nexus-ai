@@ -131,10 +131,13 @@ export default function InterviewPage() {
   const [telemetry, setTelemetry] = useState({ faces: 1, liveness: 99, lipSync: true, mask: false });
   const [maskWarnings, setMaskWarnings] = useState(0);
 
-  // 🛡️ THE UPGRADE: Behavioral Latency Memory Tracking
   const questionEndTimeRef = useRef(0);
   const [currentLatencyDisplay, setCurrentLatencyDisplay] = useState("0.0s");
   const latenciesRef = useRef<number[]>([]);
+
+  // 🛡️ THE UPGRADE: VAD Barge-In Engine Refs
+  const isSpeakingRef = useRef(false);
+  const consecutiveSpeechFramesRef = useRef(0);
 
   const [rating, setRating] = useState(0);
   const [feedbackText, setFeedbackText] = useState("");
@@ -368,6 +371,26 @@ export default function InterviewPage() {
       const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
       const isSpeakingLoudly = audioLevel > 20;
 
+      // 🛡️ THE UPGRADE: Full-Duplex VAD Barge-In Engine
+      if (isSpeakingRef.current && audioLevel > 12) {
+        consecutiveSpeechFramesRef.current += 1;
+        if (consecutiveSpeechFramesRef.current > 15) { // ~250ms sustained speech
+          window.speechSynthesis.cancel(); // Instantly kill TTS
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+          setAiMessage("Oh, go ahead...");
+          consecutiveSpeechFramesRef.current = 0;
+          
+          questionEndTimeRef.current = Date.now();
+          setCurrentLatencyDisplay("0.0s");
+          setIsRecording(true);
+          startSpeechRecognition();
+          toast.info("🎙️ You interrupted the interviewer. Mic is open.");
+        }
+      } else {
+        consecutiveSpeechFramesRef.current = 0;
+      }
+
       const mockVisionData = {
         facesDetected: 1, 
         hasMask: false, 
@@ -522,7 +545,6 @@ export default function InterviewPage() {
     recognition.onresult = (event) => {
       const now = Date.now();
       
-      // 🛡️ THE UPGRADE: Track exact latency (hesitation) before they spoke
       if (lastSpeechRef.current === recordingStartRef.current) {
         const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
         setCurrentLatencyDisplay(`${latencySecs}s`);
@@ -582,15 +604,20 @@ export default function InterviewPage() {
 
   const speakAndRecord = useCallback(async (questionText: string) => {
     setIsSpeaking(true);
+    isSpeakingRef.current = true;
     setAiMessage(questionText);
+    
     await speakText(questionText, voiceGender);
-    setIsSpeaking(false);
-    setAiMessage("");
-    // 🛡️ THE UPGRADE: Mark exactly when the AI finishes speaking
-    questionEndTimeRef.current = Date.now();
-    setCurrentLatencyDisplay("0.0s");
-    setIsRecording(true);
-    startSpeechRecognition();
+    
+    if (isSpeakingRef.current) {
+      setIsSpeaking(false);
+      isSpeakingRef.current = false;
+      setAiMessage("");
+      questionEndTimeRef.current = Date.now();
+      setCurrentLatencyDisplay("0.0s");
+      setIsRecording(true);
+      startSpeechRecognition();
+    }
   }, [voiceGender, startSpeechRecognition]);
 
   const handleAnswerSubmit = useCallback(async (e: any) => {
@@ -608,20 +635,13 @@ export default function InterviewPage() {
     const newTranscriptChunk = stopRecording(); 
     let finalChunk = newTranscriptChunk.trim();
 
-    if (reason === "OVER_TIME_LIMIT") {
-       finalChunk += " [SYSTEM: OVER_TIME_LIMIT]";
-    } else if (reason === "MIC_ERROR") {
-       finalChunk += " [SYSTEM: MIC_ERROR]";
-    } else if (reason === "SILENCE" && finalChunk.length === 0 && accumulatedTranscript.length === 0) {
-       finalChunk = "<SILENCE>";
-    }
+    if (reason === "OVER_TIME_LIMIT") finalChunk += " [SYSTEM: OVER_TIME_LIMIT]";
+    else if (reason === "MIC_ERROR") finalChunk += " [SYSTEM: MIC_ERROR]";
+    else if (reason === "SILENCE" && finalChunk.length === 0 && accumulatedTranscript.length === 0) finalChunk = "<SILENCE>";
 
     const totalAnswerSoFar = finalChunk === "<SILENCE>" ? "<SILENCE>" : (accumulatedTranscript + " " + finalChunk).trim();
     setAccumulatedTranscript(totalAnswerSoFar);
 
-    setIsSpeaking(true);
-    setAiMessage("Thinking..."); 
-    
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
     let nextIndex = introPhase ? 0 : currentQ + 1;
     let nextQData = finalQuestionsList[nextIndex];
@@ -640,33 +660,34 @@ export default function InterviewPage() {
         isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
     } catch (err) { dynamicResponse = "Understood. " + nextQText; }
 
+    // 🛡️ THE FIX: Force state update BEFORE AI speaks to prevent data loss on interruption
+    if (isSufficient) {
+      setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
+      setAccumulatedTranscript(""); 
+
+      if (introPhase) {
+        setIntroPhase(false); setCurrentQ(0);
+      } else if (currentQ < totalQuestions - 1) {
+        setCurrentQ(nextIndex); 
+      } else {
+        finalizeInterviewAndUpload();
+        return;
+      }
+    }
+
+    setIsSpeaking(true);
+    isSpeakingRef.current = true;
     setAiMessage(dynamicResponse);
     await speakText(dynamicResponse, voiceGender);
-    setIsSpeaking(false);
-    setAiMessage("");
 
-    if (!isSufficient) {
+    if (isSpeakingRef.current) {
+        setIsSpeaking(false);
+        isSpeakingRef.current = false;
+        setAiMessage("");
         questionEndTimeRef.current = Date.now();
+        setCurrentLatencyDisplay("0.0s");
         setIsRecording(true);
         startSpeechRecognition();
-        return; 
-    }
-
-    setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
-    setAccumulatedTranscript(""); 
-
-    if (introPhase) {
-      setIntroPhase(false); setCurrentQ(0); 
-      questionEndTimeRef.current = Date.now();
-      setIsRecording(true); startSpeechRecognition(); return;
-    }
-
-    if (currentQ < totalQuestions - 1) {
-      setCurrentQ(nextIndex); 
-      questionEndTimeRef.current = Date.now();
-      setIsRecording(true); startSpeechRecognition();
-    } else {
-      finalizeInterviewAndUpload();
     }
   }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, finalQuestionsList, voiceGender, startSpeechRecognition]);
 
@@ -727,7 +748,6 @@ export default function InterviewPage() {
         } catch {}
       }
 
-      // 🛡️ THE UPGRADE: Calculate average hesitation/latency and send to Backend Math Engine
       const validLatencies = latenciesRef.current.filter(l => l > 0);
       const avgLatency = validLatencies.length > 0 ? (validLatencies.reduce((a,b)=>a+b,0) / validLatencies.length).toFixed(1) : 0;
 
@@ -898,7 +918,6 @@ export default function InterviewPage() {
 
       <div className="container mx-auto px-6 pt-32 pb-16 max-w-5xl flex flex-col lg:flex-row gap-6">
         
-        {/* Telemetry Sidebar */}
         <div className="lg:w-64 shrink-0 space-y-4">
           <div className="glass rounded-xl p-4 border border-primary/20">
             <h3 className="text-xs font-bold text-primary uppercase tracking-widest mb-4 flex items-center gap-2">
@@ -917,7 +936,6 @@ export default function InterviewPage() {
                 <span className="text-muted-foreground">LIP SYNC</span>
                 <span className={telemetry.lipSync ? "text-green-500" : "text-destructive animate-pulse"}>{telemetry.lipSync ? "VERIFIED" : "FAILED"}</span>
               </div>
-              {/* 🛡️ THE UPGRADE: Live Latency Display */}
               <div className="flex justify-between items-center p-2 rounded bg-muted/50">
                 <span className="text-muted-foreground flex items-center gap-1" title="Hesitation before answering">
                   <Timer className="w-3 h-3" /> LATENCY
@@ -934,10 +952,8 @@ export default function InterviewPage() {
           >
             <LogOut className="w-4 h-4 mr-2" /> End Interview
           </Button>
-
         </div>
 
-        {/* Main Interview Area */}
         <motion.div initial="hidden" animate="visible" className="flex-1 space-y-6">
           <motion.div variants={fadeUp} className="space-y-3">
             <div className="flex items-center justify-between">
@@ -969,7 +985,6 @@ export default function InterviewPage() {
             <div className="relative rounded-lg overflow-hidden bg-muted aspect-video border border-primary/20 shadow-[0_0_15px_rgba(0,240,255,0.1)]">
               <video ref={videoRef} muted playsInline className="w-full h-full object-cover block" style={{ transform: "scaleX(-1)" }} />
               
-              {/* High-Tech Face Box Overlay */}
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-56 border-2 border-primary/40 rounded-lg pointer-events-none">
                 <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-primary"></div>
                 <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-primary"></div>
