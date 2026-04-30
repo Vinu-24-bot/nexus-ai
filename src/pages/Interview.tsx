@@ -569,7 +569,8 @@ export default function InterviewPage() {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      else if (timeSinceLastSpeech > 45000) {
+      // 🛡️ THE FIX: Restored ideal 12-second auto-submit trigger for natural conversational flow
+      else if (timeSinceLastSpeech > 12000) {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
@@ -577,7 +578,6 @@ export default function InterviewPage() {
 
     if (DEEPGRAM_API_KEY && streamRef.current) {
         try {
-            // 🛡️ THE MERCOR FIX: Increased endpointing to 800ms so it doesn't cut candidates off mid-sentence
             const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&interim_results=true&endpointing=800', ['token', DEEPGRAM_API_KEY]);
             dgSocketRef.current = socket;
             
@@ -625,18 +625,6 @@ export default function InterviewPage() {
                         const interimText = (finalTranscriptAccumulator + transcript).trim();
                         liveTranscriptRef.current = interimText;
                         setLiveTranscript(interimText);
-                    }
-
-                    const tLower = transcript.toLowerCase();
-                    const isSkipping = tLower === "skip" || tLower === "i don't know";
-                    const isStalling = tLower === "give me a minute" || tLower === "let me think";
-
-                    if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
-                        isHandlingSubmitRef.current = true; 
-                        setTimeout(() => {
-                           const btn = document.getElementById("auto-submit-btn");
-                           if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
-                        }, 500);
                     }
                 }
             };
@@ -688,18 +676,6 @@ export default function InterviewPage() {
       
       liveTranscriptRef.current = newText;
       setLiveTranscript(newText);
-      
-      const tLower = newText.toLowerCase();
-      const isSkipping = tLower === "skip" || tLower === "i don't know";
-      const isStalling = tLower === "give me a minute" || tLower === "let me think";
-
-      if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
-          isHandlingSubmitRef.current = true;
-          setTimeout(() => {
-             const btn = document.getElementById("auto-submit-btn");
-             if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
-          }, 500);
-      }
     };
     
     recognition.onerror = (event: any) => {
@@ -784,7 +760,6 @@ export default function InterviewPage() {
     let dynamicResponse = "";
     let isSufficient = true;
 
-    // 🛡️ THE MERCOR FIX: Removed "Fast-Path". Send EVERYTHING to the LLM so the AI can build a highly contextual, human-like bridge.
     try {
         const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
             method: "POST", headers: { "Content-Type": "application/json" },
