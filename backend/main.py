@@ -17,10 +17,11 @@ from typing import List
 from concurrent.futures import ThreadPoolExecutor
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, BackgroundTasks, Request
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, BackgroundTasks, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text  
 
@@ -33,7 +34,8 @@ from schemas import (
 )
 from ai_service import (
     evaluate_candidate, generate_interview_questions,
-    generate_jd, get_answer_acknowledgment, transcribe_audio, parse_resume_to_json
+    generate_jd, get_answer_acknowledgment, transcribe_audio, parse_resume_to_json,
+    generate_speech_audio
 )
 
 load_dotenv()
@@ -102,7 +104,6 @@ def save_result_file(eval_id: str, candidate_name: str, result_data: dict):
         json.dump(result_data, f, indent=2, ensure_ascii=False)
     return str(filepath)
 
-# 🛡️ THE FIX: Restricted ffmpeg to 1 thread to prevent RAM spikes and OOM crashes
 def extract_audio(video_path: str, audio_path: str) -> bool:
     try:
         command = ["ffmpeg", "-threads", "1", "-i", video_path, "-q:a", "0", "-map", "a", audio_path, "-y"]
@@ -112,7 +113,6 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
         print(f"[BATS] Audio Extraction Error: {e}")
         return False
 
-# 🛡️ THE FIX: Synchronous HF Upload function (Will be run in a thread pool below)
 def upload_to_hf_sync(file_path: Path, filename: str) -> str:
     hf_token = os.getenv("HF_TOKEN")
     hf_repo_id = os.getenv("HF_REPO_ID")
@@ -149,6 +149,19 @@ def send_system_email(to_email: str, subject: str, body: str):
             client.post(gas_url, json=payload)
     except Exception:
         pass
+
+# 🛡️ THE UPGRADE: 100% Free Neural Voice Route
+class TTSRequest(BaseModel):
+    text: str
+    gender: str = "female"
+
+@app.post("/api/tts")
+async def text_to_speech(req: TTSRequest):
+    try:
+        audio_bytes = await generate_speech_audio(req.text, req.gender)
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 async def root():
@@ -283,7 +296,7 @@ async def upload_video(video: UploadFile = File(...)):
     safe_name = f"{timestamp}_{video.filename}"
     file_path = RECORDINGS_DIR / safe_name
     with open(file_path, "wb") as f: shutil.copyfileobj(video.file, f)
-    gc.collect() # 🛡️ RAM Flush
+    gc.collect() 
     return {"filename": safe_name, "path": f"recordings/{safe_name}", "size": file_path.stat().st_size, "timestamp": timestamp}
 
 @app.post("/api/upload-resume", response_model=ResumeUploadResponse)
@@ -327,7 +340,7 @@ async def upload_resume(file: UploadFile = File(...)):
             extracted_text = "[DOCX extraction requires python-docx.]"
 
     del content
-    gc.collect() # 🛡️ RAM Flush
+    gc.collect() 
     return ResumeUploadResponse(filename=safe_name, path=str(file_path), extracted_text=extracted_text, size=file_path.stat().st_size)
 
 @app.post("/api/generate-questions")
@@ -372,12 +385,10 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
                     except: 
                         pass
 
-                # 🛡️ THE FIX: Offload HF Upload to a background thread so it doesn't freeze FastAPI/Render
                 cloud_url = await asyncio.to_thread(upload_to_hf_sync, video_path, actual_video_filename)
                 if cloud_url:
                     final_video_storage = f"[UPLOADED] {cloud_url}"
 
-        # 🛡️ Aggressive RAM Flush before the heavy AI Evaluation
         gc.collect()
 
         behavior_data = {}
@@ -411,7 +422,7 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
         response_data = db_to_response(evaluation)
         save_result_file(evaluation.id, evaluation.candidate_name, response_data)
         
-        gc.collect() # Final flush
+        gc.collect() 
         return response_data
 
     except ValueError as e:
