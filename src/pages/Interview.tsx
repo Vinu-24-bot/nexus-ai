@@ -569,8 +569,8 @@ export default function InterviewPage() {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      // 🛡️ THE FIX: Restored ideal 12-second auto-submit trigger for natural conversational flow
-      else if (timeSinceLastSpeech > 12000) {
+      // 🛡️ THE FIX: Set auto-submit watchdog to exactly 8 seconds to prevent lingering delays
+      else if (timeSinceLastSpeech > 8000) {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
@@ -626,6 +626,19 @@ export default function InterviewPage() {
                         liveTranscriptRef.current = interimText;
                         setLiveTranscript(interimText);
                     }
+
+                    const tLower = transcript.toLowerCase();
+                    // 🛡️ THE FIX: Broadened regex to ruthlessly catch any skip/don't know variation instantly
+                    const isSkipping = tLower === "skip" || tLower.includes("next question") || tLower.includes("i don't know") || tLower.includes("not sure") || tLower.includes("move ahead") || tLower.includes("move on");
+                    const isStalling = tLower === "give me a minute" || tLower === "let me think";
+
+                    if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
+                        isHandlingSubmitRef.current = true; 
+                        setTimeout(() => {
+                           const btn = document.getElementById("auto-submit-btn");
+                           if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
+                        }, 500);
+                    }
                 }
             };
             
@@ -676,6 +689,18 @@ export default function InterviewPage() {
       
       liveTranscriptRef.current = newText;
       setLiveTranscript(newText);
+      
+      const tLower = newText.toLowerCase();
+      const isSkipping = tLower === "skip" || tLower.includes("next question") || tLower.includes("i don't know") || tLower.includes("not sure") || tLower.includes("move ahead") || tLower.includes("move on");
+      const isStalling = tLower === "give me a minute" || tLower === "let me think";
+
+      if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
+          isHandlingSubmitRef.current = true;
+          setTimeout(() => {
+             const btn = document.getElementById("auto-submit-btn");
+             if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
+          }, 500);
+      }
     };
     
     recognition.onerror = (event: any) => {

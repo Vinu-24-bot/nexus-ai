@@ -146,9 +146,9 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Bulletproof sync with the History page logic
-  const initialScreeningData = results.filter(r => !r.video_filename?.includes("[UPLOADED]"));
-  const l1TechRoundData = results.filter(r => r.video_filename?.includes("[UPLOADED]"));
+  // 🛡️ THE FIX: Bulletproof sync with History.tsx using explicit video_filename checking
+  const initialScreeningData = results.filter(r => !r.video_filename || !String(r.video_filename).includes("[UPLOADED]"));
+  const l1TechRoundData = results.filter(r => r.video_filename && String(r.video_filename).includes("[UPLOADED]"));
   const selectedData = results.filter(r => r.selection_status?.toLowerCase() === "selected");
 
   const calculateStats = (data: EvaluationResult[]) => {
@@ -278,6 +278,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
+                {/* 🛡️ THE FIX: Hard-locked to only show strictly when L1 Tech Round tab is selected */}
                 {debriefMatrix && debriefMatrix.enterprise_debrief_matrix && activeTab === "l1" && (
                    <div className="glass rounded-xl overflow-hidden border border-primary/20 shadow-sm">
                      <div className="bg-muted/50 px-6 py-5 border-b border-border flex justify-between items-center">

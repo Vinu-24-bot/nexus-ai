@@ -76,15 +76,15 @@ export default function HistoryPage() {
     }
   };
 
-  // 🛡️ DYNAMIC FILTERING ENGINE
+  // 🛡️ THE FIX: DYNAMIC FILTERING ENGINE 100% Synced with Dashboard Logic
   const filteredEvals = useMemo(() => {
     let filtered = [...evaluations];
 
     // 1. Tab Filter
     if (activeTab === "Initial Screening (Live)") {
-      filtered = filtered.filter(ev => !ev.video_filename?.includes("[UPLOADED]"));
+      filtered = filtered.filter(ev => !ev.video_filename || !String(ev.video_filename).includes("[UPLOADED]"));
     } else if (activeTab === "L1 Tech Round (Uploaded)") {
-      filtered = filtered.filter(ev => ev.video_filename?.includes("[UPLOADED]"));
+      filtered = filtered.filter(ev => ev.video_filename && String(ev.video_filename).includes("[UPLOADED]"));
     }
 
     // 2. Search Filter
@@ -374,7 +374,6 @@ export default function HistoryPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                {/* 🛡️ THE FIX: Updated text exactly as requested */}
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> ForgePro Verdict</span>
                 <select 
                   value={recFilter} onChange={(e) => setRecFilter(e.target.value)}
