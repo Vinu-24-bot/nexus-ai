@@ -149,6 +149,7 @@ export default function InterviewPage() {
   const [introPhase, setIntroPhase] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
   
   const [liveTranscript, setLiveTranscript] = useState("");
@@ -504,7 +505,6 @@ export default function InterviewPage() {
     startSecurityTelemetry();
     await speakText("Activating security vault. Scanning face mesh and environment.", voiceGender);
     
-    // 🛡️ THE FIX: Sped up Face Scan logic to 2 seconds for a snappier feel
     setTimeout(() => {
       if (telemetry.mask) {
         handleSecurityViolation("Mask detected", true);
@@ -577,8 +577,8 @@ export default function InterviewPage() {
 
     if (DEEPGRAM_API_KEY && streamRef.current) {
         try {
-            // 🛡️ THE FIX: Deepgram WebSocket now uses smart_format and reduced endpointing (300ms) for high accuracy
-            const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&interim_results=true&endpointing=300', ['token', DEEPGRAM_API_KEY]);
+            // 🛡️ THE MERCOR FIX: Increased endpointing to 800ms so it doesn't cut candidates off mid-sentence
+            const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&interim_results=true&endpointing=800', ['token', DEEPGRAM_API_KEY]);
             dgSocketRef.current = socket;
             
             let finalTranscriptAccumulator = "";
@@ -628,7 +628,7 @@ export default function InterviewPage() {
                     }
 
                     const tLower = transcript.toLowerCase();
-                    const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
+                    const isSkipping = tLower === "skip" || tLower === "i don't know";
                     const isStalling = tLower === "give me a minute" || tLower === "let me think";
 
                     if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
@@ -690,7 +690,7 @@ export default function InterviewPage() {
       setLiveTranscript(newText);
       
       const tLower = newText.toLowerCase();
-      const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
+      const isSkipping = tLower === "skip" || tLower === "i don't know";
       const isStalling = tLower === "give me a minute" || tLower === "let me think";
 
       if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
@@ -736,6 +736,7 @@ export default function InterviewPage() {
 
   const speakAndRecord = useCallback(async (questionText: string) => {
     setIsSpeaking(true);
+    setIsAnalyzing(false);
     isSpeakingRef.current = true;
     setAiMessage(questionText);
     
@@ -757,6 +758,7 @@ export default function InterviewPage() {
     
     isHandlingSubmitRef.current = true;
     setIsRecording(false);
+    setIsAnalyzing(true);
     
     let reason = "";
     if (e && e.target && e.target.dataset) {
@@ -779,54 +781,36 @@ export default function InterviewPage() {
     let nextQData = finalQuestionsList[nextIndex];
     let nextQText = nextQData ? nextQData.question : "Okay, that concludes all the technical questions.";
 
-    // 🛡️ THE FIX: Optimistic Fast-Path (Eliminates LLM Latency by 100% for standard answers)
-    const wordCount = totalAnswerSoFar.trim().split(/\s+/).length;
-    const isSkipping = totalAnswerSoFar.toLowerCase().includes("skip") || totalAnswerSoFar.toLowerCase().includes("don't know");
-
     let dynamicResponse = "";
+    let isSufficient = true;
+
+    // 🛡️ THE MERCOR FIX: Removed "Fast-Path". Send EVERYTHING to the LLM so the AI can build a highly contextual, human-like bridge.
+    try {
+        const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: nextQText })
+        });
+        const ackData = await ackRes.json();
+        dynamicResponse = ackData.response_text || ("Okay. " + nextQText);
+        isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
+    } catch (err) { dynamicResponse = "Understood. " + nextQText; }
+
+    if (isSufficient) {
+      setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
+      setAccumulatedTranscript(""); 
+
+      if (introPhase) {
+        setIntroPhase(false); setCurrentQ(0);
+      } else if (currentQ < totalQuestions - 1) {
+        setCurrentQ(nextIndex); 
+      } else {
+        finalizeInterviewAndUpload();
+        return;
+      }
+    }
 
     setIsSpeaking(true);
-    setAiMessage("Processing..."); 
-
-    if (wordCount < 4 && !isSkipping && totalAnswerSoFar !== "<SILENCE>") {
-        try {
-            const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: nextQText })
-            });
-            const ackData = await ackRes.json();
-            dynamicResponse = ackData.response_text || ("Could you elaborate on that?");
-            
-            if (ackData.is_sufficient === false) {
-                setAiMessage(dynamicResponse);
-                await speakText(dynamicResponse, voiceGender);
-                setIsSpeaking(false);
-                isSpeakingRef.current = false;
-                setAiMessage("");
-                questionEndTimeRef.current = Date.now();
-                setIsRecording(true);
-                startSpeechRecognition();
-                return;
-            }
-        } catch (err) { dynamicResponse = "Got it. " + nextQText; }
-    } else {
-        const fillers = ["Got it. ", "Understood. ", "Makes sense. ", "Alright. "];
-        const filler = introPhase ? "Great to meet you. " : (isSkipping ? "No problem. " : fillers[Math.floor(Math.random() * fillers.length)]);
-        dynamicResponse = filler + nextQText;
-    }
-
-    setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
-    setAccumulatedTranscript(""); 
-
-    if (introPhase) {
-      setIntroPhase(false); setCurrentQ(0);
-    } else if (currentQ < totalQuestions - 1) {
-      setCurrentQ(nextIndex); 
-    } else {
-      finalizeInterviewAndUpload();
-      return;
-    }
-
+    setIsAnalyzing(false);
     isSpeakingRef.current = true;
     setAiMessage(dynamicResponse);
     await speakText(dynamicResponse, voiceGender);
@@ -1062,7 +1046,6 @@ export default function InterviewPage() {
     );
   }
 
-  // 🛡️ THE FIX: UI upgrade - Cinematic View, Stacked Layout, Professional aesthetic
   return (
     <div className="min-h-screen bg-background nexus-grid">
       <CandidateHeader isLive={true} strikes={cheatStrikes} />
@@ -1096,7 +1079,7 @@ export default function InterviewPage() {
           <motion.div className="h-full bg-primary rounded-full" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 0.3 }} />
         </div>
 
-        {/* 🛡️ THE FIX: Cinematic Centered Video View */}
+        {/* Cinematic Centered Video View */}
         <div className="w-full max-w-4xl mx-auto mt-4 mb-2">
           <div className="relative rounded-2xl overflow-hidden bg-black aspect-video border border-primary/20 shadow-[0_0_50px_rgba(0,240,255,0.15)] ring-1 ring-white/5">
             <video ref={videoRef} muted playsInline className="w-full h-full object-cover block" style={{ transform: "scaleX(-1)" }} />
@@ -1162,6 +1145,10 @@ export default function InterviewPage() {
               {isRecording ? (
                  <Button onClick={handleAnswerSubmit} className="w-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
                    <Send className="w-4 h-4 mr-2" /> Submit Answer
+                 </Button>
+              ) : isAnalyzing ? (
+                 <Button disabled variant="outline" className="w-full border-primary/50 bg-primary/10 text-primary">
+                   <Loader2 className="w-4 h-4 animate-spin mr-2" /> Analyzing Answer...
                  </Button>
               ) : (
                  <Button disabled variant="outline" className="w-full border-border/50 bg-muted/30">
