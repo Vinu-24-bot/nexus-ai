@@ -99,7 +99,6 @@ Synthesize the findings reliably. Output ONLY valid JSON matching this exact str
 {transcript}
 """
 
-# 🛡️ THE FIX: Forcefully limited question generation to 15 words for rapid-fire coverage
 QUESTION_GENERATION_PROMPT = """You are "BATS ForgePro", an elite, human-like AI technical interviewer.
 Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY {num_questions} highly unique, targeted questions.
 
@@ -128,7 +127,6 @@ Output ONLY valid JSON:
 {resume}
 """
 
-# 🛡️ THE FIX: Explicitly commanded the AI to never twist/repeat questions if the candidate skips
 DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite AI technical interviewer.
 You are having a live conversation. You must act like a highly intelligent, empathetic human engineering manager.
 
@@ -143,7 +141,7 @@ RULES:
 1. IF THEY SKIP OR DON'T KNOW: If the candidate says "I don't know", "not sure", "skip", or "move ahead", you MUST set "is_sufficient": true. DO NOT twist or rephrase the same question. Acknowledge gracefully (e.g., "Got it, let's move on.") and IMMEDIATELY ask the exact {next_question}.
 2. IF SILENCE: If the answer is exactly "<SILENCE>", you MUST set "is_sufficient": true. Say "Let's move ahead to the next topic." and ask the {next_question}.
 3. IF DETAILED AND VALID: Set "is_sufficient": true. Acknowledge a specific technical detail they just said (under 10 words), and seamlessly pivot into asking the {next_question}.
-4. IF EXTREMELY VAGUE (but not a skip): If the answer is under 5 words and completely misses the point (like "um", "well"), set "is_sufficient": false. Ask them to clarify. Do NOT ask the next planned topic.
+4. IF EXTREMELY VAGUE (but not a skip): If the answer is under 5 words and completely misses the point (like "um", "well"), set "is_sufficient": false. Ask them to clarify briefly. Do NOT ask the next planned topic.
 
 Output ONLY valid JSON:
 {
@@ -314,6 +312,7 @@ async def get_answer_acknowledgment(question: str, answer: str, next_question: s
     next_q_text = next_question if next_question else "Thank the candidate and conclude this section."
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_q_text)
     try:
-        return await _call_ai_cascade(prompt, force_json=True, max_tokens=800, groq_model="llama-3.1-8b-instant")
+        # 🛡️ THE FIX: Reduced max_tokens to 150. Forces LLM to return answer instantly (under 300ms) ensuring fast pacing.
+        return await _call_ai_cascade(prompt, force_json=True, max_tokens=150, groq_model="llama-3.1-8b-instant")
     except Exception as e:
         return {"response_text": f"Got it. {next_q_text}", "is_sufficient": True}
