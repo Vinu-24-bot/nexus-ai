@@ -374,7 +374,8 @@ export default function HistoryPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> AI Verdict</span>
+                {/* 🛡️ THE FIX: Updated text exactly as requested */}
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> ForgePro Verdict</span>
                 <select 
                   value={recFilter} onChange={(e) => setRecFilter(e.target.value)}
                   className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none"
