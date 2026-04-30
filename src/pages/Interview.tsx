@@ -81,7 +81,6 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
       const blob = await res.blob();
       const audio = new Audio(URL.createObjectURL(blob));
       
-      // 🛡️ THE FIX: Safely attaching to window without triggering TypeScript global scope errors
       (window as any).currentActiveAudio = audio;
       
       audio.onended = () => { (window as any).currentActiveAudio = null; resolve(); };
@@ -410,7 +409,6 @@ export default function InterviewPage() {
       const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
       const isSpeakingLoudly = audioLevel > 20;
 
-      // 🛡️ VAD Barge-In Engine
       if (isSpeakingRef.current && audioLevel > 25) {
         consecutiveSpeechFramesRef.current += 1;
         if (consecutiveSpeechFramesRef.current > 30) { 
@@ -548,6 +546,7 @@ export default function InterviewPage() {
     });
   }, []);
 
+  // 🛡️ THE FIX: Bulletproof STT Fallback & Accumulation Engine
   const startSpeechRecognition = useCallback(() => {
     setLiveTranscript("");
     liveTranscriptRef.current = "";
@@ -573,20 +572,105 @@ export default function InterviewPage() {
       }
     }, 1000);
 
+    const handleSpeechIntent = (text: string) => {
+        const tLower = text.toLowerCase().trim();
+        const isExactSkip = tLower === "skip" || tLower === "i don't know";
+        
+        if (isExactSkip && !isHandlingSubmitRef.current) {
+            isHandlingSubmitRef.current = true; 
+            setTimeout(() => {
+               const btn = document.getElementById("auto-submit-btn");
+               if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
+            }, 500);
+        }
+    };
+
+    const startNative = () => {
+        // @ts-ignore
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            toast.error("Speech recognition not supported in this browser. Please use Chrome.");
+            return;
+        }
+
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+        
+        let nativeFinalAccumulator = "";
+
+        // @ts-ignore
+        recognition.onresult = (event) => {
+            const now = Date.now();
+            if (lastSpeechRef.current === recordingStartRef.current) {
+                const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
+                setCurrentLatencyDisplay(`${latencySecs}s`);
+                latenciesRef.current.push(parseFloat(latencySecs));
+            }
+            lastSpeechRef.current = now; 
+            
+            let interim = "";
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    nativeFinalAccumulator += event.results[i][0].transcript + " ";
+                } else {
+                    interim += event.results[i][0].transcript;
+                }
+            }
+            
+            const fullText = (nativeFinalAccumulator + interim).trim();
+            liveTranscriptRef.current = fullText;
+            setLiveTranscript(fullText);
+            handleSpeechIntent(fullText);
+        };
+        
+        recognition.onerror = (event: any) => {
+            if (event.error === 'network' || event.error === 'audio-capture') {
+                const btn = document.getElementById("auto-submit-btn");
+                if (btn && !isHandlingSubmitRef.current) { btn.dataset.reason = "MIC_ERROR"; btn.click(); }
+            }
+        };
+        
+        recognition.onend = () => { 
+            if (isRecordingRef.current) { try { recognition.start(); } catch {} } 
+        };
+        
+        recognition.start();
+        recognitionRef.current = recognition;
+    };
+
     if (DEEPGRAM_API_KEY && streamRef.current) {
         try {
             const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&punctuate=true&interim_results=true&endpointing=500', ['token', DEEPGRAM_API_KEY]);
             dgSocketRef.current = socket;
             
             let finalTranscriptAccumulator = "";
+            let isSocketReady = false;
 
             socket.onopen = () => {
-                const recorder = new MediaRecorder(streamRef.current as MediaStream, { mimeType: 'audio/webm' });
-                dgRecorderRef.current = recorder;
-                recorder.addEventListener('dataavailable', event => {
-                    if (event.data.size > 0 && socket.readyState === 1) socket.send(event.data);
-                });
-                recorder.start(250); 
+                isSocketReady = true;
+                
+                // 🛡️ THE FIX: Strictly isolate ONLY the audio track so Deepgram doesn't crash on video
+                const audioTrack = streamRef.current?.getAudioTracks()[0];
+                if (!audioTrack) {
+                    startNative();
+                    return;
+                }
+                
+                const audioStream = new MediaStream([audioTrack]);
+                
+                try {
+                    const recorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+                    dgRecorderRef.current = recorder;
+                    recorder.addEventListener('dataavailable', event => {
+                        if (event.data.size > 0 && socket.readyState === 1) socket.send(event.data);
+                    });
+                    recorder.start(250); 
+                } catch (err) {
+                    socket.close();
+                    startNative();
+                }
             };
 
             socket.onmessage = (message) => {
@@ -607,99 +691,30 @@ export default function InterviewPage() {
                         const fullText = finalTranscriptAccumulator.trim();
                         liveTranscriptRef.current = fullText;
                         setLiveTranscript(fullText);
+                        handleSpeechIntent(transcript);
                     } else {
                         const interimText = (finalTranscriptAccumulator + transcript).trim();
                         liveTranscriptRef.current = interimText;
                         setLiveTranscript(interimText);
                     }
-
-                    const tLower = transcript.toLowerCase();
-                    const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
-                    const isStalling = tLower === "give me a minute" || tLower === "let me think";
-
-                    if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
-                        isHandlingSubmitRef.current = true; 
-                        setTimeout(() => {
-                           const btn = document.getElementById("auto-submit-btn");
-                           if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
-                        }, 500);
-                    }
                 }
             };
             
+            socket.onclose = () => {
+                if (!isSocketReady && !isHandlingSubmitRef.current) startNative();
+            };
+
             socket.onerror = () => {
-                if (!isHandlingSubmitRef.current) startNativeSpeechRecognition();
+                if (!isSocketReady && !isHandlingSubmitRef.current) startNative();
             };
             
         } catch (e) {
-            startNativeSpeechRecognition();
+            startNative();
         }
     } else {
-        startNativeSpeechRecognition();
+        startNative();
     }
   }, []);
-
-  const startNativeSpeechRecognition = () => {
-    // @ts-ignore
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      toast.error("Speech recognition not supported in this browser.");
-      return;
-    }
-    
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-    
-    // @ts-ignore
-    recognition.onresult = (event) => {
-      const now = Date.now();
-      
-      if (lastSpeechRef.current === recordingStartRef.current) {
-        const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
-        setCurrentLatencyDisplay(`${latencySecs}s`);
-        latenciesRef.current.push(parseFloat(latencySecs));
-      }
-
-      lastSpeechRef.current = now; 
-      
-      let interim = ""; let allFinal = "";
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) allFinal += transcript + " ";
-        else interim += transcript;
-      }
-      
-      const newText = (allFinal + interim).trim();
-      
-      liveTranscriptRef.current = newText;
-      setLiveTranscript(newText);
-      
-      const tLower = newText.toLowerCase();
-      const isSkipping = tLower === "skip" || tLower.includes("next question please") || tLower.includes("i don't know");
-      const isStalling = tLower === "give me a minute" || tLower === "let me think";
-
-      if ((isSkipping || isStalling) && !isHandlingSubmitRef.current) {
-          isHandlingSubmitRef.current = true;
-          setTimeout(() => {
-             const btn = document.getElementById("auto-submit-btn");
-             if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
-          }, 500);
-      }
-    };
-    
-    recognition.onerror = (event: any) => {
-       if (event.error === 'network' || event.error === 'no-speech' || event.error === 'audio-capture') {
-          const btn = document.getElementById("auto-submit-btn");
-          if (btn && !isHandlingSubmitRef.current) { btn.dataset.reason = "MIC_ERROR"; btn.click(); }
-       }
-    };
-    recognition.onend = () => { if (isRecordingRef.current) { try { recognition.start(); } catch {} } };
-    
-    recognition.start();
-    recognitionRef.current = recognition;
-  };
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false; 
