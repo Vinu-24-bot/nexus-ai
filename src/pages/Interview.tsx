@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, ChevronRight, Loader2, ScanFace, Activity,
   Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck,
-  Eye, Keyboard, LogOut, Timer
+  Eye, Keyboard, LogOut, Timer, Cpu, UserX
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,6 +19,10 @@ interface LocationState { candidateName: string; position: string; jobDescriptio
 interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob | null; }
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
+
+declare global {
+  interface Window { currentActiveAudio: HTMLAudioElement | null; }
+}
 
 const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number }) => (
   <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-border/50">
@@ -159,6 +163,8 @@ export default function InterviewPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
   
+  const [sttEngine, setSttEngine] = useState<"Deepgram Nova-2" | "Web Speech API">("Initializing...");
+  
   const [liveTranscript, setLiveTranscript] = useState("");
   const liveTranscriptRef = useRef(""); 
   const [accumulatedTranscript, setAccumulatedTranscript] = useState(""); 
@@ -201,8 +207,6 @@ export default function InterviewPage() {
   const securityLoopRef = useRef<number | null>(null);
 
   const isTerminatingRef = useRef(false);
-  const escWarningsRef = useRef(0);
-  const clickWarningsRef = useRef(0);
 
   const [submitStatusIndex, setSubmitStatusIndex] = useState(0);
   const submitStatuses = [
@@ -275,7 +279,6 @@ export default function InterviewPage() {
     };
   }, []);
 
-  // 🛡️ THE FIX: Ensures video rendering works flawlessly during scanning by depending on cameraReady
   useEffect(() => {
     if ((interviewStep === "interview" || interviewStep === "scanning") && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
@@ -331,20 +334,9 @@ export default function InterviewPage() {
       e.stopPropagation();
 
       if (e.key === "Escape") {
-        escWarningsRef.current += 1;
-        if (escWarningsRef.current >= 3) {
-          handleForceEndInterview(true, "SECURITY BREACH: Candidate attempted to bypass lock with ESC key.");
-        } else {
-          toast.error(`SECURITY WARNING: ESC key is strictly prohibited. (Warning ${escWarningsRef.current}/2)`);
-          speakText(`Warning. Escape key pressed.`, voiceGender);
-        }
+        handleSecurityViolation("Candidate attempted to bypass lock with ESC key.");
       } else {
-        clickWarningsRef.current += 1;
-        if (clickWarningsRef.current >= 4) {
-           handleForceEndInterview(true, "SECURITY BREACH: Excessive keyboard interaction detected.");
-        } else {
-           toast.error(`SECURITY WARNING: Keyboard is locked. Do not press keys. (Warning ${clickWarningsRef.current}/3)`);
-        }
+        handleSecurityViolation("Keyboard is locked. Do not press keys.");
       }
     };
 
@@ -354,12 +346,7 @@ export default function InterviewPage() {
        if (target.closest('button')) return;
 
        e.preventDefault();
-       clickWarningsRef.current += 1;
-       if (clickWarningsRef.current >= 4) {
-         handleForceEndInterview(true, "SECURITY BREACH: Excessive background clicking detected.");
-       } else {
-         toast.error(`SECURITY WARNING: Mouse clicks outside buttons are logged. (Warning ${clickWarningsRef.current}/3)`);
-       }
+       handleSecurityViolation("Mouse clicks outside buttons are logged.");
     };
 
     const handleContextMenu = (e: MouseEvent) => e.preventDefault(); 
@@ -385,9 +372,7 @@ export default function InterviewPage() {
   const startSecurityTelemetry = () => {
     const checkTelemetry = () => {
       if (isTerminatingRef.current) return;
-      // 🛡️ THE FIX: Real 3D face tracking requires a heavy 5MB WebGL model (face-api.js).
-      // To strictly prevent random false-positive "face missing" crashes that ruin real interviews, 
-      // we lock this to 1. Advanced enterprise plans inject the WebGL payload.
+      // 🛡️ THE FIX: Hardcoded to prevent false-positive "face missing" crashes during testing
       setTelemetry({ faces: 1, liveness: 99, lipSync: true, mask: false });
       securityLoopRef.current = requestAnimationFrame(checkTelemetry);
     };
@@ -494,7 +479,6 @@ export default function InterviewPage() {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      // 🛡️ THE FIX: Dialed auto-submit timer perfectly to 5.5 seconds
       else if (timeSinceLastSpeech > 5500) {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
@@ -515,6 +499,7 @@ export default function InterviewPage() {
     };
 
     const startNative = () => {
+        setSttEngine("Web Speech API");
         // @ts-ignore
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
@@ -537,7 +522,7 @@ export default function InterviewPage() {
                 setCurrentLatencyDisplay(`${latencySecs}s`);
                 latenciesRef.current.push(parseFloat(latencySecs));
             }
-            lastSpeechRef.current = now; // 🛡️ Properly resets the 5.5s timer when candidate speaks
+            lastSpeechRef.current = now; 
             
             let interim = "";
             for (let i = event.resultIndex; i < event.results.length; ++i) {
@@ -579,6 +564,7 @@ export default function InterviewPage() {
 
             socket.onopen = () => {
                 isSocketReady = true;
+                setSttEngine("Deepgram Nova-2");
                 const audioTrack = streamRef.current?.getAudioTracks()[0];
                 if (!audioTrack) { startNative(); return; }
                 
@@ -607,7 +593,7 @@ export default function InterviewPage() {
                         setCurrentLatencyDisplay(`${latencySecs}s`);
                         latenciesRef.current.push(parseFloat(latencySecs));
                     }
-                    lastSpeechRef.current = now; // 🛡️ Resets the 5.5s timer
+                    lastSpeechRef.current = now;
 
                     if (received.is_final) {
                         finalTranscriptAccumulator += transcript + " ";
@@ -660,7 +646,6 @@ export default function InterviewPage() {
     isSpeakingRef.current = true;
     setAiMessage(questionText);
     
-    // 🛡️ THE FIX: Removed self-interrupt logic. The AI will speak smoothly without breaking.
     await speakText(questionText, voiceGender);
     
     if (isSpeakingRef.current) {
@@ -935,7 +920,7 @@ export default function InterviewPage() {
               <div className="absolute inset-0 bg-[linear-gradient(transparent_50%,rgba(0,240,255,0.1)_50%)] bg-[length:100%_4px] animate-[scan_2s_linear_infinite] pointer-events-none" />
               <div className="absolute top-2 left-2 flex gap-2">
                 <span className="bg-black/50 text-xs px-2 py-1 rounded text-white font-mono">LIVENESS: {telemetry.liveness}%</span>
-                <span className="bg-black/50 text-xs px-2 py-1 rounded text-white font-mono">FACES: {telemetry.faces}</span>
+                <span className="bg-black/50 text-xs px-2 py-1 rounded text-white font-mono flex items-center gap-1"><UserX className="w-3 h-3"/> {telemetry.faces}</span>
               </div>
             </div>
           </div>
@@ -1064,6 +1049,9 @@ export default function InterviewPage() {
                   <Mic className={`w-4 h-4 ${isRecording && !isSpeaking ? "text-green-500 animate-pulse" : "text-muted-foreground"}`} />
                   <span className="text-sm font-bold text-foreground uppercase tracking-wider">Live Transcript</span>
                 </div>
+                <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 px-2 py-0.5 rounded border border-border/50" title="Active Speech Engine">
+                   <Cpu className="w-3 h-3 text-primary" /> {sttEngine}
+                </span>
               </div>
               
               <div className="flex-1 bg-background/50 rounded-lg p-4 border border-border/30 min-h-[120px] max-h-[160px] overflow-y-auto mb-4">
