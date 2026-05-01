@@ -20,12 +20,111 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-declare global {
-  interface Window { 
-    currentActiveAudio: HTMLAudioElement | null;
-    currentUtterance: SpeechSynthesisUtterance | null; 
+// 🛡️ THE FIX: AudioQueueManager (From Approach 4) to completely isolate and protect AI speech
+class AudioQueueManager {
+  private queue: {text: string, gender: "female" | "male", resolve: () => void}[] = [];
+  private isPlaying = false;
+  private currentUtterance: SpeechSynthesisUtterance | null = null;
+  private currentAudio: HTMLAudioElement | null = null;
+  
+  async speak(text: string, gender: "female" | "male"): Promise<void> {
+    return new Promise((resolve) => {
+      this.queue.push({text, gender, resolve});
+      if (!this.isPlaying) {
+        this.processQueue();
+      }
+    });
+  }
+  
+  private async processQueue(): Promise<void> {
+    if (this.queue.length === 0) {
+      this.isPlaying = false;
+      return;
+    }
+    
+    this.isPlaying = true;
+    const item = this.queue.shift()!;
+    
+    try {
+      await this.playCloudTTS(item.text, item.gender);
+    } catch (error) {
+      await this.playBrowserTTS(item.text, item.gender);
+    }
+    
+    item.resolve();
+    setTimeout(() => this.processQueue(), 150);
+  }
+  
+  private async playCloudTTS(text: string, gender: string): Promise<void> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    
+    try {
+      const response = await fetch(`${API_URL}/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, gender }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error('Cloud TTS failed');
+      
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      this.currentAudio = audio;
+      
+      return new Promise((resolve, reject) => {
+        audio.onended = () => { URL.revokeObjectURL(audioUrl); resolve(); };
+        audio.onerror = (e) => { URL.revokeObjectURL(audioUrl); reject(e); };
+        audio.play().catch(reject);
+      });
+    } catch (error) {
+      clearTimeout(timeoutId);
+      throw error;
+    }
+  }
+  
+  private playBrowserTTS(text: string, gender: string): Promise<void> {
+    return new Promise((resolve) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      const voices = window.speechSynthesis.getVoices();
+      const isFemale = gender === "female";
+      const targetKeywords = isFemale ? ["female", "woman", "jenny", "samantha", "karen"] : ["male", "man", "guy", "david", "mark"];
+      let bestMatch = null;
+      let highestScore = -1;
+
+      for (const v of voices) {
+        if (!v.lang.startsWith("en")) continue;
+        let score = 0;
+        if (v.lang === "en-US") score += 5; 
+        if (targetKeywords.some(k => v.name.toLowerCase().includes(k))) score += 5;
+        if (score > highestScore) { highestScore = score; bestMatch = v; }
+      }
+
+      if (bestMatch) utterance.voice = bestMatch;
+      utterance.rate = 1.0; 
+      utterance.pitch = gender === "female" ? 1.05 : 0.95;
+      
+      this.currentUtterance = utterance;
+      
+      utterance.onend = () => { this.currentUtterance = null; resolve(); };
+      utterance.onerror = () => { this.currentUtterance = null; resolve(); };
+      
+      window.speechSynthesis.speak(utterance);
+    });
+  }
+  
+  cancel(): void {
+    this.queue = [];
+    if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
+    if (this.currentUtterance) { window.speechSynthesis.cancel(); this.currentUtterance = null; }
+    this.isPlaying = false;
   }
 }
+
+const audioQueue = new AudioQueueManager();
 
 const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number }) => (
   <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-border/50">
@@ -53,79 +152,6 @@ const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number
     </div>
   </header>
 );
-
-function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
-  if (voices.length === 0) return null;
-  
-  const isFemale = gender === "female";
-  const targetKeywords = isFemale ? ["female", "woman", "jenny", "samantha", "karen", "zira", "victoria", "siri", "ava"] : ["male", "man", "guy", "david", "mark", "daniel", "james", "alex", "andrew"];
-  
-  let bestMatch: SpeechSynthesisVoice | null = null;
-  let highestScore = -1;
-
-  for (const v of voices) {
-    if (!v.lang.startsWith("en")) continue;
-    const name = v.name.toLowerCase();
-    let score = 0;
-    
-    if (v.lang === "en-US") score += 5; 
-    if (targetKeywords.some(k => name.includes(k))) score += 5;
-    if (name.includes("google") || name.includes("neural") || name.includes("premium")) score += 3; 
-    
-    if (score > highestScore) { highestScore = score; bestMatch = v; }
-  }
-  return bestMatch || voices.find(v => v.lang.startsWith("en-US")) || voices[0];
-}
-
-function speakText(text: string, gender: "female" | "male"): Promise<void> {
-  return new Promise(async (resolve) => {
-    let isResolved = false;
-    const safeResolve = () => { if (!isResolved) { isResolved = true; resolve(); } };
-    
-    const wordCount = text.split(/\s+/).length;
-    const hardTimeout = setTimeout(safeResolve, Math.max(4000, wordCount * 500));
-
-    try {
-      const res = await fetch(`${API_URL}/tts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, gender })
-      });
-      
-      if (!res.ok) throw new Error("TTS fetch failed");
-      
-      const blob = await res.blob();
-      const audio = new Audio(URL.createObjectURL(blob));
-      (window as any).currentActiveAudio = audio;
-      
-      audio.onended = () => { clearTimeout(hardTimeout); safeResolve(); };
-      audio.onerror = () => { clearTimeout(hardTimeout); fallbackSpeak(text, gender, safeResolve); };
-      
-      audio.play().catch(() => { clearTimeout(hardTimeout); fallbackSpeak(text, gender, safeResolve); });
-    } catch (e) {
-      clearTimeout(hardTimeout);
-      fallbackSpeak(text, gender, safeResolve);
-    }
-  });
-}
-
-function fallbackSpeak(text: string, gender: "female" | "male", resolve: () => void) {
-  if (!window.speechSynthesis) { resolve(); return; }
-  // 🛡️ THE FIX: Removed speechSynthesis.cancel() which was aggressively killing the TTS loop
-  
-  const utterance = new SpeechSynthesisUtterance(text);
-  (window as any).currentUtterance = utterance; 
-  
-  utterance.voice = getVoice(gender);
-  utterance.rate = 1.0; 
-  utterance.pitch = gender === "female" ? 1.05 : 0.95;
-  
-  const safetyTimeout = setTimeout(resolve, Math.max(3000, text.length * 60));
-  utterance.onend = () => { clearTimeout(safetyTimeout); resolve(); };
-  utterance.onerror = () => { clearTimeout(safetyTimeout); resolve(); };
-  window.speechSynthesis.speak(utterance);
-}
 
 const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | null) => {
   try {
@@ -235,8 +261,8 @@ export default function InterviewPage() {
   const rawQuestions = state?.questions || fetchedData?.questions || [];
   
   const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
-    { id: 1, question: "Could you briefly describe your most impactful project?", category: "technical", difficulty: "medium" },
-    { id: 2, question: "What is the most challenging bug you've faced recently?", category: "behavioral", difficulty: "hard" }
+    { id: 1, question: "Could you briefly describe your most impactful project?", category: "technical", difficulty: "easy" },
+    { id: 2, question: "What is the most challenging bug you've faced recently?", category: "behavioral", difficulty: "medium" }
   ];
 
   const finalQuestionsList = activeQuestions; 
@@ -279,12 +305,7 @@ export default function InterviewPage() {
 
   useEffect(() => {
     return () => {
-      if ((window as any).currentActiveAudio) {
-        (window as any).currentActiveAudio.pause();
-        (window as any).currentActiveAudio.currentTime = 0;
-        (window as any).currentActiveAudio = null;
-      }
-      window.speechSynthesis.cancel();
+      audioQueue.cancel();
       if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
       if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
       if (totalTimerRef.current) clearInterval(totalTimerRef.current);
@@ -325,7 +346,7 @@ export default function InterviewPage() {
         handleForceEndInterview(true, `SECURITY BREACH: ${reason} (3 Strikes Exceeded).`);
       } else {
         toast.warning(`Security Violation (${newStrikes}/3): ${reason}.`);
-        speakText(`Security warning. ${reason}.`, voiceGender);
+        audioQueue.speak(`Security warning. ${reason}.`, voiceGender);
       }
       return newStrikes;
     });
@@ -433,7 +454,7 @@ export default function InterviewPage() {
     setInterviewStep("scanning");
     
     startSecurityTelemetry();
-    await speakText("Activating security vault. Scanning face mesh and environment.", voiceGender);
+    await audioQueue.speak("Activating security vault. Scanning face mesh and environment.", voiceGender);
     
     setTimeout(() => {
         startActualInterview();
@@ -491,7 +512,6 @@ export default function InterviewPage() {
       const timeSinceStart = now - recordingStartRef.current;
       const timeSinceLastSpeech = now - lastSpeechRef.current;
 
-      // 🛡️ THE FIX: Dual-Phase Watchdog Timer limits skipping errors
       const hasSpoken = liveTranscriptRef.current.trim().length > 0 || accumulatedTranscript.trim().length > 0;
 
       if (timeSinceStart > 120000) { 
@@ -509,8 +529,9 @@ export default function InterviewPage() {
     }, 500);
 
     const handleSpeechIntent = (text: string) => {
-        const tLower = text.toLowerCase().trim();
-        const isExactSkip = tLower === "skip" || tLower.includes("next question") || tLower.includes("i don't know") || tLower.includes("not sure") || tLower.includes("move ahead") || tLower.includes("move on");
+        // 🛡️ THE FIX: Broadened Skip Regex to catch "I don't have any idea"
+        const skipRegex = /(skip|don'?t know|no idea|move on|next question|not sure|pass|don'?t have any idea)/i;
+        const isExactSkip = skipRegex.test(text.trim());
         
         if (isExactSkip && !isHandlingSubmitRef.current) {
             isHandlingSubmitRef.current = true; 
@@ -583,7 +604,7 @@ export default function InterviewPage() {
 
     if (DEEPGRAM_API_KEY && streamRef.current && !deepgramFailedRef.current) {
         try {
-            const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true&filler_words=true&interim_results=true&endpointing=800', ['token', DEEPGRAM_API_KEY]);
+            const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2-conversational&smart_format=true&punctuate=true&filler_words=true&interim_results=true&endpointing=500', ['token', DEEPGRAM_API_KEY]);
             dgSocketRef.current = socket;
             
             let finalTranscriptAccumulator = "";
@@ -681,7 +702,7 @@ export default function InterviewPage() {
     isSpeakingRef.current = true;
     setAiMessage(questionText);
     
-    await speakText(questionText, voiceGender);
+    await audioQueue.speak(questionText, voiceGender);
     
     if (isSpeakingRef.current) {
       setIsSpeaking(false);
@@ -766,7 +787,7 @@ export default function InterviewPage() {
     setIsAnalyzing(false);
     isSpeakingRef.current = true;
     setAiMessage(dynamicResponse);
-    await speakText(dynamicResponse, voiceGender);
+    await audioQueue.speak(dynamicResponse, voiceGender);
 
     if (isSpeakingRef.current) {
         setIsSpeaking(false);
@@ -798,7 +819,7 @@ export default function InterviewPage() {
     setIsSpeaking(true);
     const closingMsg = isCheat ? `Interview terminated due to security violation.` : `Thank you. That concludes your interview.`;
     setAiMessage(closingMsg);
-    await speakText(closingMsg, voiceGender);
+    await audioQueue.speak(closingMsg, voiceGender);
     setIsSpeaking(false);
     setAiMessage("");
 
@@ -852,15 +873,16 @@ export default function InterviewPage() {
       });
       const hybridRemarks = `${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
-      // 🛡️ THE FIX: Hardcoded "NO_VIDEO" flag ensures DB doesn't reject Initial Screenings
+      // 🛡️ THE FIX: Hardcoded "LIVE_SCREENING" fallback guarantees DB accepts transcript-only reports
       await submitEvaluation({
         candidate_name: candidateName || "Unknown", 
         position: position || "Standard Role", 
         job_description: jobDescription || "Standard JD",
         resume: resume || "Standard Resume", 
         transcript: fullTranscript || "(No transcript generated)", 
-        video_filename: primaryVideoFilename || "NO_VIDEO",
+        video_filename: primaryVideoFilename || "LIVE_SCREENING",
         remarks: hybridRemarks,
+        evaluation_type: primaryVideoFilename ? "full_interview" : "initial_screening"
       } as any); 
 
       setInterviewStep("feedback");
