@@ -112,12 +112,12 @@ QUESTION_GENERATION_PROMPT = """You are "BATS ForgePro", an elite, human-like AI
 Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY {num_questions} highly unique, targeted questions.
 
 RULES:
-1. PROGRESSIVE DIFFICULTY: You MUST generate the questions in this exact order: 
-   - First 20% of questions: "easy" (Basic fundamentals & background).
-   - Next 40% of questions: "medium" (Scenario-based project mapping).
-   - Final 40% of questions: "hard" (Deep technical tradeoffs & architecture).
-2. NO DEFINITIONS: NEVER ask basic definition questions like "What is Django?". 
-3. SCENARIO BASED: Medium and Hard questions must explicitly blend a specific project from the [CANDIDATE_RESUME] with a requirement from the [JOB_DESCRIPTION]. 
+1. STRICT PROGRESSIVE CURRICULUM: You MUST generate the questions in this exact order: 
+   - Questions 1 & 2: "easy" (Basic fundamentals & smooth background intro to build confidence).
+   - Next 50% of questions: "medium" (DEEP DIVE into specific projects from their [CANDIDATE_RESUME] mapped directly to the [JOB_DESCRIPTION]).
+   - Final questions: "hard" (Advanced architecture, scaling tradeoffs, and complex system design).
+2. NO DEFINITIONS: NEVER ask basic textbook questions like "What is Django?". 
+3. SCENARIO BASED: Medium and Hard questions must explicitly challenge their exact resume experience.
 4. CONCISE LENGTH: Keep questions perfectly balanced, between 15 to 30 words. 
 
 Output ONLY valid JSON:

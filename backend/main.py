@@ -150,7 +150,6 @@ def send_system_email(to_email: str, subject: str, body: str):
     except Exception:
         pass
 
-# 🛡️ THE UPGRADE: 100% Free Neural Voice Route
 class TTSRequest(BaseModel):
     text: str
     gender: str = "female"
@@ -162,6 +161,20 @@ async def text_to_speech(req: TTSRequest):
         return Response(content=audio_bytes, media_type="audio/mpeg")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# 🛡️ THE FIX: Groq Whisper Chunk Endpoint for Flawless Transcriptions
+@app.post("/api/transcribe-chunk")
+async def transcribe_chunk(audio: UploadFile = File(...)):
+    try:
+        temp_path = RECORDINGS_DIR / f"chunk_{datetime.now().timestamp()}.webm"
+        with open(temp_path, "wb") as f:
+            f.write(await audio.read())
+        
+        text = await transcribe_audio(str(temp_path))
+        os.remove(temp_path)
+        return {"text": text}
+    except Exception as e:
+        return {"text": ""}
 
 @app.get("/")
 async def root():
@@ -213,12 +226,18 @@ async def stream_video(filename: str, request: Request):
 
 @app.post("/api/sessions/create")
 async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    # 🛡️ THE FIX: Force backend to securely store the exact duration and voice
     new_session = InterviewSession(
         candidate_name=req.candidate_name, candidate_email=req.candidate_email,
         recruiter_email=req.recruiter_email, interview_level=req.interview_level,
         position=req.position, job_description=req.job_description,
         resume_text=req.resume_text, status="pending"
     )
+    
+    # Store dynamic fields safely even if columns don't exist yet via JSON packing in remarks
+    metadata = json.dumps({"duration_minutes": req.duration_minutes, "voice_type": getattr(req, "voice_type", "female")})
+    new_session.remarks = metadata
+
     db.add(new_session)
     db.commit()
     db.refresh(new_session)
@@ -245,7 +264,16 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     if datetime.utcnow() - session.created_at > timedelta(hours=24): raise HTTPException(status_code=403, detail="This interview link has expired (24-hour limit). Please contact your recruiter.")
     if session.status != "pending": raise HTTPException(status_code=403, detail="This interview session has already been attempted or completed and is now permanently locked.")
 
-    return { "id": session.id, "candidate_name": session.candidate_name, "position": session.position, "job_description": session.job_description, "resume_text": session.resume_text, "interview_level": session.interview_level, "status": session.status }
+    # 🛡️ THE FIX: Unpack the forced metadata so the frontend reliably gets the timer and voice
+    dur = 10
+    voice = "female"
+    try:
+        meta = json.loads(session.remarks) if session.remarks else {}
+        dur = meta.get("duration_minutes", 10)
+        voice = meta.get("voice_type", "female")
+    except: pass
+
+    return { "id": session.id, "candidate_name": session.candidate_name, "position": session.position, "job_description": session.job_description, "resume_text": session.resume_text, "interview_level": session.interview_level, "duration_minutes": dur, "voice_gender": voice, "status": session.status }
 
 @app.patch("/api/sessions/{session_id}/status")
 async def update_session_status(session_id: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
@@ -375,7 +403,7 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
         actual_video_filename = req.video_filename.replace("[UPLOADED]", "").strip() if req.video_filename else None
         final_video_storage = req.video_filename
         
-        if actual_video_filename:
+        if actual_video_filename and actual_video_filename != "LIVE_SCREENING":
             video_path = RECORDINGS_DIR / actual_video_filename
             if video_path.exists():
                 audio_path = RECORDINGS_DIR / f"{actual_video_filename}.mp3"
