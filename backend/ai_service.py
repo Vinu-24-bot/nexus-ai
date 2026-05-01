@@ -251,7 +251,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     is_breach = "SECURITY BREACH" in clean_transcript.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
 
     # 🛡️ THE FIX: Hard Programmatic Penalty for Silent or Breached Interviews
-    # We calculate the total words spoken by the candidate (excluding AI generated tags)
     candidate_words = [w for w in clean_transcript.split() if w.lower() not in ['q0', 'q1', 'q2', 'q3', 'a0', 'a1', 'a2', 'a3', 'introduction:', 'candidate:', '[medium]:', '[hard]:', '<silence>']]
     total_words = len(candidate_words)
 
