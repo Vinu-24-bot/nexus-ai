@@ -61,7 +61,6 @@ You are running a deep-dive evaluation. You have the Job Description, the Candid
 *** ENTERPRISE EVALUATION PROTOCOL ***
 1. L1 TECH ROUND (PRE-RECORDED): If the [INTERVIEW_TRANSCRIPT] explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
 2. LIVE INTERVIEW (STRICT SCORING): If this is a live interview, the [INTERVIEW_TRANSCRIPT] is the ultimate source of truth. 
-   - ZERO TOLERANCE FOR SILENCE/SKIPS: If the candidate stays silent ("<SILENCE>"), skips questions, fails to introduce themselves, or gives extremely short non-answers, you MUST severely penalize their scores. Do NOT score them highly based on their resume if they failed to speak well in the interview. A completely silent or skipped interview MUST score below 20/100 and result in a Reject.
 3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence in the transcript. 
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
@@ -106,8 +105,8 @@ The target difficulty level is: {interview_level}.
 
 RULES:
 1. NO DEFINITIONS: NEVER ask basic definition questions (e.g., DO NOT ask "What is Django?" or "What is React?"). 
-2. SCENARIO BASED: Ask architectural and problem-solving questions that explicitly blend a project mentioned in their [CANDIDATE_RESUME] with a requirement from the [JOB_DESCRIPTION]. (e.g., "How did you scale the PostgreSQL database in your E-commerce project to handle high-traffic?").
-3. CONCISE LENGTH: Keep questions perfectly balanced, between 15 to 30 words. Not too short, not too long.
+2. SCENARIO BASED: Ask architectural and problem-solving questions that explicitly blend a specific project mentioned in their [CANDIDATE_RESUME] with a requirement from the [JOB_DESCRIPTION]. 
+3. CONCISE LENGTH: Keep questions perfectly balanced, between 15 to 30 words. Make them sound conversational and highly professional.
 
 Output ONLY valid JSON:
 {
@@ -134,6 +133,7 @@ You are having a live conversation. You must act like a highly intelligent, empa
 Context of the conversation:
 - The question you just asked: {question}
 - The Candidate's exact answer: {answer}
+- The next planned topic on your list: {next_question}
 
 YOUR GOAL: Keep the interview flowing rapidly. Acknowledge what the candidate just said.
 
@@ -248,19 +248,24 @@ async def parse_resume_to_json(raw_text: str) -> dict:
 async def evaluate_candidate(job_description: str, resume: str, transcript: str, behavior_data: dict = None) -> dict:
     behavior_data = behavior_data or {}
     clean_transcript = transcript.replace("(No speech detected)", "").strip()
-    is_breach = "[SYSTEM LOG]: SECURITY BREACH" in transcript
+    is_breach = "SECURITY BREACH" in clean_transcript.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
 
-    if is_breach:
+    # 🛡️ THE FIX: Hard Programmatic Penalty for Silent or Breached Interviews
+    # We calculate the total words spoken by the candidate (excluding AI generated tags)
+    candidate_words = [w for w in clean_transcript.split() if w.lower() not in ['q0', 'q1', 'q2', 'q3', 'a0', 'a1', 'a2', 'a3', 'introduction:', 'candidate:', '[medium]:', '[hard]:', '<silence>']]
+    total_words = len(candidate_words)
+
+    if is_breach or total_words < 30:
         return {
-            "candidate_overview": "Session automatically rejected. Candidate triggered the Anti-Cheat Security Vault.",
+            "candidate_overview": "Session automatically rejected. The candidate either triggered the Anti-Cheat Security Vault or failed to provide sufficient verbal responses during the interview.",
             "scores": { "technical_proficiency": 0, "relevance_to_jd": 0, "communication": 0, "confidence_level": 0, "overall_score": 0 },
-            "sentiment": {"rating": "Negative", "explanation": "Session failed or terminated prematurely."},
-            "candidate_status": {"level": "Needs Improvement", "description": "Terminated"},
-            "strengths": ["None identified due to security breach."],
-            "red_flags_or_weaknesses": ["CRITICAL: SECURITY BREACH"],
+            "sentiment": {"rating": "Negative", "explanation": "Session failed or candidate refused to engage in the interview."},
+            "candidate_status": {"level": "Needs Improvement", "description": "Terminated / No Data"},
+            "strengths": ["None identified due to lack of participation or security breach."],
+            "red_flags_or_weaknesses": ["CRITICAL: Candidate provided less than 30 words of actual verbal response or triggered a security protocol."],
             "dynamic_follow_up_questions": [],
             "hiring_recommendation": "Reject",
-            "justification": "Zero-Tolerance Engine Activated: Security Protocol violated. Score locked to 0."
+            "justification": "CRITICAL PENALTY: Zero-Tolerance Engine Activated. The candidate provided virtually no verbal responses or triggered a security breach. The AI scoring module has been manually overridden, and the score is strictly locked to 0/100."
         }
 
     avg_latency = behavior_data.get("avg_latency", 0)
@@ -282,22 +287,10 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     if faces > 1: cv_penalty += 10
     if liveness < 70: cv_penalty += 10
 
-    # 🛡️ THE FIX: Brutal hard programmatic penalty. If total transcript words < 50, crush the score.
-    total_words = len([w for w in clean_transcript.split() if w.lower() not in ['q0', 'q1', 'q2', 'q3', 'a0', 'a1', 'a2', 'a3', 'introduction:', 'candidate:', '[medium]:', '[hard]:', '<silence>']])
-    
-    if total_words < 50:
-        result["scores"]["technical_proficiency"] = min(result["scores"].get("technical_proficiency", 0), 10)
-        result["scores"]["relevance_to_jd"] = min(result["scores"].get("relevance_to_jd", 0), 10)
-        result["scores"]["communication"] = min(result["scores"].get("communication", 0), 5)
-        cv_penalty += 80
-        result["justification"] = f"CRITICAL PENALTY: Candidate provided virtually no verbal responses during the entire live interview (Total spoken words: {total_words}). AI scoring heavily overridden and clamped to Reject. " + result.get("justification", "")
-        result["hiring_recommendation"] = "Reject"
-        result["candidate_status"]["level"] = "Needs Improvement"
-
     base_conf = result["scores"].get("confidence_level", 85)
     result["scores"]["confidence_level"] = max(base_conf - cv_penalty, 0)
     
-    if cv_penalty > 0 and "CRITICAL PENALTY" not in result.get("justification", ""):
+    if cv_penalty > 0:
         result["justification"] += f"\n\n[SECURITY METRICS]: Candidate incurred a telemetry penalty. Esc presses: {esc_presses}, Tab switches: {tab_switches}."
 
     t = result["scores"]["technical_proficiency"]
@@ -323,7 +316,6 @@ async def generate_jd(position: str) -> str:
 async def get_answer_acknowledgment(question: str, answer: str, next_question: str = None) -> dict:
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_question)
     try:
-        # 🛡️ THE FIX: Hard-coded string concatenation on the backend to guarantee the AI asks the next question
         result = await _call_ai_cascade(prompt, force_json=True, max_tokens=150, groq_model="llama-3.1-8b-instant")
         if result.get("is_sufficient", True):
             result["response_text"] = result.get("response_text", "Okay.") + f" {next_question}"
