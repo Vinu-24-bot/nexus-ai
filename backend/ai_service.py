@@ -99,7 +99,6 @@ Synthesize the findings reliably. Output ONLY valid JSON matching this exact str
 {transcript}
 """
 
-# 🛡️ THE FIX: Redesigned the generation prompt to ban definitions and force JD + Resume scenario questions
 QUESTION_GENERATION_PROMPT = """You are "BATS ForgePro", an elite, human-like AI technical interviewer.
 Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY {num_questions} highly unique, targeted questions.
 
@@ -135,19 +134,18 @@ You are having a live conversation. You must act like a highly intelligent, empa
 Context of the conversation:
 - The question you just asked: {question}
 - The Candidate's exact answer: {answer}
-- The next planned topic on your list: {next_question}
 
-YOUR GOAL: Keep the interview flowing rapidly.
+YOUR GOAL: Keep the interview flowing rapidly. Acknowledge what the candidate just said.
 
 RULES:
-1. IF THEY SKIP OR DON'T KNOW: If the candidate says "I don't know", "not sure", "skip", or "move ahead", you MUST set "is_sufficient": true. DO NOT twist or rephrase the same question. Acknowledge gracefully (e.g., "Got it, let's move on.") and IMMEDIATELY ask the exact {next_question}.
-2. IF SILENCE: If the answer is exactly "<SILENCE>", you MUST set "is_sufficient": true. Say "Let's move ahead to the next topic." and ask the {next_question}.
-3. IF DETAILED AND VALID: Set "is_sufficient": true. Acknowledge a specific technical detail they just said (under 10 words), and seamlessly pivot into asking the {next_question}.
-4. IF EXTREMELY VAGUE (but not a skip): If the answer is under 5 words and completely misses the point (like "um", "well"), set "is_sufficient": false. Ask them to clarify briefly. Do NOT ask the next planned topic.
+1. IF THEY SKIP OR DON'T KNOW: If the candidate says "I don't know", "not sure", "skip", or "move ahead", you MUST set "is_sufficient": true. DO NOT twist or rephrase the same question. Say exactly: "No problem, let's move on."
+2. IF SILENCE: If the answer is exactly "<SILENCE>", you MUST set "is_sufficient": true. Say exactly: "Let's move ahead to the next topic."
+3. IF DETAILED AND VALID: Set "is_sufficient": true. Acknowledge a specific technical detail they just said (under 10 words), then stop.
+4. IF EXTREMELY VAGUE (but not a skip): If the answer is under 5 words and completely misses the point (like "um", "well"), set "is_sufficient": false. Ask them to clarify briefly.
 
 Output ONLY valid JSON:
 {
-  "response_text": "Your highly conversational, short response.",
+  "response_text": "Your highly conversational, short acknowledgment.",
   "is_sufficient": true
 }
 """
@@ -284,15 +282,15 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     if faces > 1: cv_penalty += 10
     if liveness < 70: cv_penalty += 10
 
-    # 🛡️ THE FIX: Hard Programmatic Penalty for Silent/Empty Interviews
-    word_count = len(clean_transcript.split())
-    silence_count = clean_transcript.count("<SILENCE>")
+    # 🛡️ THE FIX: Brutal hard programmatic penalty. If total transcript words < 50, crush the score.
+    total_words = len([w for w in clean_transcript.split() if w.lower() not in ['q0', 'q1', 'q2', 'q3', 'a0', 'a1', 'a2', 'a3', 'introduction:', 'candidate:', '[medium]:', '[hard]:', '<silence>']])
     
-    if silence_count >= 2 or word_count < 40:
-        result["scores"]["technical_proficiency"] = min(result["scores"].get("technical_proficiency", 0), 20)
-        result["scores"]["communication"] = min(result["scores"].get("communication", 0), 10)
-        cv_penalty += 50
-        result["justification"] = "CRITICAL PENALTY: Candidate provided little to no vocal responses during the interview. Scores have been manually clamped. " + result.get("justification", "")
+    if total_words < 50:
+        result["scores"]["technical_proficiency"] = min(result["scores"].get("technical_proficiency", 0), 10)
+        result["scores"]["relevance_to_jd"] = min(result["scores"].get("relevance_to_jd", 0), 10)
+        result["scores"]["communication"] = min(result["scores"].get("communication", 0), 5)
+        cv_penalty += 80
+        result["justification"] = f"CRITICAL PENALTY: Candidate provided virtually no verbal responses during the entire live interview (Total spoken words: {total_words}). AI scoring heavily overridden and clamped to Reject. " + result.get("justification", "")
         result["hiring_recommendation"] = "Reject"
         result["candidate_status"]["level"] = "Needs Improvement"
 
@@ -323,9 +321,12 @@ async def generate_jd(position: str) -> str:
     return await _call_groq_text(prompt)
 
 async def get_answer_acknowledgment(question: str, answer: str, next_question: str = None) -> dict:
-    next_q_text = next_question if next_question else "Thank the candidate and conclude this section."
-    prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_q_text)
+    prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_question)
     try:
-        return await _call_ai_cascade(prompt, force_json=True, max_tokens=150, groq_model="llama-3.1-8b-instant")
+        # 🛡️ THE FIX: Hard-coded string concatenation on the backend to guarantee the AI asks the next question
+        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=150, groq_model="llama-3.1-8b-instant")
+        if result.get("is_sufficient", True):
+            result["response_text"] = result.get("response_text", "Okay.") + f" {next_question}"
+        return result
     except Exception as e:
-        return {"response_text": f"Got it. {next_q_text}", "is_sufficient": True}
+        return {"response_text": f"Got it. {next_question}", "is_sufficient": True}
