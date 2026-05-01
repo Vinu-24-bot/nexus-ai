@@ -19,7 +19,6 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-// 🛡️ THE FIX: Hardened AudioQueueManager. Resolves the "Mute AI" bug by ensuring cancel() only clears old speech without blocking new TTS.
 class AudioQueueManager {
   private queue: {text: string, gender: "female" | "male", resolve: () => void}[] = [];
   public isPlaying = false;
@@ -193,6 +192,8 @@ export default function InterviewPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
   
+  const [sttEngine, setSttEngine] = useState<"Whisper Neural Engine">("Initializing...");
+  
   const [liveTranscript, setLiveTranscript] = useState("");
   const liveTranscriptRef = useRef(""); 
   const [accumulatedTranscript, setAccumulatedTranscript] = useState(""); 
@@ -223,7 +224,6 @@ export default function InterviewPage() {
   const recognitionRef = useRef<any>(null); 
   const isRecordingRef = useRef(false); 
   
-  // High-fidelity Groq Whisper Turn Recorders
   const turnRecorderRef = useRef<MediaRecorder | null>(null);
   const turnChunksRef = useRef<Blob[]>([]);
   
@@ -241,24 +241,30 @@ export default function InterviewPage() {
   const [submitStatusIndex, setSubmitStatusIndex] = useState(0);
   const submitStatuses = [
     "Securely Uploading Encrypted Session...",
-    "Transcribing Audio via Groq Whisper Engine...",
+    "Transcribing Audio via Whisper Engine...",
     "AI Analyzing Technical Depth & Alignment...",
     "Cross-referencing Answers with Job Description...",
     "Finalizing Enterprise Report..."
   ];
+
+  useEffect(() => {
+    if (state?.durationMinutes) localStorage.setItem(`forgepro_duration_${sessionId}`, state.durationMinutes.toString());
+    if (state?.voiceGender) localStorage.setItem(`forgepro_voice_${sessionId}`, state.voiceGender);
+  }, [state, sessionId]);
 
   const candidateName = state?.candidateName || fetchedData?.candidate_name || "Candidate";
   const position = state?.position || fetchedData?.position || "Technical Role";
   const jobDescription = state?.jobDescription || fetchedData?.job_description || "";
   const resume = state?.resume || fetchedData?.resume_text || "";
   
-  const rawVoice = String(state?.voiceGender || fetchedData?.voice_gender || "female").toLowerCase();
+  const storedVoice = localStorage.getItem(`forgepro_voice_${sessionId}`);
+  const rawVoice = String(state?.voiceGender || storedVoice || fetchedData?.voice_gender || "female").toLowerCase();
   const voiceGender = rawVoice.includes("male") ? "male" : "female";
   
-  // 🛡️ THE FIX: Force backend to provide the actual set duration. State overrides if loaded directly.
+  const storedDuration = localStorage.getItem(`forgepro_duration_${sessionId}`);
   const sessionDurationState = Number(state?.durationMinutes);
   const sessionDurationDB = Number(fetchedData?.duration_minutes);
-  const durationMinutes = sessionDurationState > 0 ? sessionDurationState : (sessionDurationDB > 0 ? sessionDurationDB : 10);
+  const durationMinutes = sessionDurationState > 0 ? sessionDurationState : (Number(storedDuration) > 0 ? Number(storedDuration) : (sessionDurationDB > 0 ? sessionDurationDB : 10));
   
   const rawQuestions = state?.questions || fetchedData?.questions || [];
   
@@ -280,7 +286,8 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
-          const targetQCount = session.duration_minutes >= 15 ? 25 : 20;
+          const actualDuration = Number(localStorage.getItem(`forgepro_duration_${sessionId}`)) || session.duration_minutes || 10;
+          const targetQCount = actualDuration >= 15 ? 25 : 20;
           
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -503,7 +510,6 @@ export default function InterviewPage() {
     });
   }, []);
 
-  // 🛡️ THE FIX: High Fidelity Groq Whisper Integration
   const startTurnRecording = () => {
     if (!streamRef.current) return;
     try {
@@ -535,7 +541,7 @@ export default function InterviewPage() {
     recordingStartRef.current = Date.now();
     lastSpeechRef.current = Date.now();
     
-    startTurnRecording(); // Start the high-fidelity background recorder
+    startTurnRecording(); 
 
     if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     watchdogIntervalRef.current = setInterval(() => {
@@ -561,7 +567,6 @@ export default function InterviewPage() {
     }, 500);
 
     const handleSpeechIntent = (text: string) => {
-        // 🛡️ THE FIX: Broadened conversational skip Regex
         const skipRegex = /(skip|don'?t know|no idea|move on|next question|not sure|pass|don'?t have any idea|no clue|haven'?t heard)/i;
         const isExactSkip = skipRegex.test(text.toLowerCase());
         
@@ -574,6 +579,7 @@ export default function InterviewPage() {
         }
     };
 
+    setSttEngine("Whisper Neural Engine");
     // @ts-ignore
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -647,7 +653,6 @@ export default function InterviewPage() {
     liveTranscriptRef.current = "";
     setLiveTranscript("");
     
-    // 🛡️ THE FIX: Send the background chunk to Groq Whisper for 100% accuracy
     const audioBlob = await stopTurnRecording();
     if (audioBlob.size > 0) {
       const formData = new FormData();
@@ -671,7 +676,6 @@ export default function InterviewPage() {
     isSpeakingRef.current = true;
     setAiMessage(questionText);
     
-    // 🛡️ THE FIX: Safely clears the audio queue of OLD speech, but allows the NEW speech to play flawlessly.
     audioQueue.cancel();
     await audioQueue.speak(questionText, voiceGender);
     
@@ -833,7 +837,6 @@ export default function InterviewPage() {
       });
       const hybridRemarks = `${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
-      // 🛡️ THE FIX: Removed evaluation_type from payload to fix the Pydantic crash
       await submitEvaluation({
         candidate_name: candidateName || "Unknown", 
         position: position || "Standard Role", 
@@ -1077,9 +1080,8 @@ export default function InterviewPage() {
                   <Mic className={`w-4 h-4 ${isRecording && !isSpeaking ? "text-green-500 animate-pulse" : "text-muted-foreground"}`} />
                   <span className="text-sm font-bold text-foreground uppercase tracking-wider">Live Transcript</span>
                 </div>
-                {/* 🛡️ THE FIX: Replaced STT Engine Label */}
                 <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 px-2 py-0.5 rounded border border-border/50" title="Active Speech Engine">
-                   <Cpu className="w-3 h-3 text-primary" /> Groq Whisper Engine
+                   <Cpu className="w-3 h-3 text-primary" /> Whisper Neural Engine
                 </span>
               </div>
               

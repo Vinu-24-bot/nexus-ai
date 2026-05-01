@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
-import { getEvaluations, getStats, checkBackendHealth, compareCandidates } from "@/lib/api";
+import { getEvaluations, checkBackendHealth } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
 import Navbar from "@/components/Navbar";
 import ScoreRing from "@/components/ScoreRing";
 import {
   ArrowRight, Users, TrendingUp, Loader2, RefreshCw,
-  WifiOff, BarChart3, Target, CheckCircle2, Medal, GitPullRequest,
+  WifiOff, BarChart3, CheckCircle2, Medal, GitPullRequest,
   MessageSquare, Trash2, Pin, Star, Mic, Upload
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -61,7 +61,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
-  const [debriefMatrix, setDebriefMatrix] = useState<any>(null);
 
   const [activeTab, setActiveTab] = useState<"initial" | "l1" | "selected" | "feedback">("initial");
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
@@ -76,14 +75,6 @@ export default function DashboardPage() {
       ]);
       setResults(data || []);
       setBackendOnline(online);
-
-      if (data && data.length >= 2) {
-        const candidateIds = data.slice(0, 5).map((r: any) => r.id);
-        const matrixData = await compareCandidates(candidateIds).catch(() => null);
-        setDebriefMatrix(matrixData);
-      } else {
-        setDebriefMatrix(null);
-      }
     } catch {
       setBackendOnline(false);
     } finally {
@@ -96,9 +87,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch(`${API_URL}/feedback`);
       if (res.ok) setFeedbacks(await res.json());
-    } catch (err) {
-      console.error("Failed to fetch feedback", err);
-    }
+    } catch (err) {}
   }, []);
 
   useEffect(() => {
@@ -127,13 +116,9 @@ export default function DashboardPage() {
   const deleteFeedback = async (id: number | string) => {
     setFeedbacks(prev => prev.filter(f => f.id !== id));
     try {
-      const res = await fetch(`${API_URL}/feedback/${id}`, { method: "DELETE" });
-      if (res.ok) toast.success("Feedback permanently deleted.");
-      else toast.error(`Server Error ${res.status}: ${await res.text()}`);
-    } catch (err: any) {
-      fetchFeedbacks();
-      toast.error(`Network Crash: ${err.message}`);
-    }
+      await fetch(`${API_URL}/feedback/${id}`, { method: "DELETE" });
+      toast.success("Feedback deleted.");
+    } catch (err: any) {}
   };
 
   const sortedFeedbacks = [...feedbacks].sort((a, b) => {
@@ -146,9 +131,9 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Bulletproof sync with History.tsx using explicit video_filename checking
-  const initialScreeningData = results.filter(r => !r.video_filename || !String(r.video_filename).includes("[UPLOADED]"));
-  const l1TechRoundData = results.filter(r => r.video_filename && String(r.video_filename).includes("[UPLOADED]"));
+  // 🛡️ THE FIX: Strict explicit filter. LIVE_SCREENING goes here. Everything else goes to L1.
+  const initialScreeningData = results.filter(r => r.video_filename === "LIVE_SCREENING" || r.video_filename === "NO_VIDEO" || !r.video_filename);
+  const l1TechRoundData = results.filter(r => r.video_filename && r.video_filename !== "LIVE_SCREENING" && r.video_filename !== "NO_VIDEO");
   const selectedData = results.filter(r => r.selection_status?.toLowerCase() === "selected");
 
   const calculateStats = (data: EvaluationResult[]) => {
@@ -165,7 +150,6 @@ export default function DashboardPage() {
     }
 
     const top_scorer = total > 0 ? [...data].sort((a,b) => (b.scores?.overall_score||0) - (a.scores?.overall_score||0))[0].candidateName : "N/A";
-
     return { total, avg_score, strong_hires, pipeline_health, top_scorer };
   };
 
@@ -278,56 +262,6 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* 🛡️ THE FIX: Hard-locked to only show strictly when L1 Tech Round tab is selected */}
-                {debriefMatrix && debriefMatrix.enterprise_debrief_matrix && activeTab === "l1" && (
-                   <div className="glass rounded-xl overflow-hidden border border-primary/20 shadow-sm">
-                     <div className="bg-muted/50 px-6 py-5 border-b border-border flex justify-between items-center">
-                       <h2 className="text-base md:text-lg font-bold text-foreground tracking-wide flex items-center gap-3">
-                         <Target className="w-5 h-5 text-primary" /> 
-                         Executive Debrief Matrix (Top 5 Overall)
-                       </h2>
-                       <span className="hidden sm:inline-block text-xs font-mono text-muted-foreground bg-background px-3 py-1 rounded-md border border-border shadow-sm">
-                         {debriefMatrix.recommended_action}
-                       </span>
-                     </div>
-                     <div className="overflow-x-auto">
-                       <table className="w-full text-sm text-left">
-                         <thead className="text-xs text-muted-foreground uppercase bg-background">
-                           <tr>
-                             <th className="px-6 py-4 border-b border-border">Rank</th>
-                             <th className="px-6 py-4 border-b border-border">Candidate</th>
-                             <th className="px-6 py-4 border-b border-border">Verdict</th>
-                             <th className="px-6 py-4 border-b border-border">Tech Score</th>
-                             <th className="px-6 py-4 border-b border-border">Top Strength</th>
-                             <th className="px-6 py-4 border-b border-border">Risk Level</th>
-                           </tr>
-                         </thead>
-                         <tbody>
-                           {debriefMatrix.enterprise_debrief_matrix.map((row: any, idx: number) => (
-                             <tr key={idx} className="border-b border-border/50 hover:bg-muted/10 transition-colors">
-                               <td className="px-6 py-4 font-mono font-medium text-muted-foreground">#{row.rank}</td>
-                               <td className="px-6 py-4 font-semibold text-foreground">{row.candidate}</td>
-                               <td className="px-6 py-4">
-                                 <StatusBadge status={row.verdict} />
-                               </td>
-                               <td className="px-6 py-4 font-mono font-medium text-foreground">{row.technical_score}/100</td>
-                               <td className="px-6 py-4 text-xs text-muted-foreground truncate max-w-[200px]">{row.top_strength}</td>
-                               <td className="px-6 py-4">
-                                  <span className={`px-2.5 py-1 rounded text-[10px] font-bold tracking-widest uppercase border ${
-                                    row.risk_level === 'Low' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
-                                    row.risk_level === 'High' ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
-                                  }`}>
-                                    {row.risk_level}
-                                  </span>
-                               </td>
-                             </tr>
-                           ))}
-                         </tbody>
-                       </table>
-                     </div>
-                   </div>
-                )}
-
                 <div className="space-y-4">
                   <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
                     {activeTab === "initial" ? "Recent Initial Screenings" : activeTab === "l1" ? "Recent L1 Tech Rounds" : "Selected Candidates Roster"}
@@ -344,7 +278,7 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     <div className="grid gap-3">
-                      {activeData.slice(0, 15).map((result) => (
+                      {activeData.map((result) => (
                         <div 
                           key={result.id}
                           onClick={() => navigate(`/result/${result.id}`)}

@@ -48,7 +48,7 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-const ForgeProVideoPlayer = ({ src }: { src: string }) => {
+const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackDuration: number }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -80,13 +80,12 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
     setCurrentTime(vid.currentTime);
     
     let d = vid.duration;
-    if (isNaN(d) || d === Infinity) {
-      if (vid.buffered && vid.buffered.length > 0) {
-        d = vid.buffered.end(vid.buffered.length - 1);
-      }
+    // 🛡️ THE FIX: Hard math check. If native duration fails, inject the backend's recorded duration.
+    if (isNaN(d) || !isFinite(d) || d <= 0) {
+      d = fallbackDuration > 0 ? fallbackDuration : (vid.buffered && vid.buffered.length > 0 ? vid.buffered.end(vid.buffered.length - 1) : 0);
     }
 
-    if (d > 0 && d !== Infinity) {
+    if (d > 0 && isFinite(d)) {
       setDuration(d);
       setProgress((vid.currentTime / d) * 100);
     }
@@ -150,7 +149,7 @@ const ForgeProVideoPlayer = ({ src }: { src: string }) => {
   }, []);
 
   const formatTime = (time: number) => {
-    if (isNaN(time) || time === Infinity || time < 0) return "0:00";
+    if (isNaN(time) || !isFinite(time) || time < 0) return "0:00";
     const mins = Math.floor(time / 60);
     const secs = Math.floor(time % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
@@ -580,6 +579,15 @@ ${result.justification}
     setShowExportMenu(false);
   };
 
+  let fallbackVideoDuration = 0;
+  try {
+    if (result && (result as any).remarks && String((result as any).remarks).includes("METRICS_PAYLOAD:")) {
+       const parts = String((result as any).remarks).split("METRICS_PAYLOAD:");
+       const payload = JSON.parse(parts[1]);
+       if (payload && payload.interview_duration_seconds) fallbackVideoDuration = payload.interview_duration_seconds;
+    }
+  } catch(e) {}
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -593,7 +601,7 @@ ${result.justification}
   const SentimentIconComp = sentimentIcon[result.sentiment?.rating as keyof typeof sentimentIcon] || Meh;
   const sentClr = sentimentColor[result.sentiment?.rating as keyof typeof sentimentColor] || sentimentColor.Neutral;
   
-  const rawVideoFiles = result.video_filename?.split(", ").filter(Boolean) || [];
+  const rawVideoFiles = result.video_filename && result.video_filename !== "LIVE_SCREENING" && result.video_filename !== "NO_VIDEO" ? result.video_filename.split(", ").filter(Boolean) : [];
   const videoFiles = rawVideoFiles.map((f) => {
     const cleanName = f.replace(/^\[.*?\]\s*/, "");
     const url = cleanName.startsWith("http") ? cleanName : `${API_BASE}/api/stream/${encodeURIComponent(cleanName)}`;
@@ -718,13 +726,13 @@ ${result.justification}
           </motion.div>
 
           {/* @ts-ignore */}
-          {(result as any).remarks && (result as any).remarks !== "Completed normally without interruptions." && (result as any).remarks !== "Completed normally." && (
+          {(result as any).remarks && (result as any).remarks !== "Completed normally without interruptions." && (result as any).remarks !== "Completed normally." && !(result as any).remarks.includes("METRICS_PAYLOAD:") && (
             <motion.div variants={fadeUp} custom={0.8} className="w-full bg-destructive/10 border border-destructive/30 rounded-xl p-4 mb-6 flex items-start gap-3">
               <ShieldAlert className="w-6 h-6 text-destructive shrink-0 mt-0.5" />
               <div>
                 <h3 className="text-sm font-bold text-destructive uppercase tracking-wider">System Alert / Security Breach</h3>
                 {/* @ts-ignore */}
-                <p className="text-sm text-foreground">{(result as any).remarks}</p>
+                <p className="text-sm text-foreground">{(result as any).remarks.split("METRICS_PAYLOAD:")[0]}</p>
               </div>
             </motion.div>
           )}
@@ -799,7 +807,7 @@ ${result.justification}
               </div>
               <div className="w-full">
                 {videoFiles.map((vf, i) => (
-                  <ForgeProVideoPlayer key={i} src={vf.url} />
+                  <ForgeProVideoPlayer key={i} src={vf.url} fallbackDuration={fallbackVideoDuration} />
                 ))}
               </div>
             </motion.div>

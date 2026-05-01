@@ -76,15 +76,14 @@ export default function HistoryPage() {
     }
   };
 
-  // 🛡️ THE FIX: DYNAMIC FILTERING ENGINE 100% Synced with Dashboard Logic
+  // 🛡️ THE FIX: Strict explicit filtering ensures Cook and other Screenings stay in the right tab
   const filteredEvals = useMemo(() => {
     let filtered = [...evaluations];
 
-    // 1. Tab Filter
     if (activeTab === "Initial Screening (Live)") {
-      filtered = filtered.filter(ev => !ev.video_filename || !String(ev.video_filename).includes("[UPLOADED]"));
+      filtered = filtered.filter(ev => ev.video_filename === "LIVE_SCREENING" || ev.video_filename === "NO_VIDEO" || !ev.video_filename);
     } else if (activeTab === "L1 Tech Round (Uploaded)") {
-      filtered = filtered.filter(ev => ev.video_filename && String(ev.video_filename).includes("[UPLOADED]"));
+      filtered = filtered.filter(ev => ev.video_filename && ev.video_filename !== "LIVE_SCREENING" && ev.video_filename !== "NO_VIDEO");
     }
 
     // 2. Search Filter
@@ -112,7 +111,6 @@ export default function HistoryPage() {
       if (sortBy === "Score") {
         return (b.scores?.overall_score || 0) - (a.scores?.overall_score || 0);
       }
-      // Default to Date (newest first)
       return new Date(b.date).getTime() - new Date(a.date).getTime();
     });
 
@@ -239,7 +237,7 @@ export default function HistoryPage() {
         filename: `ForgePro_Cohort_Report_${new Date().getTime()}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' } // Landscape is better for tables
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' } 
       }).from(element).save().then(() => toast.success("PDF Downloaded successfully!"));
     };
     document.body.appendChild(script);
@@ -262,7 +260,6 @@ export default function HistoryPage() {
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-6xl">
         <motion.div initial="hidden" animate="visible" className="space-y-6">
           
-          {/* Header & Export Dropdown */}
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">Evaluation History</h1>
@@ -316,7 +313,6 @@ export default function HistoryPage() {
             </div>
           </div>
 
-          {/* Tabs */}
           <div className="flex flex-wrap gap-2 pt-2 border-b border-border/50 pb-4">
             {["All Evaluations", "Initial Screening (Live)", "L1 Tech Round (Uploaded)"].map((tab) => (
               <button
@@ -333,7 +329,6 @@ export default function HistoryPage() {
             ))}
           </div>
 
-          {/* Search & Filters */}
           <div className="glass p-4 rounded-xl border border-border/50 shadow-sm flex flex-col lg:flex-row gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -388,7 +383,6 @@ export default function HistoryPage() {
             </div>
           </div>
 
-          {/* Data List */}
           {loading ? (
             <div className="py-20 flex justify-center">
               <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -417,7 +411,7 @@ export default function HistoryPage() {
                       <span>{ev.position}</span>
                       <span>•</span>
                       <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {ev.date}</span>
-                      {ev.video_filename?.includes("[UPLOADED]") && (
+                      {ev.video_filename && ev.video_filename !== "LIVE_SCREENING" && ev.video_filename !== "NO_VIDEO" && (
                         <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-accent/10 text-accent border border-accent/20 tracking-wider">
                           L1 TECH ROUND
                         </span>
