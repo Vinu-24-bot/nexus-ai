@@ -26,14 +26,12 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Filters
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("All Evaluations");
   const [sortBy, setSortBy] = useState("Date");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
   const [recFilter, setRecFilter] = useState("All Recommendations");
 
-  // Export Dropdown State
   const [showExportMenu, setShowExportMenu] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -53,7 +51,6 @@ export default function HistoryPage() {
     fetchData();
   }, []);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -76,17 +73,21 @@ export default function HistoryPage() {
     }
   };
 
-  // 🛡️ THE FIX: Strict explicit filtering ensures Cook and other Screenings stay in the right tab
   const filteredEvals = useMemo(() => {
     let filtered = [...evaluations];
 
     if (activeTab === "Initial Screening (Live)") {
-      filtered = filtered.filter(ev => ev.video_filename === "LIVE_SCREENING" || ev.video_filename === "NO_VIDEO" || !ev.video_filename);
+      filtered = filtered.filter(ev => {
+        const v = ev.video_filename || "";
+        return v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "";
+      });
     } else if (activeTab === "L1 Tech Round (Uploaded)") {
-      filtered = filtered.filter(ev => ev.video_filename && ev.video_filename !== "LIVE_SCREENING" && ev.video_filename !== "NO_VIDEO");
+      filtered = filtered.filter(ev => {
+        const v = ev.video_filename || "";
+        return v !== "LIVE_SCREENING" && v !== "NO_VIDEO" && v !== "";
+      });
     }
 
-    // 2. Search Filter
     if (search) {
       const q = search.toLowerCase();
       filtered = filtered.filter(ev => 
@@ -96,17 +97,14 @@ export default function HistoryPage() {
       );
     }
 
-    // 3. Status Filter
     if (statusFilter !== "All Statuses") {
       filtered = filtered.filter(ev => ev.selection_status?.toLowerCase() === statusFilter.toLowerCase());
     }
 
-    // 4. Recommendation Filter
     if (recFilter !== "All Recommendations") {
       filtered = filtered.filter(ev => ev.hiring_recommendation === recFilter);
     }
 
-    // 5. Sorting
     filtered.sort((a, b) => {
       if (sortBy === "Score") {
         return (b.scores?.overall_score || 0) - (a.scores?.overall_score || 0);
@@ -117,7 +115,6 @@ export default function HistoryPage() {
     return filtered;
   }, [evaluations, search, activeTab, sortBy, statusFilter, recFilter]);
 
-  // 🛡️ ENTERPRISE COHORT EXPORT ENGINE (Client-Side)
   const generateCohortHTML = () => {
     const baseUrl = window.location.origin;
     return `

@@ -48,6 +48,7 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
+// 🛡️ THE FIX: Hard Math Check for WebM Timeline.
 const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackDuration: number }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -79,10 +80,10 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
     const vid = videoRef.current;
     setCurrentTime(vid.currentTime);
     
-    let d = vid.duration;
-    // 🛡️ THE FIX: Hard math check. If native duration fails, inject the backend's recorded duration.
+    let d = fallbackDuration > 0 ? fallbackDuration : vid.duration;
+    
     if (isNaN(d) || !isFinite(d) || d <= 0) {
-      d = fallbackDuration > 0 ? fallbackDuration : (vid.buffered && vid.buffered.length > 0 ? vid.buffered.end(vid.buffered.length - 1) : 0);
+      d = (vid.buffered && vid.buffered.length > 0) ? vid.buffered.end(vid.buffered.length - 1) : 0;
     }
 
     if (d > 0 && isFinite(d)) {

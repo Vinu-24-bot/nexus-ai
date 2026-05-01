@@ -192,8 +192,6 @@ export default function InterviewPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
   
-  const [sttEngine, setSttEngine] = useState<"Whisper Neural Engine">("Initializing...");
-  
   const [liveTranscript, setLiveTranscript] = useState("");
   const liveTranscriptRef = useRef(""); 
   const [accumulatedTranscript, setAccumulatedTranscript] = useState(""); 
@@ -579,7 +577,6 @@ export default function InterviewPage() {
         }
     };
 
-    setSttEngine("Whisper Neural Engine");
     // @ts-ignore
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {

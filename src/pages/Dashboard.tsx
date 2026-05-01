@@ -131,9 +131,16 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Strict explicit filter. LIVE_SCREENING goes here. Everything else goes to L1.
-  const initialScreeningData = results.filter(r => r.video_filename === "LIVE_SCREENING" || r.video_filename === "NO_VIDEO" || !r.video_filename);
-  const l1TechRoundData = results.filter(r => r.video_filename && r.video_filename !== "LIVE_SCREENING" && r.video_filename !== "NO_VIDEO");
+  const initialScreeningData = results.filter(r => {
+    const v = r.video_filename || "";
+    return v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "";
+  });
+  
+  const l1TechRoundData = results.filter(r => {
+    const v = r.video_filename || "";
+    return v !== "LIVE_SCREENING" && v !== "NO_VIDEO" && v !== "";
+  });
+  
   const selectedData = results.filter(r => r.selection_status?.toLowerCase() === "selected");
 
   const calculateStats = (data: EvaluationResult[]) => {
