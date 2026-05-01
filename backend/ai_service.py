@@ -31,7 +31,6 @@ def format_prompt(template: str, **kwargs) -> str:
 
 def _parse_json_response(text: str) -> dict:
     try:
-        # Fallback regex to aggressively extract JSON even if LLM adds markdown wrapping
         start_idx = text.find('{')
         end_idx = text.rfind('}')
         if start_idx != -1 and end_idx != -1:
@@ -43,7 +42,6 @@ def _parse_json_response(text: str) -> dict:
             raise ValueError("No JSON brackets found in AI response.")
     except Exception as e:
         print(f"[BATS ForgePro] Critical JSON Parsing Error: {e}\nRaw Text snippet: {text[:300]}...")
-        # Ultimate fallback to prevent 500 crashes
         return {
             "candidate_overview": "Evaluation completed but AI failed to format response.",
             "scores": { "technical_proficiency": 50, "relevance_to_jd": 50, "communication": 50, "confidence_level": 50, "overall_score": 50 },
@@ -259,7 +257,6 @@ async def parse_resume_to_json(raw_text: str) -> dict:
 
 async def evaluate_candidate(job_description: str, resume: str, transcript: str, behavior_data: dict = None) -> dict:
     behavior_data = behavior_data or {}
-    # Ensure strings exist to prevent NoneType errors
     jd_safe = job_description or "Standard IT Role"
     resume_safe = resume or "No Resume Provided"
     transcript_safe = (transcript or "(No transcript generated)").replace("(No speech detected)", "").strip()
@@ -292,7 +289,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
         result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
         result = _validate_result(result)
     except Exception as e:
-        # Failsafe if Llama completely crashes, ensures DB always receives a valid record
         return _validate_result({})
 
     tab_switches = behavior_data.get("tab_switches", 0)
