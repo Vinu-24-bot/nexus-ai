@@ -221,7 +221,7 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
     
     async with httpx.AsyncClient(timeout=60) as client:
         for attempt in range(3):
-            resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
+            resp = await post(url, headers={"Content-Type": "application/json"}, json=payload)
             if resp.status_code == 429 and attempt < 2:
                 await asyncio.sleep((attempt + 1) * 5)
                 continue
@@ -272,18 +272,22 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     candidate_only_text = candidate_only_text.replace("<SILENCE>", "").strip()
     total_spoken_words = len(candidate_only_text.split())
 
-    if is_breach or total_spoken_words < 15:
+    # 🛡️ THE FIX: Replaced the flat 0/100 return with an explicit partial evaluation instruction for the LLM
+    if is_breach:
         return {
-            "candidate_overview": "Session automatically rejected. The candidate either triggered the Anti-Cheat Security Vault or failed to provide sufficient verbal responses during the interview.",
+            "candidate_overview": "Session automatically rejected due to Security Vault breach.",
             "scores": { "technical_proficiency": 0, "relevance_to_jd": 0, "communication": 0, "confidence_level": 0, "overall_score": 0 },
-            "sentiment": {"rating": "Negative", "explanation": "Session failed or candidate refused to engage in the interview."},
-            "candidate_status": {"level": "Needs Improvement", "description": "Terminated / No Data"},
-            "strengths": ["None identified due to lack of participation or security breach."],
-            "red_flags_or_weaknesses": [f"CRITICAL: Candidate provided only {total_spoken_words} words of actual verbal response."],
+            "sentiment": {"rating": "Negative", "explanation": "Security protocol triggered."},
+            "candidate_status": {"level": "Needs Improvement", "description": "Terminated / Breach"},
+            "strengths": ["None identified due to security breach."],
+            "red_flags_or_weaknesses": ["CRITICAL: Candidate triggered a security protocol."],
             "dynamic_follow_up_questions": [],
             "hiring_recommendation": "Reject",
-            "justification": f"CRITICAL PENALTY: Zero-Tolerance Engine Activated. The candidate provided virtually no verbal responses (Total Words: {total_spoken_words}) or triggered a security breach. Score locked to 0/100."
+            "justification": "CRITICAL PENALTY: Zero-Tolerance Engine Activated. Score locked to 0/100."
         }
+        
+    if total_spoken_words < 30 and not "(Pre-recorded interview video uploaded" in transcript_safe:
+         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered only a few questions (Total Words: {total_spoken_words}). Do NOT give a flat 0/100. Evaluate the specific answers they DID provide for partial credit, but heavily penalize their overall score for incomplete data."
 
     avg_latency = behavior_data.get("avg_latency", 0)
     if avg_latency > 0:
