@@ -162,7 +162,6 @@ async def text_to_speech(req: TTSRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 🛡️ THE FIX: Groq Whisper Chunk Endpoint for Flawless Transcriptions
 @app.post("/api/transcribe-chunk")
 async def transcribe_chunk(audio: UploadFile = File(...)):
     try:
@@ -226,7 +225,6 @@ async def stream_video(filename: str, request: Request):
 
 @app.post("/api/sessions/create")
 async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    # 🛡️ THE FIX: Force backend to securely store the exact duration and voice
     new_session = InterviewSession(
         candidate_name=req.candidate_name, candidate_email=req.candidate_email,
         recruiter_email=req.recruiter_email, interview_level=req.interview_level,
@@ -234,7 +232,6 @@ async def create_interview_session(req: SessionCreateRequest, background_tasks: 
         resume_text=req.resume_text, status="pending"
     )
     
-    # Store dynamic fields safely even if columns don't exist yet via JSON packing in remarks
     metadata = json.dumps({"duration_minutes": req.duration_minutes, "voice_type": getattr(req, "voice_type", "female")})
     new_session.remarks = metadata
 
@@ -264,7 +261,6 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     if datetime.utcnow() - session.created_at > timedelta(hours=24): raise HTTPException(status_code=403, detail="This interview link has expired (24-hour limit). Please contact your recruiter.")
     if session.status != "pending": raise HTTPException(status_code=403, detail="This interview session has already been attempted or completed and is now permanently locked.")
 
-    # 🛡️ THE FIX: Unpack the forced metadata so the frontend reliably gets the timer and voice
     dur = 10
     voice = "female"
     try:
@@ -508,30 +504,6 @@ async def get_stats(db: Session = Depends(get_db)):
     top_eval = max(evaluations, key=lambda e: (e.scores or {}).get("overall_score", 0))
 
     return {"total": total, "avg_score": avg_score, "strong_hires": strong_hires, "lean_hires": lean_hires, "rejects": rejects, "selected": sum(1 for ev in evaluations if ev.selection_status == "selected"), "rejected": sum(1 for ev in evaluations if ev.selection_status == "rejected"), "pending": sum(1 for ev in evaluations if ev.selection_status == "pending"), "pipeline_health": pipeline_health, "top_scorer": top_eval.candidate_name, "positions": list(set(ev.position for ev in evaluations))}
-
-@app.post("/api/compare")
-async def compare_candidates(candidate_ids: List[str], db: Session = Depends(get_db)):
-    evaluations = db.query(Evaluation).filter(Evaluation.id.in_(candidate_ids)).all()
-    if len(evaluations) < 2: raise HTTPException(400, "Need at least 2 valid candidate IDs to compare")
-
-    results = [db_to_response(ev) for ev in evaluations]
-    ranked = sorted(results, key=lambda r: r["scores"].get("overall_score", 0), reverse=True)
-    
-    debrief_matrix = []
-    for i, r in enumerate(ranked):
-        r["rank"] = i + 1
-        debrief_matrix.append({
-            "rank": i + 1, "candidate": r["candidateName"], "verdict": r["hiring_recommendation"],
-            "technical_score": r["scores"].get("technical_proficiency", 0), "communication_score": r["scores"].get("communication", 0),
-            "top_strength": r["strengths"][0] if r["strengths"] else "N/A", "biggest_red_flag": r["red_flags_or_weaknesses"][0] if r["red_flags_or_weaknesses"] else "None",
-            "risk_level": "Low" if r["hiring_recommendation"] == "Strong Hire" else "High" if r["hiring_recommendation"] == "Reject" else "Medium"
-        })
-
-    recommended_action = "No Strong Hires found in this cohort."
-    if debrief_matrix and debrief_matrix[0]["verdict"] == "Strong Hire":
-        recommended_action = f"Make an offer to {ranked[0]['candidateName']} based on superior technical alignment."
-
-    return {"candidates": ranked, "total_compared": len(ranked), "enterprise_debrief_matrix": debrief_matrix, "recommended_action": recommended_action}
 
 @app.get("/api/feedback")
 async def get_all_feedback(db: Session = Depends(get_db)):

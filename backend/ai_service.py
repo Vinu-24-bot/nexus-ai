@@ -71,7 +71,7 @@ You are running a deep-dive evaluation. You have the Job Description, the Candid
 *** ENTERPRISE EVALUATION PROTOCOL ***
 1. L1 TECH ROUND: If the [INTERVIEW_TRANSCRIPT] explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
 2. LIVE INTERVIEW: If this is a live interview, the [INTERVIEW_TRANSCRIPT] is the ultimate source of truth. 
-3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence in the transcript. 
+3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence in the transcript. If the candidate answered only 1 or 2 questions and left early, evaluate those specific answers accurately, but apply a penalty to their overall score for incomplete data. Do NOT automatically give a 0/100 if they provided valid technical answers before leaving.
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
@@ -221,7 +221,7 @@ async def _call_gemini(prompt: str, force_json: bool = False) -> dict:
     
     async with httpx.AsyncClient(timeout=60) as client:
         for attempt in range(3):
-            resp = await post(url, headers={"Content-Type": "application/json"}, json=payload)
+            resp = await client.post(url, headers={"Content-Type": "application/json"}, json=payload)
             if resp.status_code == 429 and attempt < 2:
                 await asyncio.sleep((attempt + 1) * 5)
                 continue
@@ -272,7 +272,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     candidate_only_text = candidate_only_text.replace("<SILENCE>", "").strip()
     total_spoken_words = len(candidate_only_text.split())
 
-    # 🛡️ THE FIX: Replaced the flat 0/100 return with an explicit partial evaluation instruction for the LLM
     if is_breach:
         return {
             "candidate_overview": "Session automatically rejected due to Security Vault breach.",
@@ -287,7 +286,7 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
         }
         
     if total_spoken_words < 30 and not "(Pre-recorded interview video uploaded" in transcript_safe:
-         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered only a few questions (Total Words: {total_spoken_words}). Do NOT give a flat 0/100. Evaluate the specific answers they DID provide for partial credit, but heavily penalize their overall score for incomplete data."
+         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered only a few questions (Total Words: {total_spoken_words}). Evaluate the specific answers they DID provide for partial credit, but heavily penalize their overall score for incomplete data."
 
     avg_latency = behavior_data.get("avg_latency", 0)
     if avg_latency > 0:
