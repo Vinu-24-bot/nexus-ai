@@ -127,6 +127,7 @@ Output ONLY valid JSON:
 {resume}
 """
 
+# 🛡️ THE FIX: Added Adaptive Difficulty Scaling to the prompt
 DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite AI technical interviewer.
 You are having a live conversation. You must act like a highly intelligent, empathetic human engineering manager.
 
@@ -135,17 +136,17 @@ Context of the conversation:
 - The Candidate's exact answer: {answer}
 - The next planned topic on your list: {next_question}
 
-YOUR GOAL: Keep the interview flowing rapidly. Acknowledge what the candidate just said.
+YOUR GOAL: Keep the interview flowing rapidly and adapt to their skill level.
 
 RULES:
-1. IF THEY SKIP OR DON'T KNOW: If the candidate says "I don't know", "not sure", "skip", or "move ahead", you MUST set "is_sufficient": true. DO NOT twist or rephrase the same question. Say exactly: "No problem, let's move on."
-2. IF SILENCE: If the answer is exactly "<SILENCE>", you MUST set "is_sufficient": true. Say exactly: "Let's move ahead to the next topic."
-3. IF DETAILED AND VALID: Set "is_sufficient": true. Acknowledge a specific technical detail they just said (under 10 words), then stop.
-4. IF EXTREMELY VAGUE (but not a skip): If the answer is under 5 words and completely misses the point (like "um", "well"), set "is_sufficient": false. Ask them to clarify briefly.
+1. IF THEY SKIP OR DON'T KNOW: You MUST set "is_sufficient": true. DO NOT twist or rephrase the same question. Say exactly: "No problem, let's move on."
+2. IF SILENCE: You MUST set "is_sufficient": true. Say exactly: "Let's move ahead to the next topic."
+3. IF DETAILED AND VALID (ADAPTIVE DIFFICULTY): Set "is_sufficient": true. Acknowledge a specific technical detail they just said (under 10 words). THEN, slightly adapt/increase the difficulty of the {next_question} before asking it to test their limits.
+4. IF EXTREMELY VAGUE (but not a skip): If the answer is under 5 words and completely misses the point, set "is_sufficient": false. Ask them to clarify briefly.
 
 Output ONLY valid JSON:
 {
-  "response_text": "Your highly conversational, short acknowledgment.",
+  "response_text": "Your highly conversational acknowledgment, immediately followed by the adapted next question.",
   "is_sufficient": true
 }
 """
@@ -250,7 +251,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     clean_transcript = transcript.replace("(No speech detected)", "").strip()
     is_breach = "SECURITY BREACH" in clean_transcript.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
 
-    # 🛡️ THE FIX: Hard Programmatic Penalty for Silent or Breached Interviews
     candidate_words = [w for w in clean_transcript.split() if w.lower() not in ['q0', 'q1', 'q2', 'q3', 'a0', 'a1', 'a2', 'a3', 'introduction:', 'candidate:', '[medium]:', '[hard]:', '<silence>']]
     total_words = len(candidate_words)
 
@@ -315,9 +315,10 @@ async def generate_jd(position: str) -> str:
 async def get_answer_acknowledgment(question: str, answer: str, next_question: str = None) -> dict:
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_question)
     try:
-        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=150, groq_model="llama-3.1-8b-instant")
+        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=250, groq_model="llama-3.1-8b-instant")
         if result.get("is_sufficient", True):
-            result["response_text"] = result.get("response_text", "Okay.") + f" {next_question}"
+            # If the LLM successfully adapted the next question, it will be in response_text
+            pass
         return result
     except Exception as e:
         return {"response_text": f"Got it. {next_question}", "is_sufficient": True}
