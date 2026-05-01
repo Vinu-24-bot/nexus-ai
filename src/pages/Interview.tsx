@@ -78,7 +78,6 @@ function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
   return bestMatch || voices.find(v => v.lang.startsWith("en-US")) || voices[0];
 }
 
-// 🛡️ THE FIX: Bulletproof TTS Promise. It guarantees the voice plays and cleanly resolves. No freezing.
 function speakText(text: string, gender: "female" | "male"): Promise<void> {
   return new Promise(async (resolve) => {
     let isResolved = false;
@@ -218,18 +217,20 @@ export default function InterviewPage() {
     "Finalizing Enterprise Report..."
   ];
 
+  // 🛡️ THE FIX: Smart parsing to guarantee session values don't get overwritten
   const rawSession = fetchedData || {};
-  const candidateName = state?.candidateName || rawSession.candidate_name || rawSession.candidateName || "Candidate";
+  const candidateName = state?.candidateName || rawSession.candidate_name || "Candidate";
   const position = state?.position || rawSession.position || "Technical Role";
-  const jobDescription = state?.jobDescription || rawSession.job_description || rawSession.jobDescription || "";
-  const resume = state?.resume || rawSession.resume_text || rawSession.resume || "";
+  const jobDescription = state?.jobDescription || rawSession.job_description || "";
+  const resume = state?.resume || rawSession.resume_text || "";
   
-  // 🛡️ THE FIX: Smart parsing safely converts "Male (US)" to "male" for the backend
-  const rawVoice = String(state?.voiceGender || rawSession.voice_gender || rawSession.voiceGender || "female").toLowerCase();
+  const rawVoice = String(state?.voiceGender || rawSession.voice_gender || "female").toLowerCase();
   const voiceGender = rawVoice.includes("male") ? "male" : "female";
   
-  // 🛡️ THE FIX: Hard parsing guarantees the 15-minute selection isn't lost
-  const durationMinutes = Number(state?.durationMinutes) || Number(rawSession.duration_minutes) || Number(rawSession.durationMinutes) || 10;
+  // 🛡️ THE FIX: Strictly parse the state duration first to ensure 15m stays 15m
+  const sessionDurationState = Number(state?.durationMinutes);
+  const sessionDurationDB = Number(rawSession.duration_minutes);
+  const durationMinutes = sessionDurationState > 0 ? sessionDurationState : (sessionDurationDB > 0 ? sessionDurationDB : 10);
   
   const rawQuestions = state?.questions || rawSession.questions || [];
   
@@ -251,7 +252,7 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
-          // Generate an excess of questions (20-25) to ensure the relentless 15-min interview never runs out
+          // Generate an excess of questions (20-25) to ensure the relentless interview never runs out
           const targetQCount = session.duration_minutes === 15 ? 25 : 20;
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -491,12 +492,22 @@ export default function InterviewPage() {
       const timeSinceStart = now - recordingStartRef.current;
       const timeSinceLastSpeech = now - lastSpeechRef.current;
 
+      // 🛡️ THE FIX: Dual-Phase Watchdog Timer
+      // hasSpoken checks if the candidate has started making ANY sound
+      const hasSpoken = liveTranscriptRef.current.trim().length > 0 || accumulatedTranscript.trim().length > 0;
+
       if (timeSinceStart > 120000) { 
+        // 2 minutes max per question
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      // 🛡️ THE FIX: Set auto-submit perfectly to 5.0 seconds
-      else if (timeSinceLastSpeech > 5000) {
+      else if (hasSpoken && timeSinceLastSpeech > 5500) {
+        // Phase 2: They started speaking, and paused for 5.5 seconds (Natural End)
+        const btn = document.getElementById("auto-submit-btn");
+        if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
+      }
+      else if (!hasSpoken && timeSinceLastSpeech > 15000) {
+        // Phase 1: They haven't said a word for 15 seconds (Thinking Time Over)
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
@@ -539,7 +550,7 @@ export default function InterviewPage() {
                 setCurrentLatencyDisplay(`${latencySecs}s`);
                 latenciesRef.current.push(parseFloat(latencySecs));
             }
-            lastSpeechRef.current = now; 
+            lastSpeechRef.current = now; // 🛡️ Resets the 5.5s timer when candidate speaks
             
             let interim = "";
             for (let i = event.resultIndex; i < event.results.length; ++i) {
@@ -575,7 +586,6 @@ export default function InterviewPage() {
         }
     };
 
-    // 🛡️ THE FIX: Deepgram upgraded to nova-2 with perfect 800ms endpointing and punctuation for high accuracy
     if (DEEPGRAM_API_KEY && streamRef.current && !deepgramFailedRef.current) {
         try {
             const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true&filler_words=true&interim_results=true&endpointing=800', ['token', DEEPGRAM_API_KEY]);
@@ -717,7 +727,6 @@ export default function InterviewPage() {
     let nextQData = finalQuestionsList[nextIndex];
     let nextQText = nextQData ? nextQData.question : "Okay, that concludes all the technical questions.";
 
-    // 🛡️ THE FIX: Dynamically scaling endless questions up until the final 30 seconds
     const isTimeUp = ((durationMinutes * 60) - totalElapsed) <= 30;
 
     let dynamicResponse = "";
@@ -810,8 +819,7 @@ export default function InterviewPage() {
 
     try {
       let finalAnswers = [...answers];
-      if (fullBlob.size > 0) finalAnswers.push({ questionId: -1, transcript: "", videoBlob: fullBlob });
-
+      // 🛡️ THE FIX: Always compile answers to transcript, regardless of video blob size
       const questionAnswers = finalAnswers.filter((a) => a.questionId !== -1);
       let fullTranscript = questionAnswers.map((a, i) => {
         if (a.questionId === 0) return `Introduction:\nCandidate: ${a.transcript}`;
@@ -836,6 +844,7 @@ export default function InterviewPage() {
       const avgLatency = validLatencies.length > 0 ? (validLatencies.reduce((a,b)=>a+b,0) / validLatencies.length).toFixed(1) : 0;
 
       const baseReason = forcedTerminationReason || "Completed normally.";
+      
       const metricsPayload = JSON.stringify({
          tab_switches: clickWarningsRef.current,
          esc_presses: escWarningsRef.current,
@@ -847,14 +856,14 @@ export default function InterviewPage() {
       });
       const hybridRemarks = `${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
-      // 🛡️ THE FIX: Hardcoded "LIVE_INTERVIEW_RECORDING" guarantees the SQL Database accepts the save even if video fails
+      // 🛡️ THE FIX: "LIVE_SCREENING" injected if video is missing to ensure it hits Dashboard
       await submitEvaluation({
         candidate_name: candidateName || "Unknown", 
         position: position || "Standard Role", 
         job_description: jobDescription || "Standard JD",
         resume: resume || "Standard Resume", 
         transcript: fullTranscript || "(No transcript generated)", 
-        video_filename: primaryVideoFilename || "LIVE_INTERVIEW_RECORDING",
+        video_filename: primaryVideoFilename || "LIVE_SCREENING",
         remarks: hybridRemarks,
       } as any); 
 
