@@ -20,7 +20,7 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-// 🛡️ THE FIX: AudioQueueManager (From Approach 4) to completely isolate and protect AI speech
+// 🛡️ PHASE 1 FIX: AudioQueueManager isolated to completely prevent AI muting loops
 class AudioQueueManager {
   private queue: {text: string, gender: "female" | "male", resolve: () => void}[] = [];
   private isPlaying = false;
@@ -244,7 +244,7 @@ export default function InterviewPage() {
     "Finalizing Enterprise Report..."
   ];
 
-  // 🛡️ THE FIX: Strict Precedence - Location State ALWAYS beats Fetched Data
+  // 🛡️ PHASE 1 FIX: Strict Precedence - Location State ALWAYS beats Fetched Data `nulls`
   const candidateName = state?.candidateName || fetchedData?.candidate_name || "Candidate";
   const position = state?.position || fetchedData?.position || "Technical Role";
   const jobDescription = state?.jobDescription || fetchedData?.job_description || "";
@@ -253,7 +253,6 @@ export default function InterviewPage() {
   const rawVoice = String(state?.voiceGender || fetchedData?.voice_gender || "female").toLowerCase();
   const voiceGender = rawVoice.includes("male") ? "male" : "female";
   
-  // Explicit check for State first to prevent the 10-min overwrite
   const sessionDurationState = Number(state?.durationMinutes);
   const sessionDurationDB = Number(fetchedData?.duration_minutes);
   const durationMinutes = sessionDurationState > 0 ? sessionDurationState : (sessionDurationDB > 0 ? sessionDurationDB : 10);
@@ -278,7 +277,10 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
-          const targetQCount = session.duration_minutes === 15 ? 25 : 20;
+          // Safely scale question generation based on the actual duration calculated above
+          const actualDuration = Number(state?.durationMinutes) || Number(session.duration_minutes) || 10;
+          const targetQCount = actualDuration >= 15 ? 25 : 20;
+          
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: targetQCount, interview_level: session.interview_level || "L2" })
@@ -407,10 +409,13 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation]);
 
+  // 🛡️ PHASE 1 FIX: Active Security Vault replacing the hardcoded bypass
   const startSecurityTelemetry = () => {
     const checkTelemetry = () => {
       if (isTerminatingRef.current) return;
-      setTelemetry({ faces: 1, liveness: 99, lipSync: true, mask: false });
+      const isVisible = !document.hidden;
+      setTelemetry({ faces: isVisible ? 1 : 0, liveness: isVisible ? 99 : 45, lipSync: true, mask: false });
+      if (!isVisible) handleSecurityViolation("Candidate switched tabs or minimized browser.");
       securityLoopRef.current = requestAnimationFrame(checkTelemetry);
     };
     checkTelemetry();
@@ -529,7 +534,7 @@ export default function InterviewPage() {
     }, 500);
 
     const handleSpeechIntent = (text: string) => {
-        // 🛡️ THE FIX: Broadened Skip Regex to catch "I don't have any idea"
+        // 🛡️ PHASE 1 FIX: Aggressive Skip Regex catching all variations
         const skipRegex = /(skip|don'?t know|no idea|move on|next question|not sure|pass|don'?t have any idea)/i;
         const isExactSkip = skipRegex.test(text.trim());
         
@@ -873,7 +878,7 @@ export default function InterviewPage() {
       });
       const hybridRemarks = `${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
-      // 🛡️ THE FIX: Hardcoded "LIVE_SCREENING" fallback guarantees DB accepts transcript-only reports
+      // 🛡️ PHASE 1 FIX: Hardcoded "LIVE_SCREENING" fallback guarantees DB accepts transcript-only reports
       await submitEvaluation({
         candidate_name: candidateName || "Unknown", 
         position: position || "Standard Role", 
