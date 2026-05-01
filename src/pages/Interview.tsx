@@ -71,12 +71,11 @@ function getVoice(gender: "female" | "male"): SpeechSynthesisVoice | null {
   return bestMatch || voices.find(v => v.lang.startsWith("en")) || voices[0];
 }
 
-// 🛡️ THE FIX: Added AbortController to prevent backend sleep from freezing the interview
 function speakText(text: string, gender: "female" | "male"): Promise<void> {
   return new Promise(async (resolve) => {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 second max wait for Edge-TTS
+      const timeoutId = setTimeout(() => controller.abort(), 6000); 
 
       const res = await fetch(`${API_URL}/tts`, {
         method: 'POST',
@@ -108,7 +107,6 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
   });
 }
 
-// 🛡️ THE FIX: Bulletproofed the native fallback so it never hangs if voices are unavailable
 function fallbackSpeak(text: string, gender: "female" | "male", resolve: () => void) {
   if (!window.speechSynthesis) { resolve(); return; }
   window.speechSynthesis.cancel();
@@ -121,7 +119,6 @@ function fallbackSpeak(text: string, gender: "female" | "male", resolve: () => v
   utterance.pitch = gender === "female" ? 1.05 : 0.95;
   utterance.volume = 1;
   
-  // Safety timeout in case browser TTS gets stuck
   const maxDuration = Math.max(3000, text.length * 60); 
   const safetyTimeout = setTimeout(() => { resolve(); }, maxDuration);
 
@@ -186,7 +183,6 @@ export default function InterviewPage() {
   const latenciesRef = useRef<number[]>([]);
 
   const isSpeakingRef = useRef(false);
-  const consecutiveSpeechFramesRef = useRef(0);
 
   const [rating, setRating] = useState(0);
   const [feedbackText, setFeedbackText] = useState("");
@@ -289,7 +285,6 @@ export default function InterviewPage() {
     };
   }, []);
 
-  // 🛡️ THE FIX: Explicitly turning on video feed during both "scanning" and "interview" stages
   useEffect(() => {
     if ((interviewStep === "interview" || interviewStep === "scanning") && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
@@ -430,29 +425,7 @@ export default function InterviewPage() {
       const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
       const isSpeakingLoudly = audioLevel > 20;
 
-      if (isSpeakingRef.current && audioLevel > 25) {
-        consecutiveSpeechFramesRef.current += 1;
-        if (consecutiveSpeechFramesRef.current > 30) { 
-          if ((window as any).currentActiveAudio) {
-            (window as any).currentActiveAudio.pause();
-            (window as any).currentActiveAudio.currentTime = 0;
-            (window as any).currentActiveAudio = null;
-          }
-          window.speechSynthesis.cancel();
-          isSpeakingRef.current = false;
-          setIsSpeaking(false);
-          setAiMessage("Oh, go ahead...");
-          consecutiveSpeechFramesRef.current = 0;
-          
-          questionEndTimeRef.current = Date.now();
-          setCurrentLatencyDisplay("0.0s");
-          setIsRecording(true);
-          startSpeechRecognition();
-          toast.info("🎙️ You interrupted the interviewer.");
-        }
-      } else {
-        consecutiveSpeechFramesRef.current = 0;
-      }
+      // 🛡️ THE FIX: Removed the buggy audio-level interrupt loop entirely to prevent AI cutting itself off
 
       const mockVisionData = {
         facesDetected: 1, 
@@ -517,7 +490,6 @@ export default function InterviewPage() {
     startSecurityTelemetry();
     await speakText("Activating security vault. Scanning face mesh and environment.", voiceGender);
     
-    // 🛡️ THE FIX: Reduced scanning animation time to a snappy 1 second
     setTimeout(() => {
       if (telemetry.mask) {
         handleSecurityViolation("Mask detected", true);
@@ -582,7 +554,8 @@ export default function InterviewPage() {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      else if (timeSinceLastSpeech > 4500) {
+      // 🛡️ THE FIX: Precisely set silence timer to 5.5 seconds
+      else if (timeSinceLastSpeech > 5500) {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
@@ -793,10 +766,9 @@ export default function InterviewPage() {
     let dynamicResponse = "";
     let isSufficient = true;
 
-    // 🛡️ THE FIX: Added AbortController to the analysis request so it never freezes
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 sec max wait for LLM
+        const timeoutId = setTimeout(() => controller.abort(), 8000); 
         
         const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
             method: "POST", headers: { "Content-Type": "application/json" },
