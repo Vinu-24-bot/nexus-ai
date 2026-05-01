@@ -20,10 +20,15 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-// 🛡️ PHASE 1 FIX: AudioQueueManager isolated to completely prevent AI muting loops
+// Conversational fillers to mask latency (Phase 2)
+const FILLERS = [
+  "Right.", "Got it.", "Okay, makes sense.", "Hmm, interesting.", 
+  "Understood.", "Okay.", "Great."
+];
+
 class AudioQueueManager {
   private queue: {text: string, gender: "female" | "male", resolve: () => void}[] = [];
-  private isPlaying = false;
+  public isPlaying = false;
   private currentUtterance: SpeechSynthesisUtterance | null = null;
   private currentAudio: HTMLAudioElement | null = null;
   
@@ -116,10 +121,18 @@ class AudioQueueManager {
     });
   }
   
+  // ⚡ PHASE 2: Aggressive Cancel for True Barge-In
   cancel(): void {
     this.queue = [];
-    if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
-    if (this.currentUtterance) { window.speechSynthesis.cancel(); this.currentUtterance = null; }
+    if (this.currentAudio) { 
+        this.currentAudio.pause(); 
+        this.currentAudio.currentTime = 0;
+        this.currentAudio = null; 
+    }
+    if (this.currentUtterance) { 
+        window.speechSynthesis.cancel(); 
+        this.currentUtterance = null; 
+    }
     this.isPlaying = false;
   }
 }
@@ -244,7 +257,6 @@ export default function InterviewPage() {
     "Finalizing Enterprise Report..."
   ];
 
-  // 🛡️ PHASE 1 FIX: Strict Precedence - Location State ALWAYS beats Fetched Data `nulls`
   const candidateName = state?.candidateName || fetchedData?.candidate_name || "Candidate";
   const position = state?.position || fetchedData?.position || "Technical Role";
   const jobDescription = state?.jobDescription || fetchedData?.job_description || "";
@@ -277,7 +289,6 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
-          // Safely scale question generation based on the actual duration calculated above
           const actualDuration = Number(state?.durationMinutes) || Number(session.duration_minutes) || 10;
           const targetQCount = actualDuration >= 15 ? 25 : 20;
           
@@ -409,7 +420,6 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation]);
 
-  // 🛡️ PHASE 1 FIX: Active Security Vault replacing the hardcoded bypass
   const startSecurityTelemetry = () => {
     const checkTelemetry = () => {
       if (isTerminatingRef.current) return;
@@ -523,7 +533,8 @@ export default function InterviewPage() {
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      else if (hasSpoken && timeSinceLastSpeech > 5500) { // Phase 2: 5.5s pause after speaking
+      // ⚡ PHASE 2 FIX: Aggressive 1.5-second Semantic Endpointing for ultra-smooth back-and-forth
+      else if (hasSpoken && timeSinceLastSpeech > 1500) { 
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
@@ -534,7 +545,6 @@ export default function InterviewPage() {
     }, 500);
 
     const handleSpeechIntent = (text: string) => {
-        // 🛡️ PHASE 1 FIX: Aggressive Skip Regex catching all variations
         const skipRegex = /(skip|don'?t know|no idea|move on|next question|not sure|pass|don'?t have any idea)/i;
         const isExactSkip = skipRegex.test(text.trim());
         
@@ -544,6 +554,17 @@ export default function InterviewPage() {
                const btn = document.getElementById("auto-submit-btn");
                if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
             }, 300);
+        }
+    };
+
+    const handleBargeIn = (text: string) => {
+        // ⚡ PHASE 2 FIX: True Barge-In. If AI is talking and candidate speaks, instantly kill AI voice.
+        if (isSpeakingRef.current && text.trim().length > 3) {
+            audioQueue.cancel();
+            setIsSpeaking(false);
+            isSpeakingRef.current = false;
+            setAiMessage("");
+            toast.info("Interrupted. Listening...");
         }
     };
 
@@ -586,6 +607,7 @@ export default function InterviewPage() {
             liveTranscriptRef.current = fullText;
             setLiveTranscript(fullText);
             handleSpeechIntent(fullText);
+            handleBargeIn(interim);
         };
         
         recognition.onerror = (event: any) => {
@@ -609,7 +631,7 @@ export default function InterviewPage() {
 
     if (DEEPGRAM_API_KEY && streamRef.current && !deepgramFailedRef.current) {
         try {
-            const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2-conversational&smart_format=true&punctuate=true&filler_words=true&interim_results=true&endpointing=500', ['token', DEEPGRAM_API_KEY]);
+            const socket = new WebSocket('wss://api.deepgram.com/v1/listen?model=nova-2-conversational&smart_format=true&punctuate=true&filler_words=true&interim_results=true&endpointing=300', ['token', DEEPGRAM_API_KEY]);
             dgSocketRef.current = socket;
             
             let finalTranscriptAccumulator = "";
@@ -659,6 +681,7 @@ export default function InterviewPage() {
                         const interimText = (finalTranscriptAccumulator + transcript).trim();
                         liveTranscriptRef.current = interimText;
                         setLiveTranscript(interimText);
+                        handleBargeIn(transcript);
                     }
                 }
             };
@@ -726,6 +749,10 @@ export default function InterviewPage() {
     isHandlingSubmitRef.current = true;
     setIsRecording(false);
     setIsAnalyzing(true);
+
+    // ⚡ PHASE 2 FIX: Instant Conversational Backchanneling (Masks Latency)
+    const randomFiller = FILLERS[Math.floor(Math.random() * FILLERS.length)];
+    audioQueue.speak(randomFiller, voiceGender);
     
     let reason = "";
     if (e && e.target && e.target.dataset) {
@@ -878,7 +905,6 @@ export default function InterviewPage() {
       });
       const hybridRemarks = `${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
-      // 🛡️ PHASE 1 FIX: Hardcoded "LIVE_SCREENING" fallback guarantees DB accepts transcript-only reports
       await submitEvaluation({
         candidate_name: candidateName || "Unknown", 
         position: position || "Standard Role", 
