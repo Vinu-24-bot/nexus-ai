@@ -127,7 +127,6 @@ Output ONLY valid JSON:
 {resume}
 """
 
-# 🛡️ THE FIX: Added Adaptive Difficulty Scaling to the prompt
 DYNAMIC_INTERVIEW_TURN_PROMPT = """You are BATS ForgePro, an elite AI technical interviewer.
 You are having a live conversation. You must act like a highly intelligent, empathetic human engineering manager.
 
@@ -251,20 +250,27 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     clean_transcript = transcript.replace("(No speech detected)", "").strip()
     is_breach = "SECURITY BREACH" in clean_transcript.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
 
-    candidate_words = [w for w in clean_transcript.split() if w.lower() not in ['q0', 'q1', 'q2', 'q3', 'a0', 'a1', 'a2', 'a3', 'introduction:', 'candidate:', '[medium]:', '[hard]:', '<silence>']]
-    total_words = len(candidate_words)
+    # 🛡️ THE FIX: Extract EXACTLY what the candidate spoke, ignoring the AI's questions
+    candidate_only_text = " ".join(re.findall(r'A\d+: (.*?)(?=\n\nQ|\Z)', clean_transcript, re.DOTALL | re.IGNORECASE))
+    intro_match = re.search(r'Introduction:\s*Candidate: (.*?)(?=\n\nQ|\Z)', clean_transcript, re.DOTALL | re.IGNORECASE)
+    if intro_match:
+        candidate_only_text += " " + intro_match.group(1)
+        
+    candidate_only_text = candidate_only_text.replace("<SILENCE>", "").strip()
+    total_spoken_words = len(candidate_only_text.split())
 
-    if is_breach or total_words < 30:
+    # If they spoke less than 20 words in the entire interview, crush the score to 0.
+    if is_breach or total_spoken_words < 20:
         return {
-            "candidate_overview": "Session automatically rejected. The candidate either triggered the Anti-Cheat Security Vault or failed to provide sufficient verbal responses during the interview.",
+            "candidate_overview": "Session automatically rejected. The candidate failed to provide sufficient verbal responses during the interview.",
             "scores": { "technical_proficiency": 0, "relevance_to_jd": 0, "communication": 0, "confidence_level": 0, "overall_score": 0 },
             "sentiment": {"rating": "Negative", "explanation": "Session failed or candidate refused to engage in the interview."},
             "candidate_status": {"level": "Needs Improvement", "description": "Terminated / No Data"},
-            "strengths": ["None identified due to lack of participation or security breach."],
-            "red_flags_or_weaknesses": ["CRITICAL: Candidate provided less than 30 words of actual verbal response or triggered a security protocol."],
+            "strengths": ["None identified due to lack of participation."],
+            "red_flags_or_weaknesses": [f"CRITICAL: Candidate provided only {total_spoken_words} words of actual verbal response."],
             "dynamic_follow_up_questions": [],
             "hiring_recommendation": "Reject",
-            "justification": "CRITICAL PENALTY: Zero-Tolerance Engine Activated. The candidate provided virtually no verbal responses or triggered a security breach. The AI scoring module has been manually overridden, and the score is strictly locked to 0/100."
+            "justification": f"CRITICAL PENALTY: Zero-Tolerance Engine Activated. The candidate provided virtually no verbal responses (Total Words: {total_spoken_words}). The AI scoring module has been manually overridden, and the score is strictly locked to 0/100."
         }
 
     avg_latency = behavior_data.get("avg_latency", 0)
@@ -315,9 +321,8 @@ async def generate_jd(position: str) -> str:
 async def get_answer_acknowledgment(question: str, answer: str, next_question: str = None) -> dict:
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_question)
     try:
-        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=250, groq_model="llama-3.1-8b-instant")
+        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=150, groq_model="llama-3.1-8b-instant")
         if result.get("is_sufficient", True):
-            # If the LLM successfully adapted the next question, it will be in response_text
             pass
         return result
     except Exception as e:
