@@ -69,8 +69,8 @@ EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter 
 You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, the Interview Transcript, and the Behavioral Telemetry.
 
 *** ENTERPRISE EVALUATION PROTOCOL ***
-1. L1 TECH ROUND (PRE-RECORDED): If the [INTERVIEW_TRANSCRIPT] explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
-2. LIVE INTERVIEW (STRICT SCORING): If this is a live interview, the [INTERVIEW_TRANSCRIPT] is the ultimate source of truth. 
+1. L1 TECH ROUND: If the [INTERVIEW_TRANSCRIPT] explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
+2. LIVE INTERVIEW: If this is a live interview, the [INTERVIEW_TRANSCRIPT] is the ultimate source of truth. 
 3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence in the transcript. 
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
@@ -264,7 +264,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
 
     is_breach = "SECURITY BREACH" in transcript_safe.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
 
-    # Accurate regex to extract ONLY the candidate's spoken words for strict silence penalty
     candidate_only_text = " ".join(re.findall(r'A\d+: (.*?)(?=\n\nQ|\Z)', transcript_safe, re.DOTALL | re.IGNORECASE))
     intro_match = re.search(r'Introduction:\s*Candidate: (.*?)(?=\n\nQ|\Z)', transcript_safe, re.DOTALL | re.IGNORECASE)
     if intro_match:
@@ -273,7 +272,7 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     candidate_only_text = candidate_only_text.replace("<SILENCE>", "").strip()
     total_spoken_words = len(candidate_only_text.split())
 
-    if is_breach or total_spoken_words < 25:
+    if is_breach or total_spoken_words < 15:
         return {
             "candidate_overview": "Session automatically rejected. The candidate either triggered the Anti-Cheat Security Vault or failed to provide sufficient verbal responses during the interview.",
             "scores": { "technical_proficiency": 0, "relevance_to_jd": 0, "communication": 0, "confidence_level": 0, "overall_score": 0 },
