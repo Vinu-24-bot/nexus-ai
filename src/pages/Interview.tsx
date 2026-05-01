@@ -112,7 +112,8 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
 
 function fallbackSpeak(text: string, gender: "female" | "male", resolve: () => void) {
   if (!window.speechSynthesis) { resolve(); return; }
-  window.speechSynthesis.cancel();
+  // 🛡️ THE FIX: Removed speechSynthesis.cancel() which was aggressively killing the TTS loop
+  
   const utterance = new SpeechSynthesisUtterance(text);
   (window as any).currentUtterance = utterance; 
   
@@ -217,22 +218,21 @@ export default function InterviewPage() {
     "Finalizing Enterprise Report..."
   ];
 
-  // 🛡️ THE FIX: Smart parsing to guarantee session values don't get overwritten
-  const rawSession = fetchedData || {};
-  const candidateName = state?.candidateName || rawSession.candidate_name || "Candidate";
-  const position = state?.position || rawSession.position || "Technical Role";
-  const jobDescription = state?.jobDescription || rawSession.job_description || "";
-  const resume = state?.resume || rawSession.resume_text || "";
+  // 🛡️ THE FIX: Strict Precedence - Location State ALWAYS beats Fetched Data
+  const candidateName = state?.candidateName || fetchedData?.candidate_name || "Candidate";
+  const position = state?.position || fetchedData?.position || "Technical Role";
+  const jobDescription = state?.jobDescription || fetchedData?.job_description || "";
+  const resume = state?.resume || fetchedData?.resume_text || "";
   
-  const rawVoice = String(state?.voiceGender || rawSession.voice_gender || "female").toLowerCase();
+  const rawVoice = String(state?.voiceGender || fetchedData?.voice_gender || "female").toLowerCase();
   const voiceGender = rawVoice.includes("male") ? "male" : "female";
   
-  // 🛡️ THE FIX: Strictly parse the state duration first to ensure 15m stays 15m
+  // Explicit check for State first to prevent the 10-min overwrite
   const sessionDurationState = Number(state?.durationMinutes);
-  const sessionDurationDB = Number(rawSession.duration_minutes);
+  const sessionDurationDB = Number(fetchedData?.duration_minutes);
   const durationMinutes = sessionDurationState > 0 ? sessionDurationState : (sessionDurationDB > 0 ? sessionDurationDB : 10);
   
-  const rawQuestions = state?.questions || rawSession.questions || [];
+  const rawQuestions = state?.questions || fetchedData?.questions || [];
   
   const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
     { id: 1, question: "Could you briefly describe your most impactful project?", category: "technical", difficulty: "medium" },
@@ -252,7 +252,6 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
-          // Generate an excess of questions (20-25) to ensure the relentless interview never runs out
           const targetQCount = session.duration_minutes === 15 ? 25 : 20;
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -492,22 +491,18 @@ export default function InterviewPage() {
       const timeSinceStart = now - recordingStartRef.current;
       const timeSinceLastSpeech = now - lastSpeechRef.current;
 
-      // 🛡️ THE FIX: Dual-Phase Watchdog Timer
-      // hasSpoken checks if the candidate has started making ANY sound
+      // 🛡️ THE FIX: Dual-Phase Watchdog Timer limits skipping errors
       const hasSpoken = liveTranscriptRef.current.trim().length > 0 || accumulatedTranscript.trim().length > 0;
 
       if (timeSinceStart > 120000) { 
-        // 2 minutes max per question
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      else if (hasSpoken && timeSinceLastSpeech > 5500) {
-        // Phase 2: They started speaking, and paused for 5.5 seconds (Natural End)
+      else if (hasSpoken && timeSinceLastSpeech > 5500) { // Phase 2: 5.5s pause after speaking
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
-      else if (!hasSpoken && timeSinceLastSpeech > 15000) {
-        // Phase 1: They haven't said a word for 15 seconds (Thinking Time Over)
+      else if (!hasSpoken && timeSinceLastSpeech > 15000) { // Phase 1: 15s thinking time
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
@@ -550,7 +545,7 @@ export default function InterviewPage() {
                 setCurrentLatencyDisplay(`${latencySecs}s`);
                 latenciesRef.current.push(parseFloat(latencySecs));
             }
-            lastSpeechRef.current = now; // 🛡️ Resets the 5.5s timer when candidate speaks
+            lastSpeechRef.current = now; 
             
             let interim = "";
             for (let i = event.resultIndex; i < event.results.length; ++i) {
@@ -819,7 +814,8 @@ export default function InterviewPage() {
 
     try {
       let finalAnswers = [...answers];
-      // 🛡️ THE FIX: Always compile answers to transcript, regardless of video blob size
+      if (fullBlob.size > 0) finalAnswers.push({ questionId: -1, transcript: "", videoBlob: fullBlob });
+
       const questionAnswers = finalAnswers.filter((a) => a.questionId !== -1);
       let fullTranscript = questionAnswers.map((a, i) => {
         if (a.questionId === 0) return `Introduction:\nCandidate: ${a.transcript}`;
@@ -856,14 +852,14 @@ export default function InterviewPage() {
       });
       const hybridRemarks = `${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
-      // 🛡️ THE FIX: "LIVE_SCREENING" injected if video is missing to ensure it hits Dashboard
+      // 🛡️ THE FIX: Hardcoded "NO_VIDEO" flag ensures DB doesn't reject Initial Screenings
       await submitEvaluation({
         candidate_name: candidateName || "Unknown", 
         position: position || "Standard Role", 
         job_description: jobDescription || "Standard JD",
         resume: resume || "Standard Resume", 
         transcript: fullTranscript || "(No transcript generated)", 
-        video_filename: primaryVideoFilename || "LIVE_SCREENING",
+        video_filename: primaryVideoFilename || "NO_VIDEO",
         remarks: hybridRemarks,
       } as any); 
 
