@@ -113,9 +113,9 @@ Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY 
 
 RULES:
 1. PROGRESSIVE DIFFICULTY: You MUST generate the questions in this exact order: 
-   - First 5 questions: "easy" (Basic fundamentals & background).
-   - Next 10 questions: "medium" (Scenario-based project mapping).
-   - Final 10 questions: "hard" (Deep technical tradeoffs & architecture).
+   - First 20% of questions: "easy" (Basic fundamentals & background).
+   - Next 40% of questions: "medium" (Scenario-based project mapping).
+   - Final 40% of questions: "hard" (Deep technical tradeoffs & architecture).
 2. NO DEFINITIONS: NEVER ask basic definition questions like "What is Django?". 
 3. SCENARIO BASED: Medium and Hard questions must explicitly blend a specific project from the [CANDIDATE_RESUME] with a requirement from the [JOB_DESCRIPTION]. 
 4. CONCISE LENGTH: Keep questions perfectly balanced, between 15 to 30 words. 
@@ -264,20 +264,26 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
 
     is_breach = "SECURITY BREACH" in transcript_safe.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
 
-    candidate_words = [w for w in transcript_safe.split() if w.lower() not in ['q0', 'q1', 'q2', 'q3', 'a0', 'a1', 'a2', 'a3', 'introduction:', 'candidate:', '[medium]:', '[hard]:', '<silence>']]
-    total_words = len(candidate_words)
+    # Accurate regex to extract ONLY the candidate's spoken words for strict silence penalty
+    candidate_only_text = " ".join(re.findall(r'A\d+: (.*?)(?=\n\nQ|\Z)', transcript_safe, re.DOTALL | re.IGNORECASE))
+    intro_match = re.search(r'Introduction:\s*Candidate: (.*?)(?=\n\nQ|\Z)', transcript_safe, re.DOTALL | re.IGNORECASE)
+    if intro_match:
+        candidate_only_text += " " + intro_match.group(1)
+        
+    candidate_only_text = candidate_only_text.replace("<SILENCE>", "").strip()
+    total_spoken_words = len(candidate_only_text.split())
 
-    if is_breach or total_words < 30:
+    if is_breach or total_spoken_words < 25:
         return {
             "candidate_overview": "Session automatically rejected. The candidate either triggered the Anti-Cheat Security Vault or failed to provide sufficient verbal responses during the interview.",
             "scores": { "technical_proficiency": 0, "relevance_to_jd": 0, "communication": 0, "confidence_level": 0, "overall_score": 0 },
             "sentiment": {"rating": "Negative", "explanation": "Session failed or candidate refused to engage in the interview."},
             "candidate_status": {"level": "Needs Improvement", "description": "Terminated / No Data"},
             "strengths": ["None identified due to lack of participation or security breach."],
-            "red_flags_or_weaknesses": ["CRITICAL: Candidate provided less than 30 words of actual verbal response or triggered a security protocol."],
+            "red_flags_or_weaknesses": [f"CRITICAL: Candidate provided only {total_spoken_words} words of actual verbal response."],
             "dynamic_follow_up_questions": [],
             "hiring_recommendation": "Reject",
-            "justification": "CRITICAL PENALTY: Zero-Tolerance Engine Activated. The candidate provided virtually no verbal responses or triggered a security breach. The AI scoring module has been manually overridden, and the score is strictly locked to 0/100."
+            "justification": f"CRITICAL PENALTY: Zero-Tolerance Engine Activated. The candidate provided virtually no verbal responses (Total Words: {total_spoken_words}) or triggered a security breach. Score locked to 0/100."
         }
 
     avg_latency = behavior_data.get("avg_latency", 0)
