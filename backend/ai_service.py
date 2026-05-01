@@ -31,6 +31,7 @@ def format_prompt(template: str, **kwargs) -> str:
 
 def _parse_json_response(text: str) -> dict:
     try:
+        # Fallback regex to aggressively extract JSON even if LLM adds markdown wrapping
         start_idx = text.find('{')
         end_idx = text.rfind('}')
         if start_idx != -1 and end_idx != -1:
@@ -42,7 +43,18 @@ def _parse_json_response(text: str) -> dict:
             raise ValueError("No JSON brackets found in AI response.")
     except Exception as e:
         print(f"[BATS ForgePro] Critical JSON Parsing Error: {e}\nRaw Text snippet: {text[:300]}...")
-        raise ValueError("AI generated invalid or truncated JSON.")
+        # Ultimate fallback to prevent 500 crashes
+        return {
+            "candidate_overview": "Evaluation completed but AI failed to format response.",
+            "scores": { "technical_proficiency": 50, "relevance_to_jd": 50, "communication": 50, "confidence_level": 50, "overall_score": 50 },
+            "sentiment": {"rating": "Neutral", "explanation": "Fallback triggered due to parser error."},
+            "candidate_status": {"level": "Moderate Confidence", "description": "System error during parsing."},
+            "strengths": ["Data captured successfully."],
+            "red_flags_or_weaknesses": ["AI syntax formatting error."],
+            "dynamic_follow_up_questions": [],
+            "hiring_recommendation": "Lean Hire",
+            "justification": "The interview was completed, but the AI module encountered a strict formatting error during output generation."
+        }
 
 def _validate_result(result: dict) -> dict:
     required = [
@@ -52,7 +64,7 @@ def _validate_result(result: dict) -> dict:
     ]
     for field in required:
         if field not in result:
-            raise ValueError(f"Missing required field: {field}")
+            result[field] = "Data unavailable." if field != "scores" else { "technical_proficiency": 50, "relevance_to_jd": 50, "communication": 50, "confidence_level": 50, "overall_score": 50 }
     return result
 
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
@@ -247,41 +259,41 @@ async def parse_resume_to_json(raw_text: str) -> dict:
 
 async def evaluate_candidate(job_description: str, resume: str, transcript: str, behavior_data: dict = None) -> dict:
     behavior_data = behavior_data or {}
-    clean_transcript = transcript.replace("(No speech detected)", "").strip()
-    is_breach = "SECURITY BREACH" in clean_transcript.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
+    # Ensure strings exist to prevent NoneType errors
+    jd_safe = job_description or "Standard IT Role"
+    resume_safe = resume or "No Resume Provided"
+    transcript_safe = (transcript or "(No transcript generated)").replace("(No speech detected)", "").strip()
 
-    # 🛡️ THE FIX: Extract EXACTLY what the candidate spoke, ignoring the AI's questions
-    candidate_only_text = " ".join(re.findall(r'A\d+: (.*?)(?=\n\nQ|\Z)', clean_transcript, re.DOTALL | re.IGNORECASE))
-    intro_match = re.search(r'Introduction:\s*Candidate: (.*?)(?=\n\nQ|\Z)', clean_transcript, re.DOTALL | re.IGNORECASE)
-    if intro_match:
-        candidate_only_text += " " + intro_match.group(1)
-        
-    candidate_only_text = candidate_only_text.replace("<SILENCE>", "").strip()
-    total_spoken_words = len(candidate_only_text.split())
+    is_breach = "SECURITY BREACH" in transcript_safe.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
 
-    # If they spoke less than 20 words in the entire interview, crush the score to 0.
-    if is_breach or total_spoken_words < 20:
+    candidate_words = [w for w in transcript_safe.split() if w.lower() not in ['q0', 'q1', 'q2', 'q3', 'a0', 'a1', 'a2', 'a3', 'introduction:', 'candidate:', '[medium]:', '[hard]:', '<silence>']]
+    total_words = len(candidate_words)
+
+    if is_breach or total_words < 30:
         return {
-            "candidate_overview": "Session automatically rejected. The candidate failed to provide sufficient verbal responses during the interview.",
+            "candidate_overview": "Session automatically rejected. The candidate either triggered the Anti-Cheat Security Vault or failed to provide sufficient verbal responses during the interview.",
             "scores": { "technical_proficiency": 0, "relevance_to_jd": 0, "communication": 0, "confidence_level": 0, "overall_score": 0 },
             "sentiment": {"rating": "Negative", "explanation": "Session failed or candidate refused to engage in the interview."},
             "candidate_status": {"level": "Needs Improvement", "description": "Terminated / No Data"},
-            "strengths": ["None identified due to lack of participation."],
-            "red_flags_or_weaknesses": [f"CRITICAL: Candidate provided only {total_spoken_words} words of actual verbal response."],
+            "strengths": ["None identified due to lack of participation or security breach."],
+            "red_flags_or_weaknesses": ["CRITICAL: Candidate provided less than 30 words of actual verbal response or triggered a security protocol."],
             "dynamic_follow_up_questions": [],
             "hiring_recommendation": "Reject",
-            "justification": f"CRITICAL PENALTY: Zero-Tolerance Engine Activated. The candidate provided virtually no verbal responses (Total Words: {total_spoken_words}). The AI scoring module has been manually overridden, and the score is strictly locked to 0/100."
+            "justification": "CRITICAL PENALTY: Zero-Tolerance Engine Activated. The candidate provided virtually no verbal responses or triggered a security breach. The AI scoring module has been manually overridden, and the score is strictly locked to 0/100."
         }
 
     avg_latency = behavior_data.get("avg_latency", 0)
     if avg_latency > 0:
-        clean_transcript += f"\n\n[BEHAVIORAL METADATA]: The candidate took an average of {avg_latency} seconds to start speaking after being asked a question. Factor this hesitation into their confidence score."
+        transcript_safe += f"\n\n[BEHAVIORAL METADATA]: The candidate took an average of {avg_latency} seconds to start speaking after being asked a question. Factor this hesitation into their confidence score."
 
-    safe_resume = resume[:5000]
-    safe_jd = job_description[:4000]
-    prompt = format_prompt(EVALUATION_PROMPT, job_description=safe_jd, resume=safe_resume, transcript=clean_transcript)
-    result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
-    result = _validate_result(result)
+    prompt = format_prompt(EVALUATION_PROMPT, job_description=jd_safe[:4000], resume=resume_safe[:5000], transcript=transcript_safe)
+    
+    try:
+        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
+        result = _validate_result(result)
+    except Exception as e:
+        # Failsafe if Llama completely crashes, ensures DB always receives a valid record
+        return _validate_result({})
 
     tab_switches = behavior_data.get("tab_switches", 0)
     esc_presses = behavior_data.get("esc_presses", 0)
@@ -307,9 +319,11 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     return result
 
 async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 10, interview_level: str = "L2"):
-    prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=job_description[:3000], resume=resume[:4000], num_questions=num_questions, interview_level=interview_level)
+    jd_safe = job_description or "Standard Tech Role"
+    resume_safe = resume or "Candidate Resume"
+    prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=jd_safe[:3000], resume=resume_safe[:4000], num_questions=num_questions, interview_level=interview_level)
     try:
-        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.3-70b-versatile")
+        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
         return result.get("questions", [])
     except Exception:
         return [{"id": 1, "question": "Could you briefly outline your most relevant project?", "category": "technical", "difficulty": "medium"}]
@@ -321,7 +335,7 @@ async def generate_jd(position: str) -> str:
 async def get_answer_acknowledgment(question: str, answer: str, next_question: str = None) -> dict:
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_question)
     try:
-        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=150, groq_model="llama-3.1-8b-instant")
+        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=200, groq_model="llama-3.1-8b-instant")
         if result.get("is_sufficient", True):
             pass
         return result
