@@ -99,21 +99,23 @@ Synthesize the findings reliably. Output ONLY valid JSON matching this exact str
 {transcript}
 """
 
+# 🛡️ THE FIX: Redesigned the generation prompt to ban definitions and force JD + Resume scenario questions
 QUESTION_GENERATION_PROMPT = """You are "BATS ForgePro", an elite, human-like AI technical interviewer.
 Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY {num_questions} highly unique, targeted questions.
 
 The target difficulty level is: {interview_level}.
 
 RULES:
-1. EXTREMELY SHORT & PUNCHY: Questions MUST be under 15 words. Ask short, rapid-fire questions to cover maximum ground quickly. Do not ask multi-part questions.
-2. HYPER-PERSONALIZATION: Do not ask robotic trivia. Ask contextual questions based on their resume.
+1. NO DEFINITIONS: NEVER ask basic definition questions (e.g., DO NOT ask "What is Django?" or "What is React?"). 
+2. SCENARIO BASED: Ask architectural and problem-solving questions that explicitly blend a project mentioned in their [CANDIDATE_RESUME] with a requirement from the [JOB_DESCRIPTION]. (e.g., "How did you scale the PostgreSQL database in your E-commerce project to handle high-traffic?").
+3. CONCISE LENGTH: Keep questions perfectly balanced, between 15 to 30 words. Not too short, not too long.
 
 Output ONLY valid JSON:
 {
   "questions": [
     {
       "id": 1,
-      "question": "A very short, punchy 10-15 word question based on their resume.",
+      "question": "A concise, scenario-based 15-30 word question linking their resume to the JD.",
       "category": "technical | behavioral | situational",
       "difficulty": "easy | medium | hard"
     }
@@ -282,10 +284,22 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     if faces > 1: cv_penalty += 10
     if liveness < 70: cv_penalty += 10
 
+    # 🛡️ THE FIX: Hard Programmatic Penalty for Silent/Empty Interviews
+    word_count = len(clean_transcript.split())
+    silence_count = clean_transcript.count("<SILENCE>")
+    
+    if silence_count >= 2 or word_count < 40:
+        result["scores"]["technical_proficiency"] = min(result["scores"].get("technical_proficiency", 0), 20)
+        result["scores"]["communication"] = min(result["scores"].get("communication", 0), 10)
+        cv_penalty += 50
+        result["justification"] = "CRITICAL PENALTY: Candidate provided little to no vocal responses during the interview. Scores have been manually clamped. " + result.get("justification", "")
+        result["hiring_recommendation"] = "Reject"
+        result["candidate_status"]["level"] = "Needs Improvement"
+
     base_conf = result["scores"].get("confidence_level", 85)
     result["scores"]["confidence_level"] = max(base_conf - cv_penalty, 0)
     
-    if cv_penalty > 0:
+    if cv_penalty > 0 and "CRITICAL PENALTY" not in result.get("justification", ""):
         result["justification"] += f"\n\n[SECURITY METRICS]: Candidate incurred a telemetry penalty. Esc presses: {esc_presses}, Tab switches: {tab_switches}."
 
     t = result["scores"]["technical_proficiency"]
@@ -312,7 +326,6 @@ async def get_answer_acknowledgment(question: str, answer: str, next_question: s
     next_q_text = next_question if next_question else "Thank the candidate and conclude this section."
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_q_text)
     try:
-        # 🛡️ THE FIX: Reduced max_tokens to 150. Forces LLM to return answer instantly (under 300ms) ensuring fast pacing.
         return await _call_ai_cascade(prompt, force_json=True, max_tokens=150, groq_model="llama-3.1-8b-instant")
     except Exception as e:
         return {"response_text": f"Got it. {next_q_text}", "is_sufficient": True}
