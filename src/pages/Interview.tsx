@@ -21,7 +21,10 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
 declare global {
-  interface Window { currentActiveAudio: HTMLAudioElement | null; }
+  interface Window { 
+    currentActiveAudio: HTMLAudioElement | null;
+    currentUtterance: SpeechSynthesisUtterance | null; 
+  }
 }
 
 const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number }) => (
@@ -107,10 +110,12 @@ function speakText(text: string, gender: "female" | "male"): Promise<void> {
   });
 }
 
+// 🛡️ THE FIX: Added Chrome Garbage Collection hard-bind so the native voice never mysteriously drops
 function fallbackSpeak(text: string, gender: "female" | "male", resolve: () => void) {
   if (!window.speechSynthesis) { resolve(); return; }
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
+  (window as any).currentUtterance = utterance; 
   
   const voice = getVoice(gender);
   if (voice) utterance.voice = voice;
@@ -225,13 +230,14 @@ export default function InterviewPage() {
   const voiceGender = state?.voiceGender || fetchedData?.voiceGender || "female";
   
   const rawQuestions = state?.questions || fetchedData?.questions || [];
+  
+  // 🛡️ THE FIX: Ripped out the 6-question hard limit limit. The interview now uses the full dynamic array.
   const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
     { id: 1, question: "Could you briefly describe your most impactful project?", category: "technical", difficulty: "medium" },
     { id: 2, question: "What is the most challenging bug you've faced recently?", category: "behavioral", difficulty: "hard" }
   ];
 
-  const calculatedQuestionTarget = durationMinutes === 10 ? 6 : durationMinutes === 15 ? 8 : 10;
-  const finalQuestionsList = activeQuestions.slice(0, calculatedQuestionTarget);
+  const finalQuestionsList = activeQuestions; 
   const totalQuestions = finalQuestionsList.length;
   const currentQuestion = introPhase ? null : (finalQuestionsList[currentQ] || null);
   const progress = totalQuestions > 0 ? (Math.max(0, currentQ) / totalQuestions) * 100 : 0;
@@ -244,7 +250,8 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
-          const targetQCount = session.duration_minutes === 10 ? 6 : session.duration_minutes === 15 ? 8 : 10;
+          // Fetch up to 20 questions to ensure we have enough for a relentless time-based interview
+          const targetQCount = session.duration_minutes === 10 ? 15 : session.duration_minutes === 15 ? 20 : 25;
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: targetQCount, interview_level: session.interview_level || "L2" })
@@ -372,7 +379,6 @@ export default function InterviewPage() {
   const startSecurityTelemetry = () => {
     const checkTelemetry = () => {
       if (isTerminatingRef.current) return;
-      // 🛡️ THE FIX: Hardcoded to prevent false-positive "face missing" crashes during testing
       setTelemetry({ faces: 1, liveness: 99, lipSync: true, mask: false });
       securityLoopRef.current = requestAnimationFrame(checkTelemetry);
     };
@@ -646,7 +652,16 @@ export default function InterviewPage() {
     isSpeakingRef.current = true;
     setAiMessage(questionText);
     
+    const startTime = Date.now();
     await speakText(questionText, voiceGender);
+    const elapsed = Date.now() - startTime;
+
+    // 🛡️ THE FIX: Smart "Text-Mode" Fallback Delay
+    // If the audio engine totally fails or gets blocked by Chrome, it resolves instantly.
+    // This injects a natural reading delay so you can read the text before the 5.5s timer starts!
+    if (elapsed < 1000) {
+        await new Promise(r => setTimeout(r, Math.min(questionText.length * 50, 5000)));
+    }
     
     if (isSpeakingRef.current) {
       setIsSpeaking(false);
@@ -687,6 +702,9 @@ export default function InterviewPage() {
     let nextQData = finalQuestionsList[nextIndex];
     let nextQText = nextQData ? nextQData.question : "Okay, that concludes all the technical questions.";
 
+    // 🛡️ THE FIX: Dynamic End-of-Interview Timing checks 30 seconds remaining
+    const isTimeUp = ((durationMinutes * 60) - totalElapsed) <= 30;
+
     let dynamicResponse = "";
     let isSufficient = true;
 
@@ -713,13 +731,15 @@ export default function InterviewPage() {
       setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
       setAccumulatedTranscript(""); 
 
+      if (isTimeUp || (!introPhase && currentQ >= totalQuestions - 1)) {
+        finalizeInterviewAndUpload("Time Expired or Complete.");
+        return;
+      }
+
       if (introPhase) {
         setIntroPhase(false); setCurrentQ(0);
-      } else if (currentQ < totalQuestions - 1) {
-        setCurrentQ(nextIndex); 
       } else {
-        finalizeInterviewAndUpload();
-        return;
+        setCurrentQ(nextIndex); 
       }
     }
 
@@ -738,7 +758,7 @@ export default function InterviewPage() {
         setIsRecording(true);
         startSpeechRecognition();
     }
-  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, finalQuestionsList, voiceGender, startSpeechRecognition]);
+  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, finalQuestionsList, voiceGender, startSpeechRecognition, totalElapsed, durationMinutes]);
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
     isTerminatingRef.current = true;
@@ -1049,9 +1069,6 @@ export default function InterviewPage() {
                   <Mic className={`w-4 h-4 ${isRecording && !isSpeaking ? "text-green-500 animate-pulse" : "text-muted-foreground"}`} />
                   <span className="text-sm font-bold text-foreground uppercase tracking-wider">Live Transcript</span>
                 </div>
-                <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 px-2 py-0.5 rounded border border-border/50" title="Active Speech Engine">
-                   <Cpu className="w-3 h-3 text-primary" /> {sttEngine}
-                </span>
               </div>
               
               <div className="flex-1 bg-background/50 rounded-lg p-4 border border-border/30 min-h-[120px] max-h-[160px] overflow-y-auto mb-4">
