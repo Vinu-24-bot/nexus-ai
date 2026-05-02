@@ -285,8 +285,9 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
             "justification": "CRITICAL PENALTY: Zero-Tolerance Engine Activated. Score locked to 0/100."
         }
         
+    # 🛡️ THE FIX: Instructing AI to score proportionally if the candidate bailed early, overriding the old 0-clamp logic.
     if total_spoken_words < 30 and not "(Pre-recorded interview video uploaded" in transcript_safe:
-         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered only a few questions (Total Words: {total_spoken_words}). Evaluate the specific answers they DID provide and give them proportional partial credit (e.g., if they answered 1 out of 5 questions well, give them a 20/100). Penalize the overall score for incomplete data, but NEVER output a 0 if they answered valid technical questions."
+         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered only a few questions (Total Words: {total_spoken_words}). Do NOT give a flat 0/100. Evaluate the specific answers they DID provide and give them proportional partial credit (e.g., if they answered 1 out of 5 questions well, give them a 20/100). Penalize the overall score for incomplete data, but NEVER output a 0 if they answered valid technical questions."
 
     avg_latency = behavior_data.get("avg_latency", 0)
     if avg_latency > 0:
