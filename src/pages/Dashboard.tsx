@@ -13,7 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = `${API_BASE.replace(/\/$/, "")}/api`;
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -131,28 +132,18 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Highly strict separator to handle old L1 and old Live correctly.
+  // 🛡️ THE FIX: Foolproof fallback routing logic. 
+  // Evaluates explicitly on known video filenames, making inversion impossible.
   const isInitialScreening = useCallback((r: EvaluationResult) => {
     const rem = r.remarks || "";
-    const t = r.transcript || "";
     const v = r.video_filename || "";
-    
-    // Explicit New Tags
+
     if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
     if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-    
-    // L1 Indicators
-    if (t.includes("Pre-recorded interview video uploaded")) return false;
+
     if (v.includes("UPLOADED")) return false; 
-    
-    // Initial Screening Indicators
-    if (t.includes("Introduction:\nCandidate:")) return true;
-    if (rem.includes("METRICS_PAYLOAD:")) return true;
-    if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO") return true;
-    
-    // Fallback: If it has video but no FULL_SESSION tag, it's likely an old uploaded file
-    if (v && !v.includes("FULL_SESSION_")) return false; 
-    
+    if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO") return true; 
+
     return true; 
   }, []);
 

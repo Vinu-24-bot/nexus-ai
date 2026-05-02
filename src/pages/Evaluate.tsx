@@ -195,7 +195,7 @@ export default function EvaluatePage() {
     setJobDescription("");
   };
 
-  // 🛡️ THE FIX: Restored the clean, single-click fetch logic without infinite retry loops
+  // 🛡️ THE FIX: Restored to smooth, single-click API request
   const handleGenerateLink = async () => {
     if (!candidateName || !candidateEmail || !position || !jobDescription || !resume) {
       toast.error("Please fill all required fields");
@@ -235,7 +235,7 @@ export default function EvaluatePage() {
       toast.success("Interview link generated and emails queued via Webhook!");
     } catch (err: any) {
       console.error("[ForgePro Router] Error:", err);
-      toast.error(err.message || "Failed to generate interview link. Ensure backend is running.");
+      toast.error(err.message || "Failed to generate interview link. Ensure backend is awake.", { duration: 5000 });
     } finally {
       setIsGenerating(false);
     }

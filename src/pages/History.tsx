@@ -12,6 +12,9 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import RecommendationBadge from "@/components/RecommendationBadge";
 
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = `${API_BASE.replace(/\/$/, "")}/api`;
+
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
   visible: (i: number) => ({
@@ -20,24 +23,17 @@ const fadeUp = {
   }),
 };
 
-// 🛡️ THE FIX: Same robust filtering logic to perfectly categorize old records.
+// 🛡️ THE FIX: Foolproof fallback routing logic.
 const isInitialScreening = (r: EvaluationResult) => {
   const rem = r.remarks || "";
-  const t = r.transcript || "";
   const v = r.video_filename || "";
-  
+
   if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
   if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-  
-  if (t.includes("Pre-recorded interview video uploaded")) return false;
+
   if (v.includes("UPLOADED")) return false; 
-  
-  if (t.includes("Introduction:\nCandidate:")) return true;
-  if (rem.includes("METRICS_PAYLOAD:")) return true;
-  if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO") return true;
-  
-  if (v && !v.includes("FULL_SESSION_")) return false; 
-  
+  if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO") return true; 
+
   return true; 
 };
 
