@@ -12,11 +12,6 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
-// 🛡️ THE FIX: Rock-solid API URL formatter
-const API_URL = import.meta.env.VITE_API_URL 
-  ? import.meta.env.VITE_API_URL.replace(/\/$/, "").replace(/\/api$/, "") + "/api"
-  : "http://localhost:8000/api";
-
 const LEVEL_OPTIONS = [
   { label: "L1 (Junior)", value: "L1" },
   { label: "L2 (Mid-Level)", value: "L2" },
@@ -204,7 +199,16 @@ export default function EvaluatePage() {
     
     setIsGenerating(true);
     try {
-      const res = await fetch(`${API_URL}/sessions/create`, {
+      // 🛡️ THE NUCLEAR FIX: Hard-route directly to Render if we are not on localhost.
+      // This bypasses Vercel's broken environment variables entirely.
+      const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+      const finalApiUrl = isLocalHost 
+        ? "http://localhost:8000/api/sessions/create" 
+        : "https://bats-ai-backend.onrender.com/api/sessions/create";
+
+      console.log("[ForgePro Router] Executing hard-route connection to:", finalApiUrl);
+
+      const res = await fetch(finalApiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -235,10 +239,11 @@ export default function EvaluatePage() {
       toast.success("Interview link generated and emails queued via Webhook!");
     } catch (err: any) {
       console.error("[ForgePro Router] Error:", err);
+      // If Render is asleep, it drops the connection. We inform the user to try again in 50 seconds.
       if (err.message === "Failed to fetch") {
-         toast.error("Network Blocked. VITE_API_URL is missing in Vercel settings, or Vercel needs a redeploy to apply the variable.", { duration: 8000 });
+         toast.error("Render Backend is waking up from sleep mode (takes ~50 seconds). Please wait a moment and click Generate again.", { duration: 8000 });
       } else {
-         toast.error(err.message || "Failed to generate interview link. Ensure backend is running.");
+         toast.error(err.message || "Failed to generate interview link.");
       }
     } finally {
       setIsGenerating(false);
@@ -602,7 +607,7 @@ export default function EvaluatePage() {
                     placeholder="Paste mandatory questions you want ForgePro to ask, or click 'Auto-Generate' to get a customized question bank..."
                     value={transcriptQuestions}
                     onChange={(e) => setTranscriptQuestions(e.target.value)}
-                    className="bg-background border-border min-h-[120px] resize-none focus-visible:ring-accent"
+                    className="bg-background border-border min-h-[160px] resize-none focus-visible:ring-accent"
                   />
                 </div>
               </motion.div>
