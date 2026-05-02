@@ -14,8 +14,10 @@ import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
 // Clean, standard API resolution
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const API_URL = `${API_BASE.replace(/\/$/, "")}/api`;
+// DYNAMIC API RESOLUTION: Bypasses Vercel cache bugs permanently
+const isLocal = typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+const API_BASE = isLocal ? "http://localhost:8000" : "https://bats-ai-backend.onrender.com";
+const API_URL = `${API_BASE}/api`;
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },

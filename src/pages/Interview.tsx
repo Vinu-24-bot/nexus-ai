@@ -11,7 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { submitEvaluation, uploadVideo } from "@/lib/api";
 import { toast } from "sonner";
 
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api";
+// DYNAMIC API RESOLUTION: Bypasses Vercel cache bugs permanently
+const isLocal = typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+const API_BASE = isLocal ? "http://localhost:8000" : "https://bats-ai-backend.onrender.com";
+const API_URL = `${API_BASE}/api`;
 
 interface InterviewQuestion { id: number; question: string; category: string; difficulty: string; }
 interface LocationState { candidateName: string; position: string; jobDescription: string; resume: string; questions: InterviewQuestion[]; voiceGender: "female" | "male"; durationMinutes: number; }

@@ -56,9 +56,9 @@
 
   /* SLATE MODE (Professional Deep Grey) */
   .theme-slate {
-    --background: 215 15% 15%;
+    --background: 220 20% 8%;
     --foreground: 210 20% 98%;
-    --card: 215 15% 18%;
+    --card: 222 25% 10%;
     --card-foreground: 210 20% 98%;
     --popover: 215 15% 18%;
     --popover-foreground: 210 20% 98%;
@@ -66,11 +66,11 @@
     --primary-foreground: 220 20% 4%;
     --secondary: 215 15% 22%;
     --secondary-foreground: 210 20% 90%;
-    --muted: 215 15% 20%;
+    --muted: 215 25% 15%;
     --muted-foreground: 215 15% 65%;
     --accent: 260 70% 65%;
     --accent-foreground: 210 20% 95%;
-    --border: 215 15% 24%;
+    --border: 215 25% 20%;
     --input: 215 15% 22%;
     --ring: 173 80% 50%;
     --nexus-grid-alpha: 0.05;
