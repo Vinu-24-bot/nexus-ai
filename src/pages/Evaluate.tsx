@@ -12,6 +12,11 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
+// 🛡️ THE FIX: Rock-solid API URL formatter
+const API_URL = import.meta.env.VITE_API_URL 
+  ? import.meta.env.VITE_API_URL.replace(/\/$/, "").replace(/\/api$/, "") + "/api"
+  : "http://localhost:8000/api";
+
 const LEVEL_OPTIONS = [
   { label: "L1 (Junior)", value: "L1" },
   { label: "L2 (Mid-Level)", value: "L2" },
@@ -199,15 +204,7 @@ export default function EvaluatePage() {
     
     setIsGenerating(true);
     try {
-      // 🛡️ THE FIX: Foolproof Dynamic Backend URL Generator
-      // It dynamically checks if you are deployed, and routes strictly.
-      const rawEnv = import.meta.env.VITE_API_URL || "http://localhost:8000";
-      const cleanedEnv = rawEnv.replace(/\/$/, "").replace(/\/api$/, "");
-      const finalApiUrl = `${cleanedEnv}/api/sessions/create`;
-
-      console.log("[ForgePro Router] Attemping connection to:", finalApiUrl);
-
-      const res = await fetch(finalApiUrl, {
+      const res = await fetch(`${API_URL}/sessions/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -239,7 +236,7 @@ export default function EvaluatePage() {
     } catch (err: any) {
       console.error("[ForgePro Router] Error:", err);
       if (err.message === "Failed to fetch") {
-         toast.error("Network Blocked. VITE_API_URL is missing in Vercel settings, or Render is asleep. Please check your Vercel Environment Variables.", { duration: 8000 });
+         toast.error("Network Blocked. VITE_API_URL is missing in Vercel settings, or Vercel needs a redeploy to apply the variable.", { duration: 8000 });
       } else {
          toast.error(err.message || "Failed to generate interview link. Ensure backend is running.");
       }
