@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-const API_URL = (import.meta.env.VITE_API_URL || "https://bats-ai-backend.onrender.com").replace(/\/$/, "").replace(/\/api$/, "") + "/api";
+const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -131,14 +131,25 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE NUCLEAR ROUTING FIX: Relies strictly on the injected transcript prompt to filter.
-  // This retroactively forces old "Cook" profiles into Initial Screening.
+  // 🛡️ THE FIX: Foolproof File Prefix Detector
   const isInitialScreening = useCallback((r: EvaluationResult) => {
-    const t = r.transcript || "";
     const rem = r.remarks || "";
+    const t = r.transcript || "";
+    const v = r.video_filename || "";
+    
+    // Explicit L1 Flags
     if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
     if (t.includes("Pre-recorded interview video uploaded")) return false;
-    return true; // If it's not explicitly an L1 upload, it belongs in Initial Screenings.
+    if (v.includes("[UPLOADED]") || v.includes("UPLOADED_")) return false;
+    
+    // Explicit Initial Flags
+    if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
+    if (rem.includes("METRICS_PAYLOAD:")) return true;
+    if (t.includes("Introduction:\nCandidate:")) return true;
+    if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
+    
+    // Default to Initial if unsure
+    return true; 
   }, []);
 
   const initialScreeningData = useMemo(() => results.filter(r => isInitialScreening(r)), [results, isInitialScreening]);

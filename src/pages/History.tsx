@@ -20,13 +20,22 @@ const fadeUp = {
   }),
 };
 
-// 🛡️ THE NUCLEAR ROUTING FIX
+// 🛡️ THE FIX: Out-of-scope hook cleanly handles FULL_SESSION vs UPLOADED files
 const isInitialScreening = (r: EvaluationResult) => {
-  const t = r.transcript || "";
   const rem = r.remarks || "";
+  const t = r.transcript || "";
+  const v = r.video_filename || "";
+  
   if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
   if (t.includes("Pre-recorded interview video uploaded")) return false;
-  return true; // Everything else, including old Live Records, defaults to Initial.
+  if (v.includes("[UPLOADED]") || v.includes("UPLOADED_")) return false;
+  
+  if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
+  if (rem.includes("METRICS_PAYLOAD:")) return true;
+  if (t.includes("Introduction:\nCandidate:")) return true;
+  if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
+  
+  return true;
 };
 
 export default function HistoryPage() {
