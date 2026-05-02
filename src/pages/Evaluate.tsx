@@ -12,11 +12,8 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
-// 🛡️ DYNAMIC API RESOLUTION: Intelligent fallback for Local vs Production
-const API_BASE = import.meta.env.VITE_API_URL || 
-  (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
-    ? "http://localhost:8000" 
-    : "https://bats-ai-backend.onrender.com");
+// 🚀 THE ULTIMATE OVERRIDE: Hard-locked to Render.
+const API_BASE = "https://bats-ai-backend.onrender.com";
 const API_URL = `${API_BASE}/api`;
 
 const LEVEL_OPTIONS = [
@@ -206,6 +203,11 @@ export default function EvaluatePage() {
     
     setIsGenerating(true);
     try {
+      const isOnline = await checkBackendHealth(true);
+      if (!isOnline) {
+        throw new Error("Backend is offline or unreachable.");
+      }
+
       const res = await fetch(`${API_URL}/sessions/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -230,11 +232,10 @@ export default function EvaluatePage() {
       }
 
       const data = await res.json();
-      
       const frontendUrl = window.location.origin;
       setGeneratedLink(`${frontendUrl}/interview/${data.session_id}`);
+      toast.success("Interview link generated successfully!");
       
-      toast.success("Interview link generated and emails queued via Webhook!");
     } catch (err: any) {
       console.error("[ForgePro Router] Error:", err);
       toast.error(err.message || "Failed to generate interview link. Ensure backend is awake.", { duration: 5000 });

@@ -7,11 +7,8 @@ import {
   deleteLocalEvaluation,
 } from "./local-evaluator";
 
-// 🛡️ DYNAMIC API RESOLUTION: Intelligent fallback for Local vs Production
-export const API_BASE = import.meta.env.VITE_API_URL || 
-  (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
-    ? "http://localhost:8000" 
-    : "https://bats-ai-backend.onrender.com");
+// 🚀 THE ULTIMATE OVERRIDE: Hard-locked to Render. No localhost traps.
+export const API_BASE = "https://bats-ai-backend.onrender.com";
 
 let backendOnline: boolean | null = null;
 let lastHealthCheck = 0;
@@ -43,7 +40,6 @@ export async function checkBackendHealth(forceWakeup = false): Promise<boolean> 
     }
   }
 
-  console.error("[BATS] Backend failed to wake up after maximum polling attempts.");
   backendOnline = false;
   lastHealthCheck = Date.now();
   return false;
@@ -131,13 +127,11 @@ export async function submitEvaluation(payload: EvaluationPayload) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "Server error" }));
-      console.warn(`[BATS] Backend evaluate returned ${res.status}: ${err.detail}`);
       throw new Error(err.detail || "Evaluation failed");
     }
     backendOnline = true;
     return res.json();
   } catch (err: any) {
-    console.log("[BATS] Backend unavailable or failed, running local evaluation...", err.message);
     const localResult = evaluateLocally(payload);
     saveLocalEvaluation(localResult);
     return localResult;
