@@ -7,29 +7,27 @@ import {
   deleteLocalEvaluation,
 } from "./local-evaluator";
 
-// 🛡️ THE FIX: Strictly locked to production to prevent localhost routing bugs
-const API_BASE = "https://bats-ai-backend.onrender.com";
+// 🛡️ DYNAMIC API RESOLUTION: Intelligent fallback for Local vs Production
+export const API_BASE = import.meta.env.VITE_API_URL || 
+  (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
+    ? "http://localhost:8000" 
+    : "https://bats-ai-backend.onrender.com");
 
-// Track backend status
 let backendOnline: boolean | null = null;
 let lastHealthCheck = 0;
-const HEALTH_CHECK_INTERVAL = 30000; // 30s cache
+const HEALTH_CHECK_INTERVAL = 30000;
 
-// 🛡️ THE FIX: Enterprise Polling Engine to handle Render's 50-second wake-up delay
 export async function checkBackendHealth(forceWakeup = false): Promise<boolean> {
   const now = Date.now();
-  
-  // Return cached true if checked recently, unless forcing a wake up
   if (!forceWakeup && backendOnline !== null && now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
     return backendOnline;
   }
 
-  const maxRetries = 8; // 8 attempts
-  const delayBetweenRetries = 5000; // 5 seconds (Total ~40 seconds of patience)
+  const maxRetries = 8;
+  const delayBetweenRetries = 5000;
 
   for (let i = 0; i < maxRetries; i++) {
     try {
-      // 🛡️ THE FIX: Replaced the strict 3s timeout with a patient 10s timeout per ping
       const res = await fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(10000) });
       if (res.ok) {
         backendOnline = true;
@@ -40,14 +38,11 @@ export async function checkBackendHealth(forceWakeup = false): Promise<boolean> 
     } catch (err) {
       console.warn(`[BATS] Backend asleep/starting up. Attempt ${i + 1}/${maxRetries}... Waiting...`);
     }
-    
-    // If it's not the last attempt, wait 5 seconds before trying again
     if (i < maxRetries - 1) {
       await new Promise(resolve => setTimeout(resolve, delayBetweenRetries));
     }
   }
 
-  // Only fail if it completely ignores 8 consecutive pings over 40 seconds
   console.error("[BATS] Backend failed to wake up after maximum polling attempts.");
   backendOnline = false;
   lastHealthCheck = Date.now();
@@ -65,6 +60,7 @@ export interface EvaluationPayload {
   resume: string;
   transcript: string;
   video_filename?: string;
+  remarks?: string;
 }
 
 export interface InterviewQuestion {
@@ -77,12 +73,13 @@ export interface InterviewQuestion {
 export async function generateQuestions(
   job_description: string,
   resume: string,
-  num_questions: number = 6
+  num_questions: number = 6,
+  interview_level: string = "L2"
 ): Promise<InterviewQuestion[]> {
   const res = await fetch(`${API_BASE}/api/generate-questions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ job_description, resume, num_questions }),
+    body: JSON.stringify({ job_description, resume, num_questions, interview_level }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Server error" }));
@@ -106,12 +103,12 @@ export async function generateJD(position: string): Promise<string> {
   return data.job_description;
 }
 
-export async function getAcknowledgment(question: string, answer: string): Promise<string> {
+export async function getAcknowledgment(question: string, answer: string, next_question: string): Promise<string> {
   try {
     const res = await fetch(`${API_BASE}/api/acknowledge-answer`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, answer }),
+      body: JSON.stringify({ question, answer, next_question }),
     });
     if (!res.ok) return "Thank you. Let's continue.";
     const data = await res.json();
@@ -123,7 +120,6 @@ export async function getAcknowledgment(question: string, answer: string): Promi
 
 export async function submitEvaluation(payload: EvaluationPayload) {
   try {
-    // 🛡️ THE FIX: Force a patient health check before submitting to ensure we don't crash
     const online = await checkBackendHealth(true); 
     if (!online) throw new Error("Backend offline");
 
@@ -131,7 +127,7 @@ export async function submitEvaluation(payload: EvaluationPayload) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(120000), // 2 min timeout for AI deep analysis
+      signal: AbortSignal.timeout(120000),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "Server error" }));
@@ -141,7 +137,6 @@ export async function submitEvaluation(payload: EvaluationPayload) {
     backendOnline = true;
     return res.json();
   } catch (err: any) {
-    // Fallback to local evaluation
     console.log("[BATS] Backend unavailable or failed, running local evaluation...", err.message);
     const localResult = evaluateLocally(payload);
     saveLocalEvaluation(localResult);
@@ -180,14 +175,12 @@ export async function getEvaluations() {
     if (!res.ok) throw new Error("Failed to fetch evaluations");
     const serverData = await res.json();
     backendOnline = true;
-    // Merge with local evaluations
     const localData = getLocalEvaluations();
     const serverIds = new Set(serverData.map((e: any) => e.id));
     const merged = [...serverData, ...localData.filter((e) => !serverIds.has(e.id))];
     return merged;
   } catch {
     backendOnline = false;
-    // Return local evaluations only
     return getLocalEvaluations();
   }
 }
@@ -198,7 +191,6 @@ export async function getEvaluation(id: string) {
     if (!res.ok) throw new Error("Evaluation not found");
     return res.json();
   } catch {
-    // Try local storage
     const local = getLocalEvaluation(id);
     if (local) return local;
     throw new Error("Evaluation not found");
@@ -215,7 +207,6 @@ export async function updateSelectionStatus(id: string, status: "pending" | "sel
     if (!res.ok) throw new Error("Status update failed");
     return res.json();
   } catch {
-    // Try local
     const updated = updateLocalEvaluationStatus(id, status);
     if (updated) return updated;
     throw new Error("Status update failed");
@@ -233,15 +224,12 @@ export async function deleteEvaluation(id: string) {
   }
 }
 
-// ─── ENTERPRISE UPGRADES ──────────────────────────────────────
-
 export async function getStats() {
   try {
     const res = await fetch(`${API_BASE}/api/stats`);
     if (!res.ok) throw new Error("Failed to fetch stats");
     return res.json();
   } catch {
-    // Compute from local data (Upgraded with new enterprise metrics)
     const evals = getLocalEvaluations() as any[];
     const total = evals.length;
     

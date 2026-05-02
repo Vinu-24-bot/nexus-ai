@@ -12,8 +12,11 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
-// 🛡️ THE FIX: Strictly locked to production to prevent localhost routing bugs
-const API_BASE = "https://bats-ai-backend.onrender.com";
+// 🛡️ DYNAMIC API RESOLUTION: Intelligent fallback for Local vs Production
+const API_BASE = import.meta.env.VITE_API_URL || 
+  (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
+    ? "http://localhost:8000" 
+    : "https://bats-ai-backend.onrender.com");
 const API_URL = `${API_BASE}/api`;
 
 const LEVEL_OPTIONS = [
@@ -234,9 +237,8 @@ export default function EvaluatePage() {
       toast.success("Interview link generated and emails queued via Webhook!");
     } catch (err: any) {
       console.error("[ForgePro Router] Error:", err);
-      // 🛡️ THE FIX: Added graceful error handling for Render wake-up cycle
       if (err.message === "Failed to fetch" || err.name === "TypeError") {
-        toast.error("⏳ Server is waking up from sleep mode (takes ~45 seconds). Please wait a moment and click Generate again.", { duration: 6000 });
+        toast.error("Network Error: Make sure you have pushed your latest backend updates to GitHub so Render can process the /sessions/create route.", { duration: 6000 });
       } else {
         toast.error(err.message || "Failed to generate interview link. Ensure backend is awake.", { duration: 5000 });
       }
@@ -305,12 +307,13 @@ export default function EvaluatePage() {
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
                 <WifiOff className="w-4 h-4 text-destructive shrink-0" />
                 <p className="text-xs text-destructive">
-                  <strong>Backend starting up</strong> — Connecting to Render server. Links and emails will be available momentarily.
+                  <strong>Backend offline</strong> — Cannot generate links, send emails, or extract DOCX. Please ensure your backend is awake.
                 </p>
               </div>
             )}
           </motion.div>
 
+          {/* 🛡️ This is the UI block you wanted back. It will show perfectly once the API route stops throwing 'Failed to fetch' */}
           {generatedLink ? (
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="p-8 rounded-2xl border border-primary/30 bg-primary/5 space-y-6 text-center">
               <div className="mx-auto w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">
