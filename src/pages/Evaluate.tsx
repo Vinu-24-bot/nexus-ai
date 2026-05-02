@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   FileText, Briefcase, User, Loader2, Sparkles, Upload, X, CheckCircle2,
@@ -11,18 +11,6 @@ import { generateJD, uploadResume, checkBackendHealth } from "@/lib/api";
 import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const API_URL = `${API_BASE.replace(/\/$/, "")}/api`;
-
-const fadeUp = {
-  hidden: { opacity: 0, y: 30 },
-  visible: (i: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: { delay: i * 0.1, duration: 0.5 },
-  }),
-};
 
 const LEVEL_OPTIONS = [
   { label: "L1 (Junior)", value: "L1" },
@@ -50,10 +38,7 @@ const RANDOM_ROLES = [
   "Data Scientist (NLP)",
   "Full Stack React Native Engineer",
   "Cybersecurity Analyst",
-  "Product Manager (AI Tools)",
-  "Backend Golang Developer",
-  "Site Reliability Engineer",
-  "Machine Learning Engineer"
+  "Product Manager (AI Tools)"
 ];
 
 const JD_TEMPLATES: Record<string, string> = {
@@ -65,6 +50,15 @@ const JD_TEMPLATES: Record<string, string> = {
 function generateLocalJD(position: string): string {
   return `Job Title: ${position}\n\nJob Summary:\nWe are looking for an experienced ${position} to join our growing team. The ideal candidate will have strong technical skills, excellent problem-solving abilities, and a proven track record of delivering high-quality work.\n\nKey Responsibilities:\n- Design, develop, and maintain solutions relevant to the ${position} role\n- Collaborate with cross-functional teams to define and implement features\n- Write clean, maintainable, and well-documented code/deliverables\n- Participate in reviews and provide constructive feedback\n- Troubleshoot and resolve complex issues\n- Stay current with industry trends and best practices\n- Mentor and guide junior team members\n\nRequired Skills & Qualifications:\n- 2+ years of relevant experience in the ${position} domain\n- Strong problem-solving and analytical skills\n- Excellent written and verbal communication\n- Proficiency in industry-standard tools and technologies\n- Bachelor's degree in a related field or equivalent experience\n- Ability to work independently and in a team\n\nPreferred Skills:\n- Experience with agile/scrum methodologies\n- Leadership or mentoring experience\n- Relevant industry certifications\n- Open source or community contributions\n\nExperience Level: Mid to Senior (2-5+ years)`;
 }
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 30 },
+  visible: (i: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.1, duration: 0.5 },
+  }),
+};
 
 export default function EvaluatePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -90,9 +84,9 @@ export default function EvaluatePage() {
   const [backendStatus, setBackendStatus] = useState<boolean | null>(null);
   const [generatedLink, setGeneratedLink] = useState("");
 
-  useState(() => {
+  useEffect(() => {
     checkBackendHealth().then(setBackendStatus);
-  });
+  }, []);
 
   const handleGenerateJD = async () => {
     let targetPosition = position.trim();
@@ -140,7 +134,6 @@ export default function EvaluatePage() {
     }, 800);
   };
 
-  // 🛡️ THE FIX: Smart DOCX Routing to the Backend
   const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -161,7 +154,7 @@ export default function EvaluatePage() {
     try {
       if (ext === ".doc" || ext === ".docx") {
         toast.info("Sending DOCX to ForgePro Engine for extraction...");
-        const response: any = await uploadResume(file); // Call backend
+        const response: any = await uploadResume(file); 
         if (response && response.extracted_text) {
           setResume(response.extracted_text);
           setResumeFileName(file.name);
@@ -178,7 +171,6 @@ export default function EvaluatePage() {
         } else {
           toast.error("Could not extract text. Please paste content manually.");
         }
-        // Silently push PDF/TXT to backend for records
         uploadResume(file).catch(() => {});
       }
     } catch (error) {
@@ -207,7 +199,15 @@ export default function EvaluatePage() {
     
     setIsGenerating(true);
     try {
-      const res = await fetch(`${API_URL}/sessions/create`, {
+      // 🛡️ THE FIX: Foolproof Dynamic Backend URL Generator
+      // It dynamically checks if you are deployed, and routes strictly.
+      const rawEnv = import.meta.env.VITE_API_URL || "http://localhost:8000";
+      const cleanedEnv = rawEnv.replace(/\/$/, "").replace(/\/api$/, "");
+      const finalApiUrl = `${cleanedEnv}/api/sessions/create`;
+
+      console.log("[ForgePro Router] Attemping connection to:", finalApiUrl);
+
+      const res = await fetch(finalApiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -237,7 +237,12 @@ export default function EvaluatePage() {
       
       toast.success("Interview link generated and emails queued via Webhook!");
     } catch (err: any) {
-      toast.error(err.message || "Failed to generate interview link. Ensure backend is running.");
+      console.error("[ForgePro Router] Error:", err);
+      if (err.message === "Failed to fetch") {
+         toast.error("Network Blocked. VITE_API_URL is missing in Vercel settings, or Render is asleep. Please check your Vercel Environment Variables.", { duration: 8000 });
+      } else {
+         toast.error(err.message || "Failed to generate interview link. Ensure backend is running.");
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -303,7 +308,7 @@ export default function EvaluatePage() {
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
                 <WifiOff className="w-4 h-4 text-destructive shrink-0" />
                 <p className="text-xs text-destructive">
-                  <strong>Backend offline</strong> — Cannot generate links, send emails, or extract DOCX. Please start the backend server.
+                  <strong>Backend offline</strong> — Cannot generate links, send emails, or extract DOCX. Please ensure your backend is awake.
                 </p>
               </div>
             )}
