@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { getEvaluations, checkBackendHealth } from "@/lib/api";
@@ -131,20 +131,22 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Smart Routing handles old "Cook" profiles and new ones identically
-  const isInitialScreening = (r: EvaluationResult) => {
+  // 🛡️ THE FIX: Foolproof routing filter captures both explicit tags and implicit transcript markers.
+  const isInitialScreening = useCallback((r: EvaluationResult) => {
     const rem = r.remarks || "";
     const t = r.transcript || "";
     if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
     if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
     if (t.includes("Introduction:\nCandidate:")) return true;
-    if (r.video_filename === "LIVE_SCREENING" || r.video_filename === "NO_VIDEO") return true;
+    if (t.includes("Pre-recorded interview video uploaded")) return false;
+    const v = r.video_filename || "";
+    if (v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
     return false;
-  };
+  }, []);
 
-  const initialScreeningData = results.filter(r => isInitialScreening(r));
-  const l1TechRoundData = results.filter(r => !isInitialScreening(r));
-  const selectedData = results.filter(r => r.selection_status?.toLowerCase() === "selected");
+  const initialScreeningData = useMemo(() => results.filter(r => isInitialScreening(r)), [results, isInitialScreening]);
+  const l1TechRoundData = useMemo(() => results.filter(r => !isInitialScreening(r)), [results, isInitialScreening]);
+  const selectedData = useMemo(() => results.filter(r => r.selection_status?.toLowerCase() === "selected"), [results]);
 
   const calculateStats = (data: EvaluationResult[]) => {
     const total = data.length;

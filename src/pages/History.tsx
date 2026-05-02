@@ -26,14 +26,12 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  // Filters
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("All Evaluations");
   const [sortBy, setSortBy] = useState("Date");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
   const [recFilter, setRecFilter] = useState("All Recommendations");
 
-  // Export Dropdown State
   const [showExportMenu, setShowExportMenu] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -53,7 +51,6 @@ export default function HistoryPage() {
     fetchData();
   }, []);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -76,27 +73,28 @@ export default function HistoryPage() {
     }
   };
 
-  // 🛡️ THE FIX: DYNAMIC FILTERING ENGINE explicitly routing "Cook" and old files correctly
+  // 🛡️ THE FIX: Smart Routing handles old "Cook" profiles and new ones identically
+  const isInitialScreening = useCallback((r: EvaluationResult) => {
+    const rem = r.remarks || "";
+    const t = r.transcript || "";
+    if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
+    if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
+    if (t.includes("Introduction:\nCandidate:")) return true;
+    if (t.includes("Pre-recorded interview video uploaded")) return false;
+    const v = r.video_filename || "";
+    if (v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
+    return false;
+  }, []);
+
   const filteredEvals = useMemo(() => {
     let filtered = [...evaluations];
 
-    const isInitial = (ev: EvaluationResult) => {
-      const rem = ev.remarks || "";
-      const t = ev.transcript || "";
-      if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
-      if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-      if (t.includes("Introduction:\nCandidate:")) return true;
-      if (ev.video_filename === "LIVE_SCREENING" || ev.video_filename === "NO_VIDEO") return true;
-      return false;
-    };
-
     if (activeTab === "Initial Screening (Live)") {
-      filtered = filtered.filter(ev => isInitial(ev));
+      filtered = filtered.filter(ev => isInitialScreening(ev));
     } else if (activeTab === "L1 Tech Round (Uploaded)") {
-      filtered = filtered.filter(ev => !isInitial(ev));
+      filtered = filtered.filter(ev => !isInitialScreening(ev));
     }
 
-    // 2. Search Filter
     if (search) {
       const q = search.toLowerCase();
       filtered = filtered.filter(ev => 
@@ -106,17 +104,14 @@ export default function HistoryPage() {
       );
     }
 
-    // 3. Status Filter
     if (statusFilter !== "All Statuses") {
       filtered = filtered.filter(ev => ev.selection_status?.toLowerCase() === statusFilter.toLowerCase());
     }
 
-    // 4. Recommendation Filter
     if (recFilter !== "All Recommendations") {
       filtered = filtered.filter(ev => ev.hiring_recommendation === recFilter);
     }
 
-    // 5. Sorting
     filtered.sort((a, b) => {
       if (sortBy === "Score") {
         return (b.scores?.overall_score || 0) - (a.scores?.overall_score || 0);
@@ -125,9 +120,8 @@ export default function HistoryPage() {
     });
 
     return filtered;
-  }, [evaluations, search, activeTab, sortBy, statusFilter, recFilter]);
+  }, [evaluations, search, activeTab, sortBy, statusFilter, recFilter, isInitialScreening]);
 
-  // 🛡️ ENTERPRISE COHORT EXPORT ENGINE (Client-Side)
   const generateCohortHTML = () => {
     const baseUrl = window.location.origin;
     return `
@@ -262,16 +256,6 @@ export default function HistoryPage() {
     URL.revokeObjectURL(url);
     setShowExportMenu(false);
     toast.success(`Exported ${filteredEvals.length} candidates as ${ext.toUpperCase()}`);
-  };
-
-  const isInitialScreeningCheck = (ev: EvaluationResult) => {
-      const rem = ev.remarks || "";
-      const t = ev.transcript || "";
-      if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
-      if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-      if (t.includes("Introduction:\nCandidate:")) return true;
-      if (ev.video_filename === "LIVE_SCREENING" || ev.video_filename === "NO_VIDEO") return true;
-      return false;
   };
 
   return (
@@ -435,7 +419,7 @@ export default function HistoryPage() {
                       <span>{ev.position}</span>
                       <span>•</span>
                       <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {ev.date}</span>
-                      {!isInitialScreeningCheck(ev) && (
+                      {!isInitialScreening(ev) && (
                         <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-accent/10 text-accent border border-accent/20 tracking-wider">
                           L1 TECH ROUND
                         </span>

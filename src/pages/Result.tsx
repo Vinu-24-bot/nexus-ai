@@ -79,17 +79,17 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
     const vid = videoRef.current;
     setCurrentTime(vid.currentTime);
     
-    let d = fallbackDuration > 0 ? fallbackDuration : vid.duration;
-    
-    if (isNaN(d) || !isFinite(d) || d <= 0) {
+    // 🛡️ THE FIX: Hard math check to force payload duration if native WebM duration fails
+    let d = vid.duration;
+    if (fallbackDuration > 0) {
+      d = fallbackDuration; 
+    } else if (isNaN(d) || !isFinite(d) || d <= 0) {
       d = (vid.buffered && vid.buffered.length > 0) ? vid.buffered.end(vid.buffered.length - 1) : 0;
     }
-    
-    const finalDuration = fallbackDuration > 0 ? fallbackDuration : d;
 
-    if (finalDuration > 0 && isFinite(finalDuration)) {
-      setDuration(finalDuration);
-      setProgress((vid.currentTime / finalDuration) * 100);
+    if (d > 0 && isFinite(d)) {
+      setDuration(d);
+      setProgress((vid.currentTime / d) * 100);
     }
   };
 
@@ -586,7 +586,9 @@ ${result.justification}
     if (result && (result as any).remarks && String((result as any).remarks).includes("METRICS_PAYLOAD:")) {
        const parts = String((result as any).remarks).split("METRICS_PAYLOAD:");
        const payload = JSON.parse(parts[1]);
-       if (payload && payload.interview_duration_seconds) fallbackVideoDuration = payload.interview_duration_seconds;
+       if (payload && payload.interview_duration_seconds) {
+           fallbackVideoDuration = payload.interview_duration_seconds;
+       }
     }
   } catch(e) {}
 

@@ -245,6 +245,7 @@ export default function InterviewPage() {
     "Finalizing Enterprise Report..."
   ];
 
+  // 🛡️ THE FIX: Enforce persistent caching for timer and voice
   useEffect(() => {
     if (state?.durationMinutes) localStorage.setItem(`forgepro_duration_${sessionId}`, state.durationMinutes.toString());
     if (state?.voiceGender) localStorage.setItem(`forgepro_voice_${sessionId}`, state.voiceGender);
@@ -259,10 +260,10 @@ export default function InterviewPage() {
   const rawVoice = String(state?.voiceGender || storedVoice || fetchedData?.voice_gender || "female").toLowerCase();
   const voiceGender = rawVoice.includes("male") ? "male" : "female";
   
-  const storedDuration = localStorage.getItem(`forgepro_duration_${sessionId}`);
+  const storedDuration = parseInt(localStorage.getItem(`forgepro_duration_${sessionId}`) || "0");
   const sessionDurationState = Number(state?.durationMinutes);
   const sessionDurationDB = Number(fetchedData?.duration_minutes);
-  const durationMinutes = sessionDurationState > 0 ? sessionDurationState : (Number(storedDuration) > 0 ? Number(storedDuration) : (sessionDurationDB > 0 ? sessionDurationDB : 10));
+  const durationMinutes = sessionDurationState > 0 ? sessionDurationState : (storedDuration > 0 ? storedDuration : (sessionDurationDB > 0 ? sessionDurationDB : 10));
   
   const rawQuestions = state?.questions || fetchedData?.questions || [];
   
@@ -284,8 +285,7 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
-          const actualDuration = Number(localStorage.getItem(`forgepro_duration_${sessionId}`)) || session.duration_minutes || 10;
-          const targetQCount = actualDuration >= 15 ? 25 : 20;
+          const targetQCount = durationMinutes >= 15 ? 25 : 20;
           
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -300,7 +300,7 @@ export default function InterviewPage() {
       };
       fetchSessionDetails();
     }
-  }, [sessionId, state, navigate]);
+  }, [sessionId, state, navigate, durationMinutes]);
 
   useEffect(() => {
     if (interviewStep === "submitting") {
@@ -832,7 +832,7 @@ export default function InterviewPage() {
          avg_latency: parseFloat(avgLatency as string),
          interview_duration_seconds: totalElapsed
       });
-      // 🛡️ THE FIX: Hardcode [TYPE:INITIAL_SCREENING] into the payload so routing is infallible
+      // 🛡️ THE FIX: Hardcode [TYPE:INITIAL_SCREENING] into remarks payload. This is 100% foolproof for the Dashboard filter.
       const hybridRemarks = `[TYPE:INITIAL_SCREENING] ${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
       await submitEvaluation({
