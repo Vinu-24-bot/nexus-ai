@@ -131,24 +131,28 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Foolproof File Prefix Detector
+  // 🛡️ THE FIX: Highly strict separator to handle old L1 and old Live correctly.
   const isInitialScreening = useCallback((r: EvaluationResult) => {
     const rem = r.remarks || "";
     const t = r.transcript || "";
     const v = r.video_filename || "";
     
-    // Explicit L1 Flags
-    if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-    if (t.includes("Pre-recorded interview video uploaded")) return false;
-    if (v.includes("[UPLOADED]") || v.includes("UPLOADED_")) return false;
-    
-    // Explicit Initial Flags
+    // Explicit New Tags
     if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
-    if (rem.includes("METRICS_PAYLOAD:")) return true;
-    if (t.includes("Introduction:\nCandidate:")) return true;
-    if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
+    if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
     
-    // Default to Initial if unsure
+    // L1 Indicators
+    if (t.includes("Pre-recorded interview video uploaded")) return false;
+    if (v.includes("UPLOADED")) return false; 
+    
+    // Initial Screening Indicators
+    if (t.includes("Introduction:\nCandidate:")) return true;
+    if (rem.includes("METRICS_PAYLOAD:")) return true;
+    if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO") return true;
+    
+    // Fallback: If it has video but no FULL_SESSION tag, it's likely an old uploaded file
+    if (v && !v.includes("FULL_SESSION_")) return false; 
+    
     return true; 
   }, []);
 

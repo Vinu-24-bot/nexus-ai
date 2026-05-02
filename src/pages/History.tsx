@@ -20,22 +20,25 @@ const fadeUp = {
   }),
 };
 
-// 🛡️ THE FIX: Out-of-scope hook cleanly handles FULL_SESSION vs UPLOADED files
+// 🛡️ THE FIX: Same robust filtering logic to perfectly categorize old records.
 const isInitialScreening = (r: EvaluationResult) => {
   const rem = r.remarks || "";
   const t = r.transcript || "";
   const v = r.video_filename || "";
   
-  if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-  if (t.includes("Pre-recorded interview video uploaded")) return false;
-  if (v.includes("[UPLOADED]") || v.includes("UPLOADED_")) return false;
-  
   if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
-  if (rem.includes("METRICS_PAYLOAD:")) return true;
-  if (t.includes("Introduction:\nCandidate:")) return true;
-  if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
+  if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
   
-  return true;
+  if (t.includes("Pre-recorded interview video uploaded")) return false;
+  if (v.includes("UPLOADED")) return false; 
+  
+  if (t.includes("Introduction:\nCandidate:")) return true;
+  if (rem.includes("METRICS_PAYLOAD:")) return true;
+  if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO") return true;
+  
+  if (v && !v.includes("FULL_SESSION_")) return false; 
+  
+  return true; 
 };
 
 export default function HistoryPage() {
