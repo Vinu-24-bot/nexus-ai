@@ -57,10 +57,17 @@ app = FastAPI(
     version="3.0.0",
 )
 
+# 🛡️ THE FIX: Explicitly allowing the correct Vercel origin for CORS
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://nexus-ai-platform-omega.vercel.app"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=False, 
+    allow_origins=ALLOWED_ORIGINS, 
+    allow_credentials=True, # Note: Setting this to True is often required for secure cross-origin requests
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["Accept-Ranges", "Content-Range", "Content-Length", "Content-Type"]
