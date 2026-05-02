@@ -13,15 +13,14 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
-// 🛡️ THE NUCLEAR FIX
-const IS_DEV = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-const API_URL = IS_DEV ? "http://localhost:8000/api" : "https://bats-ai-backend.onrender.com/api";
+// Clean, standard API resolution
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = `${API_BASE.replace(/\/$/, "")}/api`;
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
   visible: (i: number) => ({
-    opacity: 1,
-    y: 0,
+    opacity: 1, y: 0,
     transition: { delay: i * 0.1, duration: 0.5 },
   }),
 };
@@ -33,7 +32,10 @@ const RANDOM_ROLES = [
   "Data Scientist (NLP)",
   "Full Stack React Native Engineer",
   "Cybersecurity Analyst",
-  "Product Manager (AI Tools)"
+  "Product Manager (AI Tools)",
+  "Backend Golang Developer",
+  "Site Reliability Engineer",
+  "Machine Learning Engineer"
 ];
 
 const JD_TEMPLATES: Record<string, string> = {
@@ -93,9 +95,7 @@ export default function UploadAnalysisPage() {
   const [backendStatus, setBackendStatus] = useState<boolean | null>(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/health`)
-      .then(res => setBackendStatus(res.ok))
-      .catch(() => setBackendStatus(false));
+    checkBackendHealth().then(setBackendStatus);
   }, []);
 
   const handleGenerateJD = async () => {
@@ -164,7 +164,7 @@ export default function UploadAnalysisPage() {
     try {
       if (ext === ".doc" || ext === ".docx") {
         toast.info("Sending DOCX to ForgePro Engine for extraction...");
-        const response: any = await uploadResume(file);
+        const response: any = await uploadResume(file); 
         if (response && response.extracted_text) {
           setResume(response.extracted_text);
           setResumeFileName(file.name);
@@ -189,6 +189,16 @@ export default function UploadAnalysisPage() {
       setIsExtractingResume(false);
       if (resumeInputRef.current) resumeInputRef.current.value = "";
     }
+  };
+
+  const clearUploadedResume = () => {
+    setResumeFileName("");
+    setResume("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const clearJD = () => {
+    setJobDescription("");
   };
 
   const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -234,31 +244,20 @@ export default function UploadAnalysisPage() {
       const finalTranscript = transcript ||
         "(Pre-recorded interview video uploaded. Analyze based on resume and JD match assessment.)";
 
-      const res = await fetch(`${API_URL}/evaluate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          candidate_name: candidateName,
-          position,
-          job_description: jobDescription,
-          resume,
-          transcript: finalTranscript,
-          video_filename: videoFilename,
-          remarks: "[TYPE:L1_TECH_ROUND] Uploaded video evaluation."
-        })
+      const evalResult = await submitEvaluation({
+        candidate_name: candidateName,
+        position,
+        job_description: jobDescription,
+        resume,
+        transcript: finalTranscript,
+        video_filename: videoFilename,
+        remarks: "[TYPE:L1_TECH_ROUND] Uploaded video evaluation."
       });
-
-      if (!res.ok) throw new Error("Evaluation Failed");
-      const evalResult = await res.json();
 
       toast.success("BATS ForgePro Evaluation complete!");
       navigate(`/result/${evalResult.id}`);
     } catch (err: any) {
-      if (err.message === "Failed to fetch") {
-         toast.error("⏳ Render Backend is waking up from sleep mode (takes ~50 seconds). Please wait a moment and click run again.", { duration: 6000 });
-      } else {
-         toast.error(err.message || "Evaluation failed");
-      }
+      toast.error(err.message || "Evaluation failed");
     } finally {
       setIsSubmitting(false);
     }
