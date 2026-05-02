@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -17,9 +17,8 @@ import RecommendationBadge from "@/components/RecommendationBadge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-// DYNAMIC API RESOLUTION: Bypasses Vercel cache bugs permanently
-const isLocal = typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-const API_BASE = isLocal ? "http://localhost:8000" : "https://bats-ai-backend.onrender.com";
+// 🛡️ THE FIX: Strictly locked to production to prevent localhost routing bugs
+const API_BASE = "https://bats-ai-backend.onrender.com";
 const API_URL = `${API_BASE}/api`;
 
 const fadeUp = {

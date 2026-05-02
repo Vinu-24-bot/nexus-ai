@@ -13,9 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-// DYNAMIC API RESOLUTION: Bypasses Vercel cache bugs permanently
-const isLocal = typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-const API_BASE = isLocal ? "http://localhost:8000" : "https://bats-ai-backend.onrender.com";
+// 🛡️ THE FIX: Strictly locked to production to prevent localhost routing bugs
+const API_BASE = "https://bats-ai-backend.onrender.com";
 const API_URL = `${API_BASE}/api`;
 
 const fadeUp = {
@@ -134,8 +133,6 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Foolproof fallback routing logic. 
-  // Evaluates explicitly on known video filenames, making inversion impossible.
   const isInitialScreening = useCallback((r: EvaluationResult) => {
     const rem = r.remarks || "";
     const v = r.video_filename || "";

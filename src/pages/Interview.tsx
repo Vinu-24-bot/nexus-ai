@@ -11,9 +11,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { submitEvaluation, uploadVideo } from "@/lib/api";
 import { toast } from "sonner";
 
-// DYNAMIC API RESOLUTION: Bypasses Vercel cache bugs permanently
-const isLocal = typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-const API_BASE = isLocal ? "http://localhost:8000" : "https://bats-ai-backend.onrender.com";
+// 🛡️ THE FIX: Strictly locked to production to prevent localhost routing bugs
+const API_BASE = "https://bats-ai-backend.onrender.com";
 const API_URL = `${API_BASE}/api`;
 
 interface InterviewQuestion { id: number; question: string; category: string; difficulty: string; }

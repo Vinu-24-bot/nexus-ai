@@ -12,10 +12,8 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
-// Clean, standard API resolution
-// DYNAMIC API RESOLUTION: Bypasses Vercel cache bugs permanently
-const isLocal = typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
-const API_BASE = isLocal ? "http://localhost:8000" : "https://bats-ai-backend.onrender.com";
+// 🛡️ THE FIX: Strictly locked to production to prevent localhost routing bugs
+const API_BASE = "https://bats-ai-backend.onrender.com";
 const API_URL = `${API_BASE}/api`;
 
 const LEVEL_OPTIONS = [
@@ -197,7 +195,6 @@ export default function EvaluatePage() {
     setJobDescription("");
   };
 
-  // 🛡️ THE FIX: Restored to smooth, single-click API request
   const handleGenerateLink = async () => {
     if (!candidateName || !candidateEmail || !position || !jobDescription || !resume) {
       toast.error("Please fill all required fields");
@@ -237,7 +234,12 @@ export default function EvaluatePage() {
       toast.success("Interview link generated and emails queued via Webhook!");
     } catch (err: any) {
       console.error("[ForgePro Router] Error:", err);
-      toast.error(err.message || "Failed to generate interview link. Ensure backend is awake.", { duration: 5000 });
+      // 🛡️ THE FIX: Added graceful error handling for Render wake-up cycle
+      if (err.message === "Failed to fetch" || err.name === "TypeError") {
+        toast.error("⏳ Server is waking up from sleep mode (takes ~45 seconds). Please wait a moment and click Generate again.", { duration: 6000 });
+      } else {
+        toast.error(err.message || "Failed to generate interview link. Ensure backend is awake.", { duration: 5000 });
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -303,7 +305,7 @@ export default function EvaluatePage() {
               <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
                 <WifiOff className="w-4 h-4 text-destructive shrink-0" />
                 <p className="text-xs text-destructive">
-                  <strong>Backend offline</strong> — Cannot generate links, send emails, or extract DOCX. Please ensure your backend is awake.
+                  <strong>Backend starting up</strong> — Connecting to Render server. Links and emails will be available momentarily.
                 </p>
               </div>
             )}
