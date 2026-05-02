@@ -71,7 +71,7 @@ You are running a deep-dive evaluation. You have the Job Description, the Candid
 *** ENTERPRISE EVALUATION PROTOCOL ***
 1. L1 TECH ROUND: If the [INTERVIEW_TRANSCRIPT] explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
 2. LIVE INTERVIEW: If this is a live interview, the [INTERVIEW_TRANSCRIPT] is the ultimate source of truth. 
-3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence in the transcript. 
+3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence in the transcript. If the candidate answered only 1 or 2 questions and left early, evaluate those specific answers accurately, but apply a penalty to their overall score for incomplete data. Do NOT automatically give a 0/100 if they provided valid technical answers before leaving.
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
