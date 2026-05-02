@@ -71,7 +71,7 @@ You are running a deep-dive evaluation. You have the Job Description, the Candid
 *** ENTERPRISE EVALUATION PROTOCOL ***
 1. L1 TECH ROUND: If the [INTERVIEW_TRANSCRIPT] explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
 2. LIVE INTERVIEW: If this is a live interview, the [INTERVIEW_TRANSCRIPT] is the ultimate source of truth. 
-3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence in the transcript. If the candidate answered only 1 or 2 questions and left early, evaluate those specific answers accurately, but apply a penalty to their overall score for incomplete data. Do NOT automatically give a 0/100 if they provided valid technical answers before leaving.
+3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence in the transcript. If the candidate answered only 1 or 2 questions and left early, evaluate those specific answers accurately and give them a proportional partial score. Do NOT give a 0/100 if they provided valid technical answers before leaving. Apply a penalty to their overall score for incomplete data, but recognize the correct answers they did provide.
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
@@ -286,7 +286,7 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
         }
         
     if total_spoken_words < 30 and not "(Pre-recorded interview video uploaded" in transcript_safe:
-         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered only a few questions (Total Words: {total_spoken_words}). Do NOT give a flat 0/100. Evaluate the specific answers they DID provide and give them proportional partial credit (e.g., if they answered 1 out of 5 questions well, give them a 20/100). Penalize the overall score for incomplete data, but NEVER output a 0 if they answered valid technical questions."
+         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered only a few questions (Total Words: {total_spoken_words}). Evaluate the specific answers they DID provide and give them proportional partial credit (e.g., if they answered 1 out of 5 questions well, give them a 20/100). Penalize the overall score for incomplete data, but NEVER output a 0 if they answered valid technical questions."
 
     avg_latency = behavior_data.get("avg_latency", 0)
     if avg_latency > 0:
