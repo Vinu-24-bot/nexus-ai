@@ -16,7 +16,8 @@ import Navbar from "@/components/Navbar";
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
   visible: (i: number) => ({
-    opacity: 1, y: 0,
+    opacity: 1,
+    y: 0,
     transition: { delay: i * 0.1, duration: 0.5 },
   }),
 };
@@ -237,6 +238,7 @@ export default function UploadAnalysisPage() {
         resume,
         transcript: finalTranscript,
         video_filename: videoFilename,
+        remarks: "[TYPE:L1_TECH_ROUND] Uploaded video evaluation."
       });
 
       toast.success("BATS ForgePro Evaluation complete!");

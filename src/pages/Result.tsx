@@ -48,7 +48,6 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE FIX: Hard Math Check for WebM Timeline.
 const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackDuration: number }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -85,10 +84,12 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
     if (isNaN(d) || !isFinite(d) || d <= 0) {
       d = (vid.buffered && vid.buffered.length > 0) ? vid.buffered.end(vid.buffered.length - 1) : 0;
     }
+    
+    const finalDuration = fallbackDuration > 0 ? fallbackDuration : d;
 
-    if (d > 0 && isFinite(d)) {
-      setDuration(d);
-      setProgress((vid.currentTime / d) * 100);
+    if (finalDuration > 0 && isFinite(finalDuration)) {
+      setDuration(finalDuration);
+      setProgress((vid.currentTime / finalDuration) * 100);
     }
   };
 

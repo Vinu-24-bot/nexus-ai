@@ -832,7 +832,8 @@ export default function InterviewPage() {
          avg_latency: parseFloat(avgLatency as string),
          interview_duration_seconds: totalElapsed
       });
-      const hybridRemarks = `${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
+      // 🛡️ THE FIX: Hardcode [TYPE:INITIAL_SCREENING] into the payload so routing is infallible
+      const hybridRemarks = `[TYPE:INITIAL_SCREENING] ${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
       await submitEvaluation({
         candidate_name: candidateName || "Unknown", 

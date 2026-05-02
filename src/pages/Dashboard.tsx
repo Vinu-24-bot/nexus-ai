@@ -131,16 +131,19 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  const initialScreeningData = results.filter(r => {
-    const v = r.video_filename || "";
-    return v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "";
-  });
-  
-  const l1TechRoundData = results.filter(r => {
-    const v = r.video_filename || "";
-    return v !== "LIVE_SCREENING" && v !== "NO_VIDEO" && v !== "";
-  });
-  
+  // 🛡️ THE FIX: Smart Routing handles old "Cook" profiles and new ones identically
+  const isInitialScreening = (r: EvaluationResult) => {
+    const rem = r.remarks || "";
+    const t = r.transcript || "";
+    if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
+    if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
+    if (t.includes("Introduction:\nCandidate:")) return true;
+    if (r.video_filename === "LIVE_SCREENING" || r.video_filename === "NO_VIDEO") return true;
+    return false;
+  };
+
+  const initialScreeningData = results.filter(r => isInitialScreening(r));
+  const l1TechRoundData = results.filter(r => !isInitialScreening(r));
   const selectedData = results.filter(r => r.selection_status?.toLowerCase() === "selected");
 
   const calculateStats = (data: EvaluationResult[]) => {
