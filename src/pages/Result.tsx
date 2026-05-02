@@ -22,7 +22,8 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
   visible: (i: number) => ({
-    opacity: 1, y: 0,
+    opacity: 1,
+    y: 0,
     transition: { delay: i * 0.08, duration: 0.5 },
   }),
 };
@@ -47,7 +48,6 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
-// 🛡️ THE FIX: Employs the `1e101` Chrome hack to instantly calculate broken WebM durations.
 const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackDuration: number }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,21 +63,21 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [hasError, setHasError] = useState(false);
 
+  // 🛡️ THE FIX: Employs the `1e101` Chrome hack to instantly calculate broken WebM durations.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     const handleLoadedMetadata = () => {
       if (video.duration === Infinity || isNaN(video.duration)) {
-        // The Chrome WebM fix: seek to end, then back to start
         video.currentTime = 1e101; 
         video.ontimeupdate = () => {
           video.ontimeupdate = null;
           video.currentTime = 0;
-          setDuration(video.duration);
+          setDuration(video.duration > 0 ? video.duration : fallbackDuration);
         };
       } else {
-        setDuration(video.duration);
+        setDuration(video.duration > 0 ? video.duration : fallbackDuration);
       }
     };
 
@@ -86,7 +86,7 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
       video.ontimeupdate = null;
     };
-  }, [src]);
+  }, [src, fallbackDuration]);
 
   const togglePlay = () => {
     if (hasError || !videoRef.current) return;
@@ -103,7 +103,6 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
     const vid = videoRef.current;
     setCurrentTime(vid.currentTime);
     
-    // Strict fallback calculation
     let d = duration > 0 ? duration : (vid.duration > 0 && isFinite(vid.duration) ? vid.duration : fallbackDuration);
     
     if (d > 0 && isFinite(d)) {

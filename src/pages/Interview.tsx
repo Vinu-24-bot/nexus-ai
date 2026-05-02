@@ -832,7 +832,7 @@ export default function InterviewPage() {
          avg_latency: parseFloat(avgLatency as string),
          interview_duration_seconds: totalElapsed
       });
-      // 🛡️ THE FIX: Force METRICS_PAYLOAD so History/Dashboard always knows it's an Initial Screening
+      // 🛡️ THE FIX: Embed [TYPE:INITIAL_SCREENING] permanently into remarks payload.
       const hybridRemarks = `[TYPE:INITIAL_SCREENING] ${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
       await submitEvaluation({

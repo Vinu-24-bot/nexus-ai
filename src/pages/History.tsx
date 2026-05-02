@@ -20,6 +20,22 @@ const fadeUp = {
   }),
 };
 
+// Extracted safely outside the component to prevent React dependency rendering crashes
+const isInitialScreening = (r: EvaluationResult) => {
+  const rem = r.remarks || "";
+  const t = r.transcript || "";
+  const v = r.video_filename || "";
+  
+  if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
+  if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
+  if (rem.includes("METRICS_PAYLOAD:")) return true;
+  
+  if (t.includes("Introduction:\nCandidate:")) return true;
+  if (t.includes("Pre-recorded interview video uploaded")) return false;
+  if (v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
+  return false;
+};
+
 export default function HistoryPage() {
   const navigate = useNavigate();
   const [evaluations, setEvaluations] = useState<EvaluationResult[]>([]);
@@ -73,29 +89,13 @@ export default function HistoryPage() {
     }
   };
 
-  // 🛡️ THE FIX: Safe internal function to prevent React dependency crashes
   const filteredEvals = useMemo(() => {
     let filtered = [...evaluations];
 
-    const isInitial = (ev: EvaluationResult) => {
-      const rem = ev.remarks || "";
-      const t = ev.transcript || "";
-      const v = ev.video_filename || "";
-      
-      if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
-      if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-      if (rem.includes("METRICS_PAYLOAD:")) return true; 
-      
-      if (t.includes("Introduction:\nCandidate:")) return true;
-      if (t.includes("Pre-recorded interview video uploaded")) return false;
-      if (v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
-      return false;
-    };
-
     if (activeTab === "Initial Screening (Live)") {
-      filtered = filtered.filter(ev => isInitial(ev));
+      filtered = filtered.filter(ev => isInitialScreening(ev));
     } else if (activeTab === "L1 Tech Round (Uploaded)") {
-      filtered = filtered.filter(ev => !isInitial(ev));
+      filtered = filtered.filter(ev => !isInitialScreening(ev));
     }
 
     if (search) {
@@ -418,9 +418,7 @@ export default function HistoryPage() {
                       <span>{ev.position}</span>
                       <span>•</span>
                       <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {ev.date}</span>
-                      
-                      {/* Show Tag only if it belongs in L1 */}
-                      {ev.video_filename && ev.video_filename !== "LIVE_SCREENING" && ev.video_filename !== "NO_VIDEO" && (
+                      {!isInitialScreening(ev) && (
                         <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-accent/10 text-accent border border-accent/20 tracking-wider">
                           L1 TECH ROUND
                         </span>
