@@ -48,6 +48,7 @@ const statusStyles: Record<string, string> = {
   doubtful: "text-orange-500 bg-orange-500/10 border-orange-500/30 shadow-[0_0_10px_rgba(249,115,22,0.15)]",
 };
 
+// 🛡️ THE FIX: Employs the `1e101` seek-to-end hack to instantly calculate broken WebM durations.
 const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackDuration: number }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,6 +64,31 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [hasError, setHasError] = useState(false);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleLoadedMetadata = () => {
+      if (video.duration === Infinity || isNaN(video.duration)) {
+        // The famous Chrome WebM fix
+        video.currentTime = 1e101; 
+        video.ontimeupdate = () => {
+          video.ontimeupdate = null;
+          video.currentTime = 0;
+          setDuration(video.duration);
+        };
+      } else {
+        setDuration(video.duration);
+      }
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.ontimeupdate = null;
+    };
+  }, [src]);
+
   const togglePlay = () => {
     if (hasError || !videoRef.current) return;
     if (isPlaying) {
@@ -75,20 +101,13 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
 
   const handleTimeUpdate = () => {
     if (hasError || !videoRef.current || isScrubbing) return;
-    
     const vid = videoRef.current;
     setCurrentTime(vid.currentTime);
     
-    // 🛡️ THE FIX: Hard math check to force payload duration if native WebM duration fails
-    let d = vid.duration;
-    if (fallbackDuration > 0) {
-      d = fallbackDuration; 
-    } else if (isNaN(d) || !isFinite(d) || d <= 0) {
-      d = (vid.buffered && vid.buffered.length > 0) ? vid.buffered.end(vid.buffered.length - 1) : 0;
-    }
-
+    // Fallback to strict DB metric if the hack failed somehow
+    let d = duration > 0 ? duration : (vid.duration > 0 && isFinite(vid.duration) ? vid.duration : fallbackDuration);
+    
     if (d > 0 && isFinite(d)) {
-      setDuration(d);
       setProgress((vid.currentTime / d) * 100);
     }
   };
@@ -96,8 +115,9 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newProgress = Number(e.target.value);
     setProgress(newProgress);
-    if (videoRef.current && duration > 0) {
-      const newTime = (newProgress / 100) * duration;
+    const d = duration > 0 ? duration : fallbackDuration;
+    if (videoRef.current && d > 0) {
+      const newTime = (newProgress / 100) * d;
       videoRef.current.currentTime = newTime;
       setCurrentTime(newTime);
     }
@@ -169,6 +189,8 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
     );
   }
 
+  const dToShow = duration > 0 ? duration : fallbackDuration;
+
   return (
     <div ref={containerRef} className="relative group w-full bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
       
@@ -179,7 +201,7 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
         onClick={togglePlay} 
         onTimeUpdate={handleTimeUpdate} 
         onError={() => setHasError(true)} 
-        preload="metadata"
+        preload="auto"
       />
       
       {!isPlaying && (
@@ -234,7 +256,7 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
             </div>
 
             <span className="text-xs font-mono text-white/80">
-              {formatTime(currentTime)} {duration > 0 ? `/ ${formatTime(duration)}` : ''}
+              {formatTime(currentTime)} / {formatTime(dToShow)}
             </span>
           </div>
 

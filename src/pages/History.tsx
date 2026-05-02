@@ -73,26 +73,28 @@ export default function HistoryPage() {
     }
   };
 
-  // 🛡️ THE FIX: Smart Routing handles old "Cook" profiles and new ones identically
-  const isInitialScreening = useCallback((r: EvaluationResult) => {
-    const rem = r.remarks || "";
-    const t = r.transcript || "";
-    if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
-    if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-    if (t.includes("Introduction:\nCandidate:")) return true;
-    if (t.includes("Pre-recorded interview video uploaded")) return false;
-    const v = r.video_filename || "";
-    if (v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
-    return false;
-  }, []);
-
+  // 🛡️ THE FIX: Multi-layered routing logic without any React dependency crashes.
   const filteredEvals = useMemo(() => {
     let filtered = [...evaluations];
 
+    const isInitial = (ev: EvaluationResult) => {
+      const rem = ev.remarks || "";
+      const t = ev.transcript || "";
+      const v = ev.video_filename || "";
+      
+      if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
+      if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
+      if (t.includes("Introduction:\nCandidate:")) return true;
+      if (v === "LIVE_SCREENING" || v === "NO_VIDEO") return true;
+      if (v && v !== "LIVE_SCREENING" && v !== "NO_VIDEO") return false;
+      
+      return true; // Default fallback for completely empty old records
+    };
+
     if (activeTab === "Initial Screening (Live)") {
-      filtered = filtered.filter(ev => isInitialScreening(ev));
+      filtered = filtered.filter(ev => isInitial(ev));
     } else if (activeTab === "L1 Tech Round (Uploaded)") {
-      filtered = filtered.filter(ev => !isInitialScreening(ev));
+      filtered = filtered.filter(ev => !isInitial(ev));
     }
 
     if (search) {
@@ -120,7 +122,7 @@ export default function HistoryPage() {
     });
 
     return filtered;
-  }, [evaluations, search, activeTab, sortBy, statusFilter, recFilter, isInitialScreening]);
+  }, [evaluations, search, activeTab, sortBy, statusFilter, recFilter]);
 
   const generateCohortHTML = () => {
     const baseUrl = window.location.origin;
@@ -264,7 +266,6 @@ export default function HistoryPage() {
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-6xl">
         <motion.div initial="hidden" animate="visible" className="space-y-6">
           
-          {/* Header & Export Dropdown */}
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
               <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">Evaluation History</h1>
@@ -285,40 +286,21 @@ export default function HistoryPage() {
                 
                 {showExportMenu && (
                   <div className="absolute right-0 mt-2 w-48 bg-card border border-border/50 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.5)] overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
-                    <button onClick={exportPDF} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      PDF Report
-                    </button>
-                    <button onClick={exportDOCX} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      Word (DOCX)
-                    </button>
-                    <button onClick={exportHTML} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      HTML Webpage
-                    </button>
-                    <button onClick={exportCSV} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      CSV Spreadsheet
-                    </button>
-                    <button onClick={exportTXT} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      Plain Text
-                    </button>
-                    <button onClick={exportJSON} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors">
-                      Raw JSON
-                    </button>
+                    <button onClick={exportPDF} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">PDF Report</button>
+                    <button onClick={exportDOCX} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">Word (DOCX)</button>
+                    <button onClick={exportHTML} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">HTML Webpage</button>
+                    <button onClick={exportCSV} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">CSV Spreadsheet</button>
+                    <button onClick={exportTXT} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">Plain Text</button>
+                    <button onClick={exportJSON} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors">Raw JSON</button>
                   </div>
                 )}
               </div>
-              
-              <Button 
-                variant="outline" 
-                onClick={() => { setIsRefreshing(true); fetchData(); }} 
-                className="bg-card text-muted-foreground hover:text-foreground shadow-sm px-3"
-                title="Refresh Data"
-              >
+              <Button variant="outline" onClick={() => { setIsRefreshing(true); fetchData(); }} className="bg-card text-muted-foreground hover:text-foreground shadow-sm px-3" title="Refresh Data">
                 <RefreshCcw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-primary' : ''}`} />
               </Button>
             </div>
           </div>
 
-          {/* Tabs */}
           <div className="flex flex-wrap gap-2 pt-2 border-b border-border/50 pb-4">
             {["All Evaluations", "Initial Screening (Live)", "L1 Tech Round (Uploaded)"].map((tab) => (
               <button
@@ -335,7 +317,6 @@ export default function HistoryPage() {
             ))}
           </div>
 
-          {/* Search & Filters */}
           <div className="glass p-4 rounded-xl border border-border/50 shadow-sm flex flex-col lg:flex-row gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -359,7 +340,6 @@ export default function HistoryPage() {
                   <option value="Score">Score</option>
                 </select>
               </div>
-
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> Status</span>
                 <select 
@@ -370,13 +350,10 @@ export default function HistoryPage() {
                   <option value="pending">Pending</option>
                   <option value="selected">Selected</option>
                   <option value="rejected">Rejected</option>
-                  <option value="hold">Hold</option>
-                  <option value="doubtful">Doubtful</option>
                 </select>
               </div>
-
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> ForgePro Verdict</span>
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> Verdict</span>
                 <select 
                   value={recFilter} onChange={(e) => setRecFilter(e.target.value)}
                   className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none"
@@ -390,7 +367,6 @@ export default function HistoryPage() {
             </div>
           </div>
 
-          {/* Data List */}
           {loading ? (
             <div className="py-20 flex justify-center">
               <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -419,7 +395,7 @@ export default function HistoryPage() {
                       <span>{ev.position}</span>
                       <span>•</span>
                       <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {ev.date}</span>
-                      {!isInitialScreening(ev) && (
+                      {ev.video_filename && ev.video_filename !== "LIVE_SCREENING" && ev.video_filename !== "NO_VIDEO" && (
                         <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-accent/10 text-accent border border-accent/20 tracking-wider">
                           L1 TECH ROUND
                         </span>
