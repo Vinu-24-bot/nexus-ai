@@ -237,11 +237,7 @@ export default function EvaluatePage() {
       toast.success("Interview link generated and emails queued via Webhook!");
     } catch (err: any) {
       console.error("[ForgePro Router] Error:", err);
-      if (err.message === "Failed to fetch" || err.name === "TypeError") {
-        toast.error("Network Error: Make sure you have pushed your latest backend updates to GitHub so Render can process the /sessions/create route.", { duration: 6000 });
-      } else {
-        toast.error(err.message || "Failed to generate interview link. Ensure backend is awake.", { duration: 5000 });
-      }
+      toast.error(err.message || "Failed to generate interview link. Ensure backend is awake.", { duration: 5000 });
     } finally {
       setIsGenerating(false);
     }
@@ -313,7 +309,6 @@ export default function EvaluatePage() {
             )}
           </motion.div>
 
-          {/* 🛡️ This is the UI block you wanted back. It will show perfectly once the API route stops throwing 'Failed to fetch' */}
           {generatedLink ? (
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="p-8 rounded-2xl border border-primary/30 bg-primary/5 space-y-6 text-center">
               <div className="mx-auto w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4">

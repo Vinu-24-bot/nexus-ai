@@ -13,8 +13,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-// 🛡️ THE FIX: Strictly locked to production to prevent localhost routing bugs
-const API_BASE = "https://bats-ai-backend.onrender.com";
+// 🛡️ DYNAMIC API RESOLUTION: Intelligent fallback for Local vs Production
+const API_BASE = import.meta.env.VITE_API_URL || 
+  (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
+    ? "http://localhost:8000" 
+    : "https://bats-ai-backend.onrender.com");
 const API_URL = `${API_BASE}/api`;
 
 const fadeUp = {
