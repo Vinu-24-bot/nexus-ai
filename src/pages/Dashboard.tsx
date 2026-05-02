@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000") + "/api";
+const API_URL = (import.meta.env.VITE_API_URL || "https://bats-ai-backend.onrender.com").replace(/\/$/, "").replace(/\/api$/, "") + "/api";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
@@ -131,19 +131,14 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
-  // 🛡️ THE FIX: Smart Routing handles old "Cook" profiles safely by checking for METRICS_PAYLOAD.
+  // 🛡️ THE NUCLEAR ROUTING FIX: Relies strictly on the injected transcript prompt to filter.
+  // This retroactively forces old "Cook" profiles into Initial Screening.
   const isInitialScreening = useCallback((r: EvaluationResult) => {
-    const rem = r.remarks || "";
     const t = r.transcript || "";
-    const v = r.video_filename || "";
-    
-    if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
+    const rem = r.remarks || "";
     if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-    if (rem.includes("METRICS_PAYLOAD:")) return true;
-    if (t.includes("Introduction:\nCandidate:")) return true;
     if (t.includes("Pre-recorded interview video uploaded")) return false;
-    if (v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
-    return false;
+    return true; // If it's not explicitly an L1 upload, it belongs in Initial Screenings.
   }, []);
 
   const initialScreeningData = useMemo(() => results.filter(r => isInitialScreening(r)), [results, isInitialScreening]);

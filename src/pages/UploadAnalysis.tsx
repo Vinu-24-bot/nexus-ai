@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
@@ -13,10 +13,16 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
+// 🛡️ THE NUCLEAR FIX
+const IS_DEV = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+const BASE_URL = IS_DEV ? "http://localhost:8000" : "https://bats-ai-backend.onrender.com";
+const API_URL = `${BASE_URL}/api`;
+
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
   visible: (i: number) => ({
-    opacity: 1, y: 0,
+    opacity: 1,
+    y: 0,
     transition: { delay: i * 0.1, duration: 0.5 },
   }),
 };
@@ -28,10 +34,7 @@ const RANDOM_ROLES = [
   "Data Scientist (NLP)",
   "Full Stack React Native Engineer",
   "Cybersecurity Analyst",
-  "Product Manager (AI Tools)",
-  "Backend Golang Developer",
-  "Site Reliability Engineer",
-  "Machine Learning Engineer"
+  "Product Manager (AI Tools)"
 ];
 
 const JD_TEMPLATES: Record<string, string> = {
@@ -90,9 +93,11 @@ export default function UploadAnalysisPage() {
   const [transcript, setTranscript] = useState("");
   const [backendStatus, setBackendStatus] = useState<boolean | null>(null);
 
-  useState(() => {
-    checkBackendHealth().then(setBackendStatus);
-  });
+  useEffect(() => {
+    fetch(`${API_URL}/health`)
+      .then(res => setBackendStatus(res.ok))
+      .catch(() => setBackendStatus(false));
+  }, []);
 
   const handleGenerateJD = async () => {
     let targetPosition = position.trim();
@@ -230,7 +235,7 @@ export default function UploadAnalysisPage() {
       const finalTranscript = transcript ||
         "(Pre-recorded interview video uploaded. Analyze based on resume and JD match assessment.)";
 
-      const evalResult = await submitEvaluation({
+      const payload = {
         candidate_name: candidateName,
         position,
         job_description: jobDescription,
@@ -238,7 +243,39 @@ export default function UploadAnalysisPage() {
         transcript: finalTranscript,
         video_filename: videoFilename,
         remarks: "[TYPE:L1_TECH_ROUND] Uploaded video evaluation."
-      });
+      };
+
+      let attempts = 0;
+      const maxAttempts = 12;
+      let evalResult;
+
+      while (attempts < maxAttempts) {
+         try {
+             const res = await fetch(`${API_URL}/evaluate`, {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify(payload)
+             });
+             
+             if (res.status === 502 || res.status === 503) {
+                 attempts++;
+                 await new Promise(resolve => setTimeout(resolve, 5000));
+                 continue;
+             }
+             if (!res.ok) throw new Error("Evaluation Failed");
+             evalResult = await res.json();
+             break;
+         } catch (e: any) {
+             if (e.message === "Failed to fetch") {
+                 attempts++;
+                 await new Promise(resolve => setTimeout(resolve, 5000));
+             } else {
+                 throw e;
+             }
+         }
+      }
+
+      if (!evalResult) throw new Error("Backend timeout.");
 
       toast.success("BATS ForgePro Evaluation complete!");
       navigate(`/result/${evalResult.id}`);

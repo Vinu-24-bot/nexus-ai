@@ -20,20 +20,13 @@ const fadeUp = {
   }),
 };
 
-// Extracted safely outside the component to prevent React dependency rendering crashes
+// 🛡️ THE NUCLEAR ROUTING FIX
 const isInitialScreening = (r: EvaluationResult) => {
-  const rem = r.remarks || "";
   const t = r.transcript || "";
-  const v = r.video_filename || "";
-  
-  if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
+  const rem = r.remarks || "";
   if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-  if (rem.includes("METRICS_PAYLOAD:")) return true;
-  
-  if (t.includes("Introduction:\nCandidate:")) return true;
   if (t.includes("Pre-recorded interview video uploaded")) return false;
-  if (v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
-  return false;
+  return true; // Everything else, including old Live Records, defaults to Initial.
 };
 
 export default function HistoryPage() {

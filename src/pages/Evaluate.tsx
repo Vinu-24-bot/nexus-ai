@@ -7,10 +7,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { generateJD, uploadResume, checkBackendHealth } from "@/lib/api";
+import { generateJD, uploadResume } from "@/lib/api";
 import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
+
+// 🛡️ THE NUCLEAR FIX: Direct backend connection. Bypasses Vercel ENV bugs completely.
+const IS_DEV = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+const BASE_URL = IS_DEV ? "http://localhost:8000" : "https://bats-ai-backend.onrender.com";
+const API_URL = `${BASE_URL}/api`;
 
 const LEVEL_OPTIONS = [
   { label: "L1 (Junior)", value: "L1" },
@@ -83,9 +88,13 @@ export default function EvaluatePage() {
   
   const [backendStatus, setBackendStatus] = useState<boolean | null>(null);
   const [generatedLink, setGeneratedLink] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
 
+  // 🛡️ THE FIX: Auto-Wakeup Ping to Render on Mount
   useEffect(() => {
-    checkBackendHealth().then(setBackendStatus);
+    fetch(`${API_URL}/health`)
+      .then(res => setBackendStatus(res.ok))
+      .catch(() => setBackendStatus(false));
   }, []);
 
   const handleGenerateJD = async () => {
@@ -191,6 +200,7 @@ export default function EvaluatePage() {
     setJobDescription("");
   };
 
+  // 🛡️ THE FIX: Auto-Retry Engine. If Render is asleep, it loops and waits.
   const handleGenerateLink = async () => {
     if (!candidateName || !candidateEmail || !position || !jobDescription || !resume) {
       toast.error("Please fill all required fields");
@@ -198,56 +208,72 @@ export default function EvaluatePage() {
     }
     
     setIsGenerating(true);
-    try {
-      // 🛡️ THE NUCLEAR FIX: Hard-route directly to Render if we are not on localhost.
-      // This bypasses Vercel's broken environment variables entirely.
-      const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-      const finalApiUrl = isLocalHost 
-        ? "http://localhost:8000/api/sessions/create" 
-        : "https://bats-ai-backend.onrender.com/api/sessions/create";
+    setIsConnecting(true);
 
-      console.log("[ForgePro Router] Executing hard-route connection to:", finalApiUrl);
+    const payload = {
+        candidate_name: candidateName,
+        candidate_email: candidateEmail,
+        recruiter_email: talentAssociateEmail,
+        talent_associate_name: talentAssociateName,
+        position,
+        job_description: jobDescription,
+        resume_text: resume,
+        interview_level: selectedLevel.label,
+        duration_minutes: durationMinutes.value,
+        voice_type: voiceType.value,
+        custom_transcript: transcriptQuestions
+    };
 
-      const res = await fetch(finalApiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          candidate_name: candidateName,
-          candidate_email: candidateEmail,
-          recruiter_email: talentAssociateEmail,
-          talent_associate_name: talentAssociateName,
-          position,
-          job_description: jobDescription,
-          resume_text: resume,
-          interview_level: selectedLevel.label,
-          duration_minutes: durationMinutes.value,
-          voice_type: voiceType.value,
-          custom_transcript: transcriptQuestions
-        })
-      });
+    let attempts = 0;
+    const maxAttempts = 12; // 1 minute max wait time
 
-      if (!res.ok) {
-         const err = await res.json();
-         throw new Error(err.detail || "Failed to create session");
-      }
+    while (attempts < maxAttempts) {
+        try {
+            console.log(`[ForgePro Router] Connecting to: ${API_URL}/sessions/create (Attempt ${attempts+1})`);
+            const res = await fetch(`${API_URL}/sessions/create`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
 
-      const data = await res.json();
-      
-      const frontendUrl = window.location.origin;
-      setGeneratedLink(`${frontendUrl}/interview/${data.session_id}`);
-      
-      toast.success("Interview link generated and emails queued via Webhook!");
-    } catch (err: any) {
-      console.error("[ForgePro Router] Error:", err);
-      // If Render is asleep, it drops the connection. We inform the user to try again in 50 seconds.
-      if (err.message === "Failed to fetch") {
-         toast.error("Render Backend is waking up from sleep mode (takes ~50 seconds). Please wait a moment and click Generate again.", { duration: 8000 });
-      } else {
-         toast.error(err.message || "Failed to generate interview link.");
-      }
-    } finally {
-      setIsGenerating(false);
+            if (res.status === 502 || res.status === 503) {
+                // Render is still waking up. Wait 5s and loop.
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                continue;
+            }
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || "Failed to create session");
+            }
+
+            const data = await res.json();
+            const frontendUrl = window.location.origin;
+            setGeneratedLink(`${frontendUrl}/interview/${data.session_id}`);
+            toast.success("Interview link generated and emails queued via Webhook!");
+            setIsGenerating(false);
+            setIsConnecting(false);
+            return; // Success! Break loop.
+
+        } catch (err: any) {
+            if (err.message === "Failed to fetch") {
+                // Render is completely asleep or waking up. Loop.
+                attempts++;
+                await new Promise(resolve => setTimeout(resolve, 5000));
+            } else {
+                toast.error(err.message || "Failed to generate interview link.");
+                setIsGenerating(false);
+                setIsConnecting(false);
+                return; // Hard error. Break loop.
+            }
+        }
     }
+    
+    // If it hits here, it looped 12 times (1 min) and failed.
+    toast.error("Render Backend failed to wake up in time. Please check your Render dashboard.");
+    setIsGenerating(false);
+    setIsConnecting(false);
   };
 
   const resetForm = () => {
@@ -303,17 +329,6 @@ export default function EvaluatePage() {
                 </div>
               ))}
             </div>
-          </motion.div>
-
-          <motion.div variants={fadeUp} custom={0.3}>
-            {backendStatus === false && (
-              <div className="rounded-xl p-3 bg-destructive/10 border border-destructive/20 flex items-center gap-3">
-                <WifiOff className="w-4 h-4 text-destructive shrink-0" />
-                <p className="text-xs text-destructive">
-                  <strong>Backend offline</strong> — Cannot generate links, send emails, or extract DOCX. Please ensure your backend is awake.
-                </p>
-              </div>
-            )}
           </motion.div>
 
           {generatedLink ? (
@@ -607,7 +622,7 @@ export default function EvaluatePage() {
                     placeholder="Paste mandatory questions you want ForgePro to ask, or click 'Auto-Generate' to get a customized question bank..."
                     value={transcriptQuestions}
                     onChange={(e) => setTranscriptQuestions(e.target.value)}
-                    className="bg-background border-border min-h-[160px] resize-none focus-visible:ring-accent"
+                    className="bg-background border-border min-h-[120px] resize-none focus-visible:ring-accent"
                   />
                 </div>
               </motion.div>
@@ -615,10 +630,15 @@ export default function EvaluatePage() {
               <motion.div variants={fadeUp} custom={4}>
                 <Button
                   onClick={handleGenerateLink}
-                  disabled={!isValid || isGenerating || backendStatus === false}
-                  className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40 mt-4"
+                  disabled={!isValid || isGenerating}
+                  className="w-full h-14 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 glow-cyan disabled:opacity-40 mt-4 relative"
                 >
-                  {isGenerating ? (
+                  {isConnecting ? (
+                    <span className="flex items-center gap-3">
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Connecting to Secure Server...
+                    </span>
+                  ) : isGenerating ? (
                     <span className="flex items-center gap-3">
                       <Loader2 className="w-5 h-5 animate-spin" />
                       Creating Session Vault...
