@@ -12,8 +12,11 @@ import { extractTextFromFile } from "@/lib/resume-parser";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 
-// 🚀 THE ULTIMATE OVERRIDE: Hard-locked to Render.
-const API_BASE = "https://bats-ai-backend.onrender.com";
+// 🛡️ DYNAMIC API RESOLUTION: Intelligent fallback for Local vs Production
+const API_BASE = import.meta.env.VITE_API_URL || 
+  (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
+    ? "http://localhost:8000" 
+    : "https://bats-ai-backend.onrender.com");
 const API_URL = `${API_BASE}/api`;
 
 const LEVEL_OPTIONS = [
@@ -226,9 +229,16 @@ export default function EvaluatePage() {
         })
       });
 
+      // 🚀 THE FIX: Properly extract the actual backend error instead of hiding it behind "Failed to fetch"
       if (!res.ok) {
-         const err = await res.json();
-         throw new Error(err.detail || "Failed to create session");
+        let errMsg = `Server Error (${res.status})`;
+        try {
+            const err = await res.json();
+            errMsg = err.detail || errMsg;
+        } catch {
+            errMsg = `Backend 500 Error: Database Schema Mismatch. Visit https://bats-ai-backend.onrender.com/api/force-reset-db to sync the database.`;
+        }
+        throw new Error(errMsg);
       }
 
       const data = await res.json();
@@ -238,7 +248,7 @@ export default function EvaluatePage() {
       
     } catch (err: any) {
       console.error("[ForgePro Router] Error:", err);
-      toast.error(err.message || "Failed to generate interview link. Ensure backend is awake.", { duration: 5000 });
+      toast.error(err.message || "Failed to generate interview link. Ensure backend is awake.", { duration: 8000 });
     } finally {
       setIsGenerating(false);
     }

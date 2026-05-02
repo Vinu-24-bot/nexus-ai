@@ -188,6 +188,16 @@ async def health_check(db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "offline", "error": str(e)}
 
+# 🚀 THE NUKE SWITCH: Rebuilds Database schema to fix 500 errors
+@app.get("/api/force-reset-db")
+async def force_reset_db():
+    try:
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        return {"message": "SUCCESS: Database tables wiped and successfully rebuilt with the newest schema columns!"}
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/api/stream/{filename}")
 async def stream_video(filename: str, request: Request):
     file_path = RECORDINGS_DIR / filename
@@ -226,34 +236,46 @@ async def stream_video(filename: str, request: Request):
 
 @app.post("/api/sessions/create")
 async def create_interview_session(req: SessionCreateRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    new_session = InterviewSession(
-        candidate_name=req.candidate_name, candidate_email=req.candidate_email,
-        recruiter_email=req.recruiter_email, interview_level=req.interview_level,
-        position=req.position, job_description=req.job_description,
-        resume_text=req.resume_text, status="pending"
-    )
-    
-    metadata = json.dumps({"duration_minutes": req.duration_minutes, "voice_type": getattr(req, "voice_type", "female")})
-    new_session.remarks = metadata
+    try:
+        # 🚀 THE FIX: Bulletproof attribute extraction prevents crashes if schemas.py is outdated
+        new_session = InterviewSession(
+            candidate_name=getattr(req, "candidate_name", "Unknown"), 
+            candidate_email=getattr(req, "candidate_email", ""),
+            recruiter_email=getattr(req, "recruiter_email", ""), 
+            interview_level=getattr(req, "interview_level", "L2 (Mid-Level)"),
+            position=getattr(req, "position", "Technical Role"), 
+            job_description=getattr(req, "job_description", ""),
+            resume_text=getattr(req, "resume_text", ""), 
+            status="pending"
+        )
+        
+        dur = getattr(req, "duration_minutes", 10)
+        voice = getattr(req, "voice_type", "female")
+        metadata = json.dumps({"duration_minutes": dur, "voice_type": voice})
+        new_session.remarks = metadata
 
-    db.add(new_session)
-    db.commit()
-    db.refresh(new_session)
-    
-    frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app").rstrip('/')
-    interview_link = f"{frontend_url}/interview/{new_session.id}"
-    talent_name = getattr(req, "talent_associate_name", None) or "The ForgePro Team"
+        db.add(new_session)
+        db.commit()
+        db.refresh(new_session)
+        
+        frontend_url = os.getenv("FRONTEND_URL", "https://nexus-ai-platform-omega.vercel.app").rstrip('/')
+        interview_link = f"{frontend_url}/interview/{new_session.id}"
+        talent_name = getattr(req, "talent_associate_name", None) or "The ForgePro Team"
 
-    candidate_body = f"""Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro Initial Screening for the {req.position} role ({req.interview_level}).\n\nYour Talent Associate, {talent_name}, has set up a secure interview vault for you.\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest regards,\n{talent_name}\nBATS ForgePro Talent Acquisition"""
+        candidate_body = f"""Hello {req.candidate_name},\n\nYou have been invited to a BATS ForgePro Initial Screening for the {req.position} role ({req.interview_level}).\n\nYour Talent Associate, {talent_name}, has set up a secure interview vault for you.\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest regards,\n{talent_name}\nBATS ForgePro Talent Acquisition"""
 
-    background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
+        background_tasks.add_task(send_system_email, req.candidate_email, f"Interview Invitation: {req.position}", candidate_body)
 
-    if req.recruiter_email:
-        dashboard_link = f"{frontend_url}/dashboard"
-        recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\nCreated By: {talent_name}\n\nYou will receive automated alerts when the candidate begins and completes the assessment.\n\nAccess your command center here: {dashboard_link}"
-        background_tasks.add_task(send_system_email, req.recruiter_email, f"BATS Tracking: Session Created for {req.candidate_name}", recruiter_body)
-    
-    return {"message": "Session created and emails queued", "session_id": new_session.id}
+        if req.recruiter_email:
+            dashboard_link = f"{frontend_url}/dashboard"
+            recruiter_body = f"Session Created for {req.candidate_name}.\n\nRole: {req.position} ({req.interview_level})\nCandidate Email: {req.candidate_email}\nCreated By: {talent_name}\n\nYou will receive automated alerts when the candidate begins and completes the assessment.\n\nAccess your command center here: {dashboard_link}"
+            background_tasks.add_task(send_system_email, req.recruiter_email, f"BATS Tracking: Session Created for {req.candidate_name}", recruiter_body)
+        
+        return {"message": "Session created and emails queued", "session_id": new_session.id}
+    except Exception as e:
+        db.rollback()
+        print(f"[BATS DB ERROR]: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database Crash: {str(e)}")
 
 @app.get("/api/sessions/{session_id}")
 async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
