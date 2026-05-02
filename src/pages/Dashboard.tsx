@@ -131,16 +131,23 @@ export default function DashboardPage() {
     return bId - aId; 
   });
 
+  // 🛡️ THE FIX: Smart Routing handles old "Cook" profiles safely by checking for METRICS_PAYLOAD.
   const isInitialScreening = useCallback((r: EvaluationResult) => {
     const rem = r.remarks || "";
     const t = r.transcript || "";
     const v = r.video_filename || "";
+    
     if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
     if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
+    
+    // Only Live Interviews contain this exact string in their remarks payload
+    if (rem.includes("METRICS_PAYLOAD:")) return true;
+    
     if (t.includes("Introduction:\nCandidate:")) return true;
-    if (v === "LIVE_SCREENING" || v === "NO_VIDEO") return true;
-    if (v && v !== "LIVE_SCREENING" && v !== "NO_VIDEO") return false;
-    return true; 
+    if (t.includes("Pre-recorded interview video uploaded")) return false;
+    
+    if (v === "LIVE_SCREENING" || v === "NO_VIDEO" || v === "") return true;
+    return false;
   }, []);
 
   const initialScreeningData = useMemo(() => results.filter(r => isInitialScreening(r)), [results, isInitialScreening]);

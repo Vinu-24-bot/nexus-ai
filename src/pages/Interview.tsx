@@ -245,7 +245,6 @@ export default function InterviewPage() {
     "Finalizing Enterprise Report..."
   ];
 
-  // 🛡️ THE FIX: Enforce persistent caching for timer and voice
   useEffect(() => {
     if (state?.durationMinutes) localStorage.setItem(`forgepro_duration_${sessionId}`, state.durationMinutes.toString());
     if (state?.voiceGender) localStorage.setItem(`forgepro_voice_${sessionId}`, state.voiceGender);
@@ -285,7 +284,8 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
-          const targetQCount = durationMinutes >= 15 ? 25 : 20;
+          const actualDuration = Number(localStorage.getItem(`forgepro_duration_${sessionId}`)) || session.duration_minutes || 10;
+          const targetQCount = actualDuration >= 15 ? 25 : 20;
           
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -300,7 +300,7 @@ export default function InterviewPage() {
       };
       fetchSessionDetails();
     }
-  }, [sessionId, state, navigate, durationMinutes]);
+  }, [sessionId, state, navigate]);
 
   useEffect(() => {
     if (interviewStep === "submitting") {
@@ -832,7 +832,7 @@ export default function InterviewPage() {
          avg_latency: parseFloat(avgLatency as string),
          interview_duration_seconds: totalElapsed
       });
-      // 🛡️ THE FIX: Hardcode [TYPE:INITIAL_SCREENING] into remarks payload. This is 100% foolproof for the Dashboard filter.
+      // 🛡️ THE FIX: Force METRICS_PAYLOAD so History/Dashboard always knows it's an Initial Screening
       const hybridRemarks = `[TYPE:INITIAL_SCREENING] ${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
       await submitEvaluation({
