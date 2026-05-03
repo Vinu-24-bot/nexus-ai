@@ -93,7 +93,6 @@ class AudioQueueManager {
       const voices = window.speechSynthesis.getVoices();
       const isFemale = gender === "female";
       
-      // 🚀 THE FIX: Aggressive browser TTS matching. Defaults to a female voice (Zira/Google US) if targeted matching fails.
       const targetKeywords = isFemale ? ["female", "woman", "zira", "samantha", "karen", "google us english"] : ["male", "man", "guy", "david", "mark"];
       let bestMatch = null;
       let highestScore = -1;
@@ -110,7 +109,6 @@ class AudioQueueManager {
       if (bestMatch) {
           utterance.voice = bestMatch;
       } else if (isFemale) {
-          // Absolute fallback if it fails to find "female" keywords
           utterance.voice = voices.find(v => v.name.includes("Zira") || v.name.includes("Google US English")) || voices[0];
       }
 
@@ -274,7 +272,6 @@ export default function InterviewPage() {
   const isMale = rawVoice === "male" || rawVoice === "en-us-guyneural";
   const voiceGender = isMale ? "male" : "female";
   
-  // 🚀 THE FIX: Harden state retrieval for 15-minute selection
   const sessionDurationState = Number(state?.durationMinutes);
   const sessionDurationDB = Number(fetchedData?.duration_minutes);
   const storedDuration = parseInt(localStorage.getItem(`forgepro_duration_${sessionId}`) || "0");
@@ -391,6 +388,7 @@ export default function InterviewPage() {
       if (!document.fullscreenElement && !isTerminatingRef.current) handleSecurityViolation("Exited Full-Screen Mode");
     };
 
+    // 🚀 THE FIX: Zero-Tolerance ESC key and generalized keyboard warnings
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isTerminatingRef.current) return;
       const allowedKeys = ["AudioVolumeUp", "AudioVolumeDown", "AudioVolumeMute", "MediaPlayPause", "BrightnessUp", "BrightnessDown"];
@@ -400,9 +398,9 @@ export default function InterviewPage() {
       e.stopPropagation();
 
       if (e.key === "Escape") {
-        handleSecurityViolation("Candidate attempted to bypass lock with ESC key.");
+        handleForceEndInterview(true, "SECURITY BREACH: Candidate pressed the ESC key. Zero-tolerance termination.");
       } else {
-        handleSecurityViolation("Keyboard is locked. Do not press keys.");
+        handleSecurityViolation(`Keyboard is locked. Do not press keys. (${e.key})`);
       }
     };
 
@@ -433,20 +431,23 @@ export default function InterviewPage() {
       window.removeEventListener("mousedown", handleMouseClick, { capture: true });
       window.removeEventListener("contextmenu", handleContextMenu);
     };
-  }, [interviewStep, handleSecurityViolation]);
+  }, [interviewStep, handleSecurityViolation, handleForceEndInterview]);
 
+  // 🚀 THE FIX: Advanced Pixel-Delta Analyzer (Checks every 1.5 seconds)
   const startSecurityTelemetry = () => {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    let lastImageData: ImageData | null = null;
-    let noMovementCounter = 0;
+    
+    let referenceImageData: ImageData | null = null;
+    let lastRefTime = Date.now();
+    let staticIntervals = 0;
 
     const checkTelemetry = () => {
       if (isTerminatingRef.current) return;
       
       const isVisible = !document.hidden;
       let faces = isVisible ? 1 : 0;
-      let liveness = isVisible ? 99 : 45;
+      let currentLiveness = isVisible ? 99 : 15;
 
       if (isVisible && ctx && videoRef.current && videoRef.current.videoWidth > 0) {
         canvas.width = 64; canvas.height = 64;
@@ -454,34 +455,47 @@ export default function InterviewPage() {
           ctx.drawImage(videoRef.current, 0, 0, 64, 64);
           const currentData = ctx.getImageData(0, 0, 64, 64);
           
-          if (lastImageData) {
-              let diff = 0;
-              for (let i = 0; i < currentData.data.length; i += 4) {
-                  diff += Math.abs(currentData.data[i] - lastImageData.data[i]);
-              }
-              
-              // 🚀 THE FIX: Increased threshold to 35,000 to ignore webcam sensor grain/noise
-              if (diff < 35000) {
-                  noMovementCounter++;
-              } else {
-                  noMovementCounter = 0;
-              }
-          }
-          lastImageData = currentData;
+          const now = Date.now();
           
-          // 60 frames = roughly 4 to 5 seconds of zero movement
-          if (noMovementCounter > 60) {
-              faces = 0;
-              liveness = 12;
-              handleSecurityViolation("Candidate face moved out of frame or camera is covered.");
-              noMovementCounter = -30; // Debounce to prevent immediate double strikes
+          if (!referenceImageData) {
+            referenceImageData = currentData;
+            lastRefTime = now;
+          } else {
+            let diff = 0;
+            for (let i = 0; i < currentData.data.length; i += 4) {
+                diff += Math.abs(currentData.data[i] - referenceImageData.data[i]);
+            }
+            
+            // Dynamic Liveness Percentage Math based on human micro-movements
+            currentLiveness = Math.min(99, Math.max(12, Math.floor((diff / 40000) * 100)));
+
+            // Every 1.5 seconds, we evaluate the gap.
+            if (now - lastRefTime > 1500) {
+                // If diff is under 20k over a 1.5s window, the camera is either covered or a static picture.
+                if (diff < 20000) {
+                    staticIntervals++;
+                } else {
+                    staticIntervals = 0; 
+                }
+                
+                referenceImageData = currentData;
+                lastRefTime = now;
+
+                // 3 intervals = 4.5 seconds of dead feed
+                if (staticIntervals >= 3) {
+                    faces = 0;
+                    currentLiveness = 12;
+                    handleSecurityViolation("Camera feed is completely frozen or covered.");
+                    staticIntervals = -2; // Debounce to prevent instant double strikes
+                }
+            }
           }
         } catch (e) {
           // Fallback if cross-origin canvas throws error
         }
       }
 
-      setTelemetry({ faces, liveness, lipSync: true, mask: false });
+      setTelemetry({ faces, liveness: currentLiveness, lipSync: true, mask: false });
       if (!isVisible) handleSecurityViolation("Candidate switched tabs or minimized browser.");
       
       securityLoopRef.current = requestAnimationFrame(checkTelemetry);
@@ -894,7 +908,6 @@ export default function InterviewPage() {
          avg_latency: parseFloat(avgLatency as string),
          interview_duration_seconds: totalElapsed
       });
-      // 🛡️ THE FIX: Embed [TYPE:INITIAL_SCREENING] permanently into remarks payload.
       const hybridRemarks = `[TYPE:INITIAL_SCREENING] ${baseReason} METRICS_PAYLOAD:${metricsPayload}`;
 
       await submitEvaluation({
@@ -1037,7 +1050,8 @@ export default function InterviewPage() {
                 <li className="flex items-start gap-3"><Volume2 className="w-5 h-5 text-accent shrink-0" /> <strong>PRE-FLIGHT CHECK:</strong> Connect your Bluetooth headphones/mic and adjust volume & brightness NOW. You cannot change this later.</li>
                 <li className="flex items-start gap-3"><ScanFace className="w-5 h-5 text-primary shrink-0" /> <strong>Identity & Mask Check:</strong> Face must be clearly visible. Masks or multiple faces will trigger termination.</li>
                 <li className="flex items-start gap-3"><Eye className="w-5 h-5 text-primary shrink-0" /> <strong>Liveness & Lip-Sync:</strong> AI tracks micro-movements to prevent spoofing or deepfakes.</li>
-                <li className="flex items-start gap-3"><Keyboard className="w-5 h-5 text-destructive shrink-0" /> <strong>HARDWARE LOCK:</strong> Keyboard and Mouse are strictly disabled during the interview. Do NOT press ESC or click randomly (Termination on 3rd warning).</li>
+                {/* 🚀 THE FIX: Explicit Warning Text about the new Zero-Tolerance ESC protocol */}
+                <li className="flex items-start gap-3"><Keyboard className="w-5 h-5 text-destructive shrink-0" /> <div><strong>HARDWARE LOCK:</strong> Keyboard and Mouse are strictly disabled during the interview. <span className="text-destructive font-bold">Pressing the ESC key will result in INSTANT TERMINATION.</span> Other invalid keys result in termination on the 3rd warning.</div></li>
               </ul>
             </motion.div>
             <motion.div variants={fadeUp}>
