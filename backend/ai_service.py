@@ -71,7 +71,7 @@ You are running a deep-dive evaluation. You have the Target Role, the Job Descri
 *** ENTERPRISE EVALUATION PROTOCOL ***
 1. HOLISTIC MATCHING: Your final scores MUST explicitly reflect the alignment between the [CANDIDATE_RESUME], the [JOB_DESCRIPTION], the [TARGET_ROLE], and the relevancy of their answers in the [INTERVIEW_TRANSCRIPT].
 2. L1 TECH ROUND: If the transcript explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
-3. STRICT SCORING: Provide a highly accurate, RUTHLESS score out of 100 based strictly on the evidence. DO NOT HALLUCINATE COMPETENCE. If the candidate gives vague, short, or skipped answers, the score MUST be below 40.
+3. STRICT SCORING: Provide a highly accurate, RUTHLESS score out of 100 based strictly on the evidence. DO NOT HALLUCINATE COMPETENCE. If the candidate gives vague, short, or skipped answers, the score MUST be below 40. If the interview was aborted early or contains almost no technical answers, apply a massive penalty and score it below 20. 
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
@@ -200,12 +200,18 @@ async def generate_speech_audio(text: str, gender: str = "female") -> bytes:
             
     return audio_data
 
+# 🚀 UPGRADE: Hardened transcription accuracy via AI context prompting and English locking
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
     async with httpx.AsyncClient(timeout=120) as client:
         with open(file_path, "rb") as audio_file:
             files = {"file": (os.path.basename(file_path), audio_file, "audio/mpeg")}
-            data = {"model": "whisper-large-v3", "response_format": "text"}
+            data = {
+                "model": "whisper-large-v3", 
+                "response_format": "text",
+                "language": "en",
+                "prompt": "Technical software engineering interview transcript discussing coding, system design, scalable architecture, frameworks, algorithms, and logical problem solving."
+            }
             url = "https://api.groq.com/openai/v1/audio/transcriptions"
             resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, files=files, data=data)
             resp.raise_for_status()
@@ -307,7 +313,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     except Exception as e:
         return _validate_result({})
 
-    # 🚀 THE FIX: HARD PYTHON MATH OVERRIDE. Stops AI from hallucinating a good score on a 30s interview!
     if total_spoken_words < 30 and not "(Pre-recorded" in transcript_safe:
         result["scores"]["technical_proficiency"] = min(result["scores"].get("technical_proficiency", 0), 15)
         result["scores"]["relevance_to_jd"] = min(result["scores"].get("relevance_to_jd", 0), 15)

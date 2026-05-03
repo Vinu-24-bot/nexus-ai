@@ -226,16 +226,20 @@ async def stream_video(filename: str, request: Request):
 async def create_interview_session(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
         data = await request.json()
+        
+        # 🚀 UPGRADE: Foolproof Config Injector. Bypasses schema errors entirely.
+        dur = int(data.get("duration_minutes", 10))
+        voice = str(data.get("voice_type", "female"))
+        jd = data.get("job_description", "")
+        config_str = f"\n\n[FORGEPRO_CONFIG] {json.dumps({'dur': dur, 'voice': voice})}"
+        
         new_session = InterviewSession(
             candidate_name=data.get("candidate_name", "Unknown"), candidate_email=data.get("candidate_email", ""),
             recruiter_email=data.get("recruiter_email", ""), interview_level=data.get("interview_level", "L2 (Mid-Level)"),
-            position=data.get("position", "Technical Role"), job_description=data.get("job_description", ""),
+            position=data.get("position", "Technical Role"), job_description=jd + config_str,
             resume_text=data.get("resume_text", ""), status="pending"
         )
-        dur = int(data.get("duration_minutes", 10))
-        voice = str(data.get("voice_type", "female"))
-        metadata = json.dumps({"duration_minutes": dur, "voice_type": voice})
-        new_session.remarks = metadata
+        
         db.add(new_session)
         db.commit()
         db.refresh(new_session)
@@ -261,14 +265,21 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     if not session: raise HTTPException(status_code=404, detail="This interview link does not exist.")
     if datetime.utcnow() - session.created_at > timedelta(hours=24): raise HTTPException(status_code=403, detail="This interview link has expired (24-hour limit). Please contact your recruiter.")
     if session.status != "pending": raise HTTPException(status_code=403, detail="This interview session has already been attempted or completed and is now permanently locked.")
+    
+    # 🚀 UPGRADE: Unpacking the Foolproof Config
+    jd = session.job_description or ""
     dur = 10
     voice = "female"
-    try:
-        meta = json.loads(session.remarks) if session.remarks else {}
-        dur = meta.get("duration_minutes", 10)
-        voice = meta.get("voice_type", "female")
-    except: pass
-    return { "id": session.id, "candidate_name": session.candidate_name, "position": session.position, "job_description": session.job_description, "resume_text": session.resume_text, "interview_level": session.interview_level, "duration_minutes": dur, "voice_gender": voice, "status": session.status }
+    if "[FORGEPRO_CONFIG]" in jd:
+        parts = jd.split("[FORGEPRO_CONFIG]")
+        jd = parts[0].strip()
+        try:
+            config = json.loads(parts[1].strip())
+            dur = config.get("dur", 10)
+            voice = config.get("voice", "female")
+        except: pass
+        
+    return { "id": session.id, "candidate_name": session.candidate_name, "position": session.position, "job_description": jd, "resume_text": session.resume_text, "interview_level": session.interview_level, "duration_minutes": dur, "voice_gender": voice, "status": session.status }
 
 @app.patch("/api/sessions/{session_id}/status")
 async def update_session_status(session_id: str, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):

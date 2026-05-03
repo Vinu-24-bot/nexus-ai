@@ -233,8 +233,9 @@ export default function InterviewPage() {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
-  // 🚀 THE FIX: Single source of truth for duration. No more variable shadowing or race conditions.
+  // 🚀 UPGRADE: Hard State Binding for Timer & Voice 
   const [durationMinutes, setDurationMinutes] = useState(10);
+  const [voiceGender, setVoiceGender] = useState<"indian_female" | "female" | "male">("female");
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const totalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -267,35 +268,42 @@ export default function InterviewPage() {
     "Finalizing Enterprise Report..."
   ];
 
+  // 🚀 THE FIX: This single useEffect rules them all and prevents Stale Closures
   useEffect(() => {
     let dur = 10;
-    if (state?.durationMinutes) {
-        dur = state.durationMinutes;
-    } else if (fetchedData?.duration_minutes) {
-        dur = fetchedData.duration_minutes;
+    let v: "indian_female" | "female" | "male" = "female";
+
+    // 1. Process Duration
+    const sourceDur = state?.durationMinutes || fetchedData?.duration_minutes;
+    if (sourceDur) {
+        dur = Number(sourceDur);
     } else {
         const stored = parseInt(localStorage.getItem(`forgepro_duration_${sessionId}`) || "0");
         if (stored > 0) dur = stored;
     }
+
+    // 2. Process Voice
+    const sourceVoice = String(state?.voiceGender || fetchedData?.voice_gender || localStorage.getItem(`forgepro_voice_${sessionId}`) || "female").toLowerCase();
+    if (sourceVoice.includes("indian") || sourceVoice === "indian_female") {
+        v = "indian_female";
+    } else if (sourceVoice.includes("male") || sourceVoice.includes("guy")) {
+        v = "male";
+    }
+
+    // 3. Lock State
     setDurationMinutes(dur);
-    
-    if (state?.durationMinutes) localStorage.setItem(`forgepro_duration_${sessionId}`, state.durationMinutes.toString());
-    if (state?.voiceGender) localStorage.setItem(`forgepro_voice_${sessionId}`, state.voiceGender);
+    setVoiceGender(v);
+
+    // 4. Update LocalStorage 
+    if (dur > 0) localStorage.setItem(`forgepro_duration_${sessionId}`, dur.toString());
+    if (v) localStorage.setItem(`forgepro_voice_${sessionId}`, v);
+
   }, [state, fetchedData, sessionId]);
 
   const candidateName = state?.candidateName || fetchedData?.candidate_name || "Candidate";
   const position = state?.position || fetchedData?.position || "Technical Role";
   const jobDescription = state?.jobDescription || fetchedData?.job_description || "";
   const resume = state?.resume || fetchedData?.resume_text || "";
-  
-  const rawVoice = String(state?.voiceGender || localStorage.getItem(`forgepro_voice_${sessionId}`) || fetchedData?.voice_gender || "female").toLowerCase();
-  
-  let voiceGender: "indian_female" | "female" | "male" = "female";
-  if (rawVoice === "indian_female" || rawVoice === "indian accent") {
-     voiceGender = "indian_female";
-  } else if (rawVoice === "male" || rawVoice === "en-us-guyneural") {
-     voiceGender = "male";
-  }
   
   const rawQuestions = state?.questions || fetchedData?.questions || [];
   
@@ -309,7 +317,6 @@ export default function InterviewPage() {
   const currentQuestion = introPhase ? null : (finalQuestionsList[currentQ] || null);
   const progress = totalQuestions > 0 ? (Math.max(0, currentQ) / totalQuestions) * 100 : 0;
   
-  // 🚀 THE FIX: This now uses the safe, locked-in React State value.
   const timeRemaining = Math.max(0, (durationMinutes * 60) - totalElapsed);
 
   useEffect(() => {
@@ -319,7 +326,8 @@ export default function InterviewPage() {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
-          const actualDuration = Number(localStorage.getItem(`forgepro_duration_${sessionId}`)) || session.duration_minutes || 10;
+          
+          const actualDuration = session.duration_minutes || Number(localStorage.getItem(`forgepro_duration_${sessionId}`)) || 10;
           const targetQCount = actualDuration >= 15 ? 25 : 20;
           
           const qRes = await fetch(`${API_URL}/generate-questions`, {
@@ -451,7 +459,6 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation, handleForceEndInterview]);
 
-  // 🚀 THE FIX: Purged the "Frozen Pixel" trap. The vault now ONLY strikes if the camera is physically covered (Darkness).
   const startSecurityTelemetry = () => {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -496,7 +503,6 @@ export default function InterviewPage() {
             currentLiveness = Math.min(99, Math.max(12, Math.floor((diff / 40000) * 100)));
 
             if (now - lastRefTime > 1500) {
-                // If the screen is pitch black, the camera is covered.
                 if (avgBrightness < 10) {
                     staticIntervals++;
                 } else {
