@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Mic, ChevronRight, Loader2, ScanFace, Activity,
   Brain, CheckCircle2, Volume2, Clock, ShieldAlert, Star, Send, ShieldX, ShieldCheck,
-  Eye, Keyboard, LogOut, Timer, Cpu, UserX
+  Eye, Keyboard, LogOut, Timer, UserX
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,18 +18,18 @@ const API_BASE = import.meta.env.VITE_API_URL ||
 const API_URL = `${API_BASE}/api`;
 
 interface InterviewQuestion { id: number; question: string; category: string; difficulty: string; }
-interface LocationState { candidateName: string; position: string; jobDescription: string; resume: string; questions: InterviewQuestion[]; voiceGender: "female" | "male"; durationMinutes: number; }
+interface LocationState { candidateName: string; position: string; jobDescription: string; resume: string; questions: InterviewQuestion[]; voiceGender: "indian_female" | "female" | "male"; durationMinutes: number; }
 interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob | null; }
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
 class AudioQueueManager {
-  private queue: {text: string, gender: "female" | "male", resolve: () => void}[] = [];
+  private queue: {text: string, gender: "indian_female" | "female" | "male", resolve: () => void}[] = [];
   public isPlaying = false;
   private currentAudio: HTMLAudioElement | null = null;
   private currentUtterance: SpeechSynthesisUtterance | null = null;
   
-  async speak(text: string, gender: "female" | "male"): Promise<void> {
+  async speak(text: string, gender: "indian_female" | "female" | "male"): Promise<void> {
     return new Promise((resolve) => {
       this.queue.push({text, gender, resolve});
       if (!this.isPlaying) {
@@ -91,16 +91,24 @@ class AudioQueueManager {
     return new Promise((resolve) => {
       const utterance = new SpeechSynthesisUtterance(text);
       const voices = window.speechSynthesis.getVoices();
+      
+      const isIndian = gender === "indian_female";
       const isFemale = gender === "female";
       
-      const targetKeywords = isFemale ? ["female", "woman", "zira", "samantha", "karen", "google us english"] : ["male", "man", "guy", "david", "mark"];
+      const targetKeywords = isIndian ? ["india", "en-in", "ravi", "heera", "aditi"] : 
+                             isFemale ? ["female", "woman", "zira", "samantha", "karen", "google us english"] : 
+                             ["male", "man", "guy", "david", "mark"];
+                             
       let bestMatch = null;
       let highestScore = -1;
 
       for (const v of voices) {
         if (!v.lang.startsWith("en")) continue;
         let score = 0;
-        if (v.lang === "en-US") score += 5; 
+        
+        if (isIndian && v.lang === "en-IN") score += 10;
+        else if (!isIndian && v.lang === "en-US") score += 5; 
+        
         if (targetKeywords.some(k => v.name.toLowerCase().includes(k))) score += 10;
         
         if (score > highestScore) { highestScore = score; bestMatch = v; }
@@ -108,12 +116,12 @@ class AudioQueueManager {
 
       if (bestMatch) {
           utterance.voice = bestMatch;
-      } else if (isFemale) {
+      } else if (isFemale || isIndian) {
           utterance.voice = voices.find(v => v.name.includes("Zira") || v.name.includes("Google US English")) || voices[0];
       }
 
       utterance.rate = 1.0; 
-      utterance.pitch = isFemale ? 1.1 : 0.95;
+      utterance.pitch = (isFemale || isIndian) ? 1.1 : 0.95;
       this.currentUtterance = utterance;
       
       utterance.onend = () => { this.currentUtterance = null; resolve(); };
@@ -225,6 +233,9 @@ export default function InterviewPage() {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
+  // 🚀 THE FIX: Strictly bind duration state to eliminate React race-conditions 
+  const [durationMinutes, setDurationMinutes] = useState(10);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const totalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -257,28 +268,35 @@ export default function InterviewPage() {
   ];
 
   useEffect(() => {
-    if (state?.durationMinutes) localStorage.setItem(`forgepro_duration_${sessionId}`, state.durationMinutes.toString());
-    if (state?.voiceGender) localStorage.setItem(`forgepro_voice_${sessionId}`, state.voiceGender);
+    if (state?.durationMinutes) {
+      setDurationMinutes(state.durationMinutes);
+      localStorage.setItem(`forgepro_duration_${sessionId}`, state.durationMinutes.toString());
+    }
+    if (state?.voiceGender) {
+      localStorage.setItem(`forgepro_voice_${sessionId}`, state.voiceGender);
+    }
   }, [state, sessionId]);
+
+  useEffect(() => {
+    if (fetchedData) {
+      const actualDur = Number(localStorage.getItem(`forgepro_duration_${sessionId}`)) || fetchedData.duration_minutes || 10;
+      setDurationMinutes(actualDur);
+    }
+  }, [fetchedData, sessionId]);
 
   const candidateName = state?.candidateName || fetchedData?.candidate_name || "Candidate";
   const position = state?.position || fetchedData?.position || "Technical Role";
   const jobDescription = state?.jobDescription || fetchedData?.job_description || "";
   const resume = state?.resume || fetchedData?.resume_text || "";
   
-  const storedVoice = localStorage.getItem(`forgepro_voice_${sessionId}`);
-  const rawVoice = String(state?.voiceGender || storedVoice || fetchedData?.voice_gender || "female").toLowerCase();
+  const rawVoice = String(state?.voiceGender || localStorage.getItem(`forgepro_voice_${sessionId}`) || fetchedData?.voice_gender || "female").toLowerCase();
   
-  const isMale = rawVoice === "male" || rawVoice === "en-us-guyneural";
-  const voiceGender = isMale ? "male" : "female";
-  
-  const sessionDurationState = Number(state?.durationMinutes);
-  const sessionDurationDB = Number(fetchedData?.duration_minutes);
-  const storedDuration = parseInt(localStorage.getItem(`forgepro_duration_${sessionId}`) || "0");
-  
-  const durationMinutes = sessionDurationState > 0 ? sessionDurationState : 
-                         (storedDuration > 0 ? storedDuration : 
-                         (sessionDurationDB > 0 ? sessionDurationDB : 10));
+  let voiceGender: "indian_female" | "female" | "male" = "female";
+  if (rawVoice === "indian_female" || rawVoice === "indian accent") {
+     voiceGender = "indian_female";
+  } else if (rawVoice === "male" || rawVoice === "en-us-guyneural") {
+     voiceGender = "male";
+  }
   
   const rawQuestions = state?.questions || fetchedData?.questions || [];
   
@@ -388,7 +406,6 @@ export default function InterviewPage() {
       if (!document.fullscreenElement && !isTerminatingRef.current) handleSecurityViolation("Exited Full-Screen Mode");
     };
 
-    // 🚀 THE FIX: Zero-Tolerance ESC key and generalized keyboard warnings
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isTerminatingRef.current) return;
       const allowedKeys = ["AudioVolumeUp", "AudioVolumeDown", "AudioVolumeMute", "MediaPlayPause", "BrightnessUp", "BrightnessDown"];
@@ -462,17 +479,23 @@ export default function InterviewPage() {
             lastRefTime = now;
           } else {
             let diff = 0;
+            let totalBrightness = 0;
+            
             for (let i = 0; i < currentData.data.length; i += 4) {
-                diff += Math.abs(currentData.data[i] - referenceImageData.data[i]);
+                const r = currentData.data[i];
+                const g = currentData.data[i+1];
+                const b = currentData.data[i+2];
+                totalBrightness += (r + g + b) / 3;
+                diff += Math.abs(r - referenceImageData.data[i]) + 
+                        Math.abs(g - referenceImageData.data[i+1]) + 
+                        Math.abs(b - referenceImageData.data[i+2]);
             }
             
-            // Dynamic Liveness Percentage Math based on human micro-movements
+            const avgBrightness = totalBrightness / (64 * 64);
             currentLiveness = Math.min(99, Math.max(12, Math.floor((diff / 40000) * 100)));
 
-            // Every 1.5 seconds, we evaluate the gap.
             if (now - lastRefTime > 1500) {
-                // If diff is under 20k over a 1.5s window, the camera is either covered or a static picture.
-                if (diff < 20000) {
+                if (avgBrightness < 15 || diff < 2000) {
                     staticIntervals++;
                 } else {
                     staticIntervals = 0; 
@@ -481,12 +504,12 @@ export default function InterviewPage() {
                 referenceImageData = currentData;
                 lastRefTime = now;
 
-                // 3 intervals = 4.5 seconds of dead feed
                 if (staticIntervals >= 3) {
                     faces = 0;
                     currentLiveness = 12;
-                    handleSecurityViolation("Camera feed is completely frozen or covered.");
-                    staticIntervals = -2; // Debounce to prevent instant double strikes
+                    const reason = avgBrightness < 15 ? "Camera is physically covered or completely dark." : "Camera feed is completely frozen (software lock).";
+                    handleSecurityViolation(reason);
+                    staticIntervals = -2;
                 }
             }
           }
@@ -1050,7 +1073,6 @@ export default function InterviewPage() {
                 <li className="flex items-start gap-3"><Volume2 className="w-5 h-5 text-accent shrink-0" /> <strong>PRE-FLIGHT CHECK:</strong> Connect your Bluetooth headphones/mic and adjust volume & brightness NOW. You cannot change this later.</li>
                 <li className="flex items-start gap-3"><ScanFace className="w-5 h-5 text-primary shrink-0" /> <strong>Identity & Mask Check:</strong> Face must be clearly visible. Masks or multiple faces will trigger termination.</li>
                 <li className="flex items-start gap-3"><Eye className="w-5 h-5 text-primary shrink-0" /> <strong>Liveness & Lip-Sync:</strong> AI tracks micro-movements to prevent spoofing or deepfakes.</li>
-                {/* 🚀 THE FIX: Explicit Warning Text about the new Zero-Tolerance ESC protocol */}
                 <li className="flex items-start gap-3"><Keyboard className="w-5 h-5 text-destructive shrink-0" /> <div><strong>HARDWARE LOCK:</strong> Keyboard and Mouse are strictly disabled during the interview. <span className="text-destructive font-bold">Pressing the ESC key will result in INSTANT TERMINATION.</span> Other invalid keys result in termination on the 3rd warning.</div></li>
               </ul>
             </motion.div>
@@ -1118,7 +1140,6 @@ export default function InterviewPage() {
             
             <div className="absolute bottom-4 left-4 flex gap-2">
               <span className="bg-black/60 backdrop-blur-md text-xs px-2.5 py-1 rounded-md text-white/90 font-mono border border-white/10">LIVENESS: {telemetry.liveness}%</span>
-              <span className="bg-black/60 backdrop-blur-md text-xs px-2.5 py-1 rounded-md text-white/90 font-mono border border-white/10 flex items-center gap-1"><Timer className="w-3 h-3"/> {currentLatencyDisplay}</span>
             </div>
           </div>
         </div>
@@ -1154,9 +1175,6 @@ export default function InterviewPage() {
                   <Mic className={`w-4 h-4 ${isRecording && !isSpeaking ? "text-green-500 animate-pulse" : "text-muted-foreground"}`} />
                   <span className="text-sm font-bold text-foreground uppercase tracking-wider">Live Transcript</span>
                 </div>
-                <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1 px-2 py-0.5 rounded border border-border/50" title="Active Speech Engine">
-                   <Cpu className="w-3 h-3 text-primary" /> Whisper Neural Engine
-                </span>
               </div>
               
               <div className="flex-1 bg-background/50 rounded-lg p-4 border border-border/30 min-h-[120px] max-h-[160px] overflow-y-auto mb-4">

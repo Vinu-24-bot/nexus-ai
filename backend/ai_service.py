@@ -71,7 +71,7 @@ You are running a deep-dive evaluation. You have the Target Role, the Job Descri
 *** ENTERPRISE EVALUATION PROTOCOL ***
 1. HOLISTIC MATCHING: Your final scores MUST explicitly reflect the alignment between the [CANDIDATE_RESUME], the [JOB_DESCRIPTION], the [TARGET_ROLE], and the relevancy of their answers in the [INTERVIEW_TRANSCRIPT].
 2. L1 TECH ROUND: If the transcript explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
-3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence. If the candidate answered only 1 or 2 questions and left early, evaluate those specific answers accurately and give them a proportional partial score. Do NOT give a 0/100 if they provided valid technical answers before leaving. Apply a penalty to their overall score for incomplete data.
+3. STRICT SCORING: Provide a highly accurate, RUTHLESS score out of 100 based strictly on the evidence. DO NOT HALLUCINATE COMPETENCE. If the candidate gives vague, short, or skipped answers, the score MUST be below 40. If the interview was aborted early or contains almost no technical answers, apply a massive penalty and score it below 20. 
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
@@ -184,7 +184,13 @@ async def generate_speech_audio(text: str, gender: str = "female") -> bytes:
     if not EDGE_TTS_AVAILABLE:
         raise RuntimeError("edge_tts is not installed. To use neural voices, run: pip install edge-tts")
         
-    voice = "en-US-JennyNeural" if gender == "female" else "en-US-GuyNeural"
+    if gender == "male":
+        voice = "en-US-GuyNeural"
+    elif gender == "indian_female":
+        voice = "en-IN-NeerjaNeural"
+    else:
+        voice = "en-US-JennyNeural"
+
     communicate = edge_tts.Communicate(text, voice=voice, rate="+5%")
     
     audio_data = b""
@@ -262,14 +268,15 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     try: return await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.1-8b-instant", prioritize_gemini=True)
     except: return {"candidate_info": {"name": "Extraction Error", "email": "Error", "phone": "Error", "links": []}, "executive_summary": "Parsing failed.", "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []}, "experience_and_projects": [], "education_and_certifications": []}
 
-async def evaluate_candidate(job_description: str, resume: str, transcript: str, position: str, behavior_data: dict = None) -> dict:
+async def evaluate_candidate(job_description: str, resume: str, transcript: str, position: str, remarks: str, behavior_data: dict = None) -> dict:
     behavior_data = behavior_data or {}
     jd_safe = job_description or "Standard IT Role"
     resume_safe = resume or "No Resume Provided"
     pos_safe = position or "Technical Role"
+    remarks_safe = remarks or ""
     transcript_safe = (transcript or "(No transcript generated)").replace("(No speech detected)", "").strip()
 
-    is_breach = "SECURITY BREACH" in transcript_safe.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
+    is_breach = "SECURITY BREACH" in transcript_safe.upper() or "SECURITY BREACH" in remarks_safe.upper()
 
     candidate_only_text = " ".join(re.findall(r'A\d+: (.*?)(?=\n\nQ|\Z)', transcript_safe, re.DOTALL | re.IGNORECASE))
     intro_match = re.search(r'Introduction:\s*Candidate: (.*?)(?=\n\nQ|\Z)', transcript_safe, re.DOTALL | re.IGNORECASE)
@@ -289,11 +296,11 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
             "red_flags_or_weaknesses": ["CRITICAL: Candidate triggered a security protocol."],
             "dynamic_follow_up_questions": [],
             "hiring_recommendation": "Reject",
-            "justification": "CRITICAL PENALTY: Zero-Tolerance Engine Activated. Score locked to 0/100."
+            "justification": "CRITICAL PENALTY: Zero-Tolerance Engine Activated. Candidate violated testing conditions. Score locked to 0/100."
         }
         
     if total_spoken_words < 30 and not "(Pre-recorded interview video uploaded" in transcript_safe:
-         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered only a few questions (Total Words: {total_spoken_words}). Do NOT give a flat 0/100. Evaluate the specific answers they DID provide and give them proportional partial credit (e.g., if they answered 1 out of 5 questions well, give them a 20/100). Penalize the overall score for incomplete data, but NEVER output a 0 if they answered valid technical questions."
+         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered almost no questions (Total Words: {total_spoken_words}). You MUST apply a massive penalty to their score. DO NOT score them above 30/100 under any circumstances."
 
     avg_latency = behavior_data.get("avg_latency", 0)
     if avg_latency > 0:
@@ -345,7 +352,6 @@ async def generate_jd(position: str) -> str:
     return await _call_groq_text(prompt)
 
 async def get_answer_acknowledgment(question: str, answer: str, next_question: str = None) -> dict:
-    # 🚀 THE FIX: Python-level Hard Stop for candidate skipping questions
     skip_phrases = ["don't know", "dont know", "no idea", "pass", "skip", "move on", "not sure", "no clue", "haven't heard", "havent heard"]
     answer_lower = answer.lower()
     
