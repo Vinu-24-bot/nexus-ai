@@ -139,7 +139,6 @@ def upload_to_hf_sync(file_path: Path, filename: str) -> str:
         print(f"[BATS ForgePro] HF Upload failed: {e}")
         return None
 
-# 🚀 THE FIX: The automated script to construct your proprietary Fine-Tuning dataset!
 def append_to_hf_dataset(eval_data: dict, candidate_id: str):
     """
     Creates a fine-tuning record: 
@@ -454,7 +453,6 @@ async def acknowledge_answer(req: AcknowledgmentRequest):
         print(f"[BATS] Acknowledge error: {e}")
         return {"response_text": "Got it. Let's move on to the next question.", "is_sufficient": True}
 
-# 🚀 THE FIX: Passed background_tasks and dynamically injected position for the ML Data Flywheel
 @app.post("/api/evaluate")
 async def create_evaluation(req: EvaluationRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
@@ -487,7 +485,6 @@ async def create_evaluation(req: EvaluationRequest, background_tasks: Background
                 behavior_data = json.loads(parts[1])
             except: pass
 
-        # Calling the newly updated function that accepts 'position'
         ai_result = await evaluate_candidate(req.job_description, req.resume, final_transcript, req.position, behavior_data)
         candidate_id = generate_candidate_id(req.candidate_name, req.position)
 
@@ -510,7 +507,6 @@ async def create_evaluation(req: EvaluationRequest, background_tasks: Background
         response_data = db_to_response(evaluation)
         save_result_file(evaluation.id, evaluation.candidate_name, response_data)
         
-        # 🚀 THE FIX: Queue the dataset append task to run silently in the background
         dataset_payload = {
             "position": req.position,
             "job_description": req.job_description,
@@ -548,13 +544,61 @@ async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db:
     db.refresh(ev)
     return db_to_response(ev)
 
+# 🚀 THE FIX: Nuclear Erase implemented with Background Tasks
 @app.delete("/api/evaluations/{eval_id}")
-async def delete_evaluation(eval_id: str, db: Session = Depends(get_db)):
+async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
-    if not ev: raise HTTPException(404, "Evaluation not found")
+    if not ev: 
+        raise HTTPException(404, "Evaluation not found")
+
+    # 1. Grab the filenames before we delete the database record
+    video_filename = ev.video_filename
+    candidate_id = ev.id
+
+    # 2. Delete from Postgres Database
     db.delete(ev)
     db.commit()
-    return {"message": "Deleted successfully"}
+
+    # 3. The Nuclear Cleanup Function (Runs in the background)
+    def cleanup_cloud_files(v_file: str, c_id: str):
+        hf_token = os.getenv("HF_TOKEN")
+        hf_repo_id = os.getenv("HF_REPO_ID")
+        
+        # Clean up local Render storage
+        if v_file:
+            actual_filename = v_file.replace("[UPLOADED]", "").strip()
+            local_vid = RECORDINGS_DIR / actual_filename
+            local_audio = RECORDINGS_DIR / f"{actual_filename}.mp3"
+            
+            if local_vid.exists():
+                try: os.remove(local_vid)
+                except: pass
+            if local_audio.exists():
+                try: os.remove(local_audio)
+                except: pass
+
+            # Clean up Hugging Face Video Storage
+            if "[UPLOADED]" in v_file and hf_token and hf_repo_id:
+                try:
+                    from huggingface_hub import HfApi
+                    api = HfApi()
+                    api.delete_file(path_in_repo=f"recordings/{actual_filename}", repo_id=hf_repo_id, token=hf_token)
+                except Exception as e:
+                    print(f"[BATS ForgePro] HF Video Delete Error: {e}")
+
+        # Clean up Hugging Face Training Dataset JSON
+        if hf_token and hf_repo_id:
+            try:
+                from huggingface_hub import HfApi
+                api = HfApi()
+                api.delete_file(path_in_repo=f"training_data/{c_id}.json", repo_id=hf_repo_id, token=hf_token)
+            except Exception as e:
+                print(f"[BATS ForgePro] HF Dataset Delete Error: {e}")
+
+    # Fire the cleanup task silently
+    background_tasks.add_task(cleanup_cloud_files, video_filename, candidate_id)
+
+    return {"message": "Candidate deleted successfully and cloud storage cleanup initiated"}
 
 @app.get("/api/stats")
 async def get_stats(db: Session = Depends(get_db)):
