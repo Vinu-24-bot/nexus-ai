@@ -65,11 +65,12 @@ def _validate_result(result: dict) -> dict:
             result[field] = "Data unavailable." if field != "scores" else { "technical_proficiency": 50, "relevance_to_jd": 50, "communication": 50, "confidence_level": 50, "overall_score": 50 }
     return result
 
+# 🚀 THE FIX: Injected [TARGET_ROLE] so the AI grades directly against the specific position
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
-You are running a deep-dive evaluation. You have the Job Description, the Candidate's Resume, the Interview Transcript, and the Behavioral Telemetry.
+You are running a deep-dive evaluation. You have the Target Role, the Job Description, the Candidate's Resume, the Interview Transcript, and the Behavioral Telemetry.
 
 *** ENTERPRISE EVALUATION PROTOCOL ***
-1. HOLISTIC MATCHING: Your final scores MUST explicitly reflect the alignment between the [CANDIDATE_RESUME], the [JOB_DESCRIPTION], and the relevancy of their answers in the [INTERVIEW_TRANSCRIPT].
+1. HOLISTIC MATCHING: Your final scores MUST explicitly reflect the alignment between the [CANDIDATE_RESUME], the [JOB_DESCRIPTION], the [TARGET_ROLE], and the relevancy of their answers in the [INTERVIEW_TRANSCRIPT].
 2. L1 TECH ROUND: If the transcript explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
 3. SCORING: Provide a highly accurate, fair, and justified score out of 100 based strictly on the evidence. If the candidate answered only 1 or 2 questions and left early, evaluate those specific answers accurately and give them a proportional partial score. Do NOT give a 0/100 if they provided valid technical answers before leaving. Apply a penalty to their overall score for incomplete data.
 
@@ -97,6 +98,9 @@ Synthesize the findings reliably. Output ONLY valid JSON matching this exact str
   "hiring_recommendation": "Strong Hire | Lean Hire | Reject",
   "justification": "A highly reliable, accurate, and detailed 2-paragraph explanation explicitly citing the candidate's resume, interview transcript evidence, and response latency to justify the verdict."
 }
+
+[TARGET_ROLE]
+{position}
 
 [JOB_DESCRIPTION]
 {job_description}
@@ -260,10 +264,12 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     try: return await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.1-8b-instant", prioritize_gemini=True)
     except: return {"candidate_info": {"name": "Extraction Error", "email": "Error", "phone": "Error", "links": []}, "executive_summary": "Parsing failed.", "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []}, "experience_and_projects": [], "education_and_certifications": []}
 
-async def evaluate_candidate(job_description: str, resume: str, transcript: str, behavior_data: dict = None) -> dict:
+# 🚀 THE FIX: evaluate_candidate now properly injects the `position` argument
+async def evaluate_candidate(job_description: str, resume: str, transcript: str, position: str, behavior_data: dict = None) -> dict:
     behavior_data = behavior_data or {}
     jd_safe = job_description or "Standard IT Role"
     resume_safe = resume or "No Resume Provided"
+    pos_safe = position or "Technical Role"
     transcript_safe = (transcript or "(No transcript generated)").replace("(No speech detected)", "").strip()
 
     is_breach = "SECURITY BREACH" in transcript_safe.upper() or "SECURITY BREACH" in behavior_data.get("remarks", "").upper()
@@ -296,7 +302,7 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     if avg_latency > 0:
         transcript_safe += f"\n\n[BEHAVIORAL METADATA]: The candidate took an average of {avg_latency} seconds to start speaking after being asked a question. Factor this hesitation into their confidence score."
 
-    prompt = format_prompt(EVALUATION_PROMPT, job_description=jd_safe[:4000], resume=resume_safe[:5000], transcript=transcript_safe)
+    prompt = format_prompt(EVALUATION_PROMPT, position=pos_safe[:200], job_description=jd_safe[:4000], resume=resume_safe[:5000], transcript=transcript_safe)
     
     try:
         result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")

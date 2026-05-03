@@ -139,6 +139,45 @@ def upload_to_hf_sync(file_path: Path, filename: str) -> str:
         print(f"[BATS ForgePro] HF Upload failed: {e}")
         return None
 
+# 🚀 THE FIX: The automated script to construct your proprietary Fine-Tuning dataset!
+def append_to_hf_dataset(eval_data: dict, candidate_id: str):
+    """
+    Creates a fine-tuning record: 
+    Input = Resume + Transcript + JD
+    Output = The AI's JSON score
+    Uploads it as a distinct JSON file to HuggingFace to build the Golden Dataset.
+    """
+    hf_token = os.getenv("HF_TOKEN")
+    hf_repo_id = os.getenv("HF_REPO_ID") # Your dataset repo
+    
+    if not hf_token or not hf_repo_id:
+        return
+        
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        
+        # Structure for Llama 3 / Mistral Instruct fine-tuning
+        training_row = {
+            "instruction": f"Evaluate this candidate for the role of {eval_data['position']}. JD: {eval_data['job_description']}",
+            "input": f"RESUME: {eval_data['resume']}\nTRANSCRIPT: {eval_data['transcript']}",
+            "output": json.dumps(eval_data['scores']) 
+        }
+        
+        tmp_path = RESULTS_DIR / f"{candidate_id}_dataset.json"
+        with open(tmp_path, "w") as f:
+            json.dump(training_row, f)
+            
+        api.upload_file(
+            path_or_fileobj=str(tmp_path),
+            path_in_repo=f"training_data/{candidate_id}.json",
+            repo_id=hf_repo_id,
+            repo_type="dataset",
+            token=hf_token
+        )
+    except Exception as e:
+        print(f"[BATS] Background Dataset Sync Error: {e}")
+
 def send_system_email(to_email: str, subject: str, body: str):
     gas_url = os.getenv("GOOGLE_SCRIPT_URL")
     if not gas_url:
@@ -236,7 +275,6 @@ async def stream_video(filename: str, request: Request):
 @app.post("/api/sessions/create")
 async def create_interview_session(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
-        # 🚀 THE FIX 1 & 2: By extracting directly from request.json(), we bypass any schema omissions!
         data = await request.json()
         
         new_session = InterviewSession(
@@ -250,7 +288,6 @@ async def create_interview_session(request: Request, background_tasks: Backgroun
             status="pending"
         )
         
-        # Manually guarantee that Duration and Voice save properly
         dur = int(data.get("duration_minutes", 10))
         voice = str(data.get("voice_type", "female"))
         metadata = json.dumps({"duration_minutes": dur, "voice_type": voice})
@@ -417,8 +454,9 @@ async def acknowledge_answer(req: AcknowledgmentRequest):
         print(f"[BATS] Acknowledge error: {e}")
         return {"response_text": "Got it. Let's move on to the next question.", "is_sufficient": True}
 
+# 🚀 THE FIX: Passed background_tasks and dynamically injected position for the ML Data Flywheel
 @app.post("/api/evaluate")
-async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db)):
+async def create_evaluation(req: EvaluationRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
         final_transcript = req.transcript
         actual_video_filename = req.video_filename.replace("[UPLOADED]", "").strip() if req.video_filename else None
@@ -449,7 +487,8 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
                 behavior_data = json.loads(parts[1])
             except: pass
 
-        ai_result = await evaluate_candidate(req.job_description, req.resume, final_transcript, behavior_data)
+        # Calling the newly updated function that accepts 'position'
+        ai_result = await evaluate_candidate(req.job_description, req.resume, final_transcript, req.position, behavior_data)
         candidate_id = generate_candidate_id(req.candidate_name, req.position)
 
         evaluation = Evaluation(
@@ -471,6 +510,16 @@ async def create_evaluation(req: EvaluationRequest, db: Session = Depends(get_db
         response_data = db_to_response(evaluation)
         save_result_file(evaluation.id, evaluation.candidate_name, response_data)
         
+        # 🚀 THE FIX: Queue the dataset append task to run silently in the background
+        dataset_payload = {
+            "position": req.position,
+            "job_description": req.job_description,
+            "resume": req.resume,
+            "transcript": final_transcript,
+            "scores": ai_result.get("scores", {})
+        }
+        background_tasks.add_task(append_to_hf_dataset, dataset_payload, candidate_id)
+
         gc.collect() 
         return response_data
 
