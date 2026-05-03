@@ -1,42 +1,39 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { 
   Search, Download, RefreshCcw, Trash2, ArrowRight, 
-  Filter, ChevronDown, Loader2, User, Calendar, AlertTriangle 
+  Filter, ChevronDown, Loader2, User, Calendar, AlertTriangle, Lock
 } from "lucide-react";
 import { getEvaluations, deleteEvaluation } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import RecommendationBadge from "@/components/RecommendationBadge";
 
-// 🛡️ DYNAMIC API RESOLUTION: Intelligent fallback for Local vs Production
 const API_BASE = import.meta.env.VITE_API_URL || 
   (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
     ? "http://localhost:8000" 
     : "https://bats-ai-backend.onrender.com");
 const API_URL = `${API_BASE}/api`;
 
+// 🚀 UPGRADE: The environment variable password (you set this in Vercel dashboard!)
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "forgepro2026"; 
+
 const fadeUp = {
   hidden: { opacity: 0, y: 20 },
-  visible: (i: number) => ({
-    opacity: 1, y: 0,
-    transition: { delay: i * 0.05, duration: 0.4 },
-  }),
+  visible: (i: number) => ({ opacity: 1, y: 0, transition: { delay: i * 0.05, duration: 0.4 } }),
 };
 
 const isInitialScreening = (r: EvaluationResult) => {
   const rem = r.remarks || "";
   const v = r.video_filename || "";
-
   if (rem.includes("[TYPE:INITIAL_SCREENING]")) return true;
   if (rem.includes("[TYPE:L1_TECH_ROUND]")) return false;
-
   if (v.includes("UPLOADED")) return false; 
   if (v.includes("FULL_SESSION_") || v === "LIVE_SCREENING" || v === "NO_VIDEO") return true; 
-
   return true; 
 };
 
@@ -55,6 +52,12 @@ export default function HistoryPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // 🚀 UPGRADE: State for Mass Deletion 
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const fetchData = async () => {
     try {
       const data = await getEvaluations();
@@ -67,67 +70,67 @@ export default function HistoryPage() {
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setShowExportMenu(false);
-      }
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setShowExportMenu(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation(); 
-    if (!window.confirm("Are you sure you want to permanently delete this evaluation?")) return;
-    try {
-      await deleteEvaluation(id);
-      setEvaluations(evaluations.filter((ev) => ev.id !== id));
-      toast.success("Evaluation deleted securely");
-    } catch (error) {
-      toast.error("Failed to delete evaluation");
-    }
-  };
-
   const filteredEvals = useMemo(() => {
     let filtered = [...evaluations];
-
-    if (activeTab === "Initial Screening (Live)") {
-      filtered = filtered.filter(ev => isInitialScreening(ev));
-    } else if (activeTab === "L1 Tech Round (Uploaded)") {
-      filtered = filtered.filter(ev => !isInitialScreening(ev));
-    }
-
+    if (activeTab === "Initial Screening (Live)") filtered = filtered.filter(ev => isInitialScreening(ev));
+    else if (activeTab === "L1 Tech Round (Uploaded)") filtered = filtered.filter(ev => !isInitialScreening(ev));
     if (search) {
       const q = search.toLowerCase();
-      filtered = filtered.filter(ev => 
-        ev.candidateName.toLowerCase().includes(q) || 
-        ev.position.toLowerCase().includes(q) || 
-        ev.id.toLowerCase().includes(q)
-      );
+      filtered = filtered.filter(ev => ev.candidateName.toLowerCase().includes(q) || ev.position.toLowerCase().includes(q) || ev.id.toLowerCase().includes(q));
     }
-
-    if (statusFilter !== "All Statuses") {
-      filtered = filtered.filter(ev => ev.selection_status?.toLowerCase() === statusFilter.toLowerCase());
-    }
-
-    if (recFilter !== "All Recommendations") {
-      filtered = filtered.filter(ev => ev.hiring_recommendation === recFilter);
-    }
-
+    if (statusFilter !== "All Statuses") filtered = filtered.filter(ev => ev.selection_status?.toLowerCase() === statusFilter.toLowerCase());
+    if (recFilter !== "All Recommendations") filtered = filtered.filter(ev => ev.hiring_recommendation === recFilter);
     filtered.sort((a, b) => {
-      if (sortBy === "Score") {
-        return (b.scores?.overall_score || 0) - (a.scores?.overall_score || 0);
-      }
+      if (sortBy === "Score") return (b.scores?.overall_score || 0) - (a.scores?.overall_score || 0);
       return new Date(b.date).getTime() - new Date(a.date).getTime();
     });
-
     return filtered;
   }, [evaluations, search, activeTab, sortBy, statusFilter, recFilter]);
+
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) setSelectedIds(filteredEvals.map(ev => ev.id));
+    else setSelectedIds([]);
+  };
+
+  const handleSelectOne = (e: React.ChangeEvent<HTMLInputElement>, id: string) => {
+    if (e.target.checked) setSelectedIds(prev => [...prev, id]);
+    else setSelectedIds(prev => prev.filter(item => item !== id));
+  };
+
+  const executeMassDelete = async () => {
+    if (passwordInput !== ADMIN_PASSWORD) {
+        toast.error("Incorrect Admin Password");
+        return;
+    }
+    
+    setIsDeleting(true);
+    let successCount = 0;
+    
+    for (const id of selectedIds) {
+        try {
+            await deleteEvaluation(id);
+            successCount++;
+        } catch (e) {}
+    }
+    
+    setEvaluations(evaluations.filter(ev => !selectedIds.includes(ev.id)));
+    setSelectedIds([]);
+    setShowPasswordModal(false);
+    setPasswordInput("");
+    setIsDeleting(false);
+    
+    toast.success(`Successfully purged ${successCount} candidates. HuggingFace sync initiated.`);
+  };
 
   const generateCohortHTML = () => {
     const baseUrl = window.location.origin;
@@ -268,6 +271,35 @@ export default function HistoryPage() {
   return (
     <div className="min-h-screen bg-background nexus-grid pb-20">
       <Navbar />
+      
+      {/* 🚀 UPGRADE: Password Modal for Secure Mass Delete */}
+      <AnimatePresence>
+        {showPasswordModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-card border border-border/50 shadow-2xl rounded-xl p-6 w-full max-w-sm space-y-4">
+               <div className="flex items-center gap-3 text-destructive mb-2">
+                 <ShieldAlert className="w-6 h-6" />
+                 <h2 className="text-xl font-bold">Admin Verification</h2>
+               </div>
+               <p className="text-sm text-muted-foreground">You are about to permanently delete {selectedIds.length} candidate files from Postgres and Hugging Face. This cannot be undone.</p>
+               <Input 
+                 type="password" 
+                 placeholder="Enter Master Password" 
+                 value={passwordInput} 
+                 onChange={(e) => setPasswordInput(e.target.value)}
+                 className="bg-background"
+               />
+               <div className="flex justify-end gap-3 mt-4">
+                 <Button variant="ghost" onClick={() => {setShowPasswordModal(false); setPasswordInput("");}}>Cancel</Button>
+                 <Button variant="destructive" disabled={isDeleting} onClick={executeMassDelete}>
+                   {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Purge Data"}
+                 </Button>
+               </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-6xl">
         <motion.div initial="hidden" animate="visible" className="space-y-6">
           
@@ -279,7 +311,7 @@ export default function HistoryPage() {
               </p>
             </div>
             
-            <div className="flex items-center gap-3 relative z-50">
+            <div className="flex items-center gap-3 relative z-40">
               <div className="relative" ref={dropdownRef}>
                 <Button 
                   variant="outline" 
@@ -291,34 +323,17 @@ export default function HistoryPage() {
                 
                 {showExportMenu && (
                   <div className="absolute right-0 mt-2 w-48 bg-card border border-border/50 rounded-lg shadow-[0_10px_30px_rgba(0,0,0,0.5)] overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
-                    <button onClick={exportPDF} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      PDF Report
-                    </button>
-                    <button onClick={exportDOCX} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      Word (DOCX)
-                    </button>
-                    <button onClick={exportHTML} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      HTML Webpage
-                    </button>
-                    <button onClick={exportCSV} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      CSV Spreadsheet
-                    </button>
-                    <button onClick={exportTXT} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">
-                      Plain Text
-                    </button>
-                    <button onClick={exportJSON} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors">
-                      Raw JSON
-                    </button>
+                    <button onClick={exportPDF} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">PDF Report</button>
+                    <button onClick={exportDOCX} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">Word (DOCX)</button>
+                    <button onClick={exportHTML} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">HTML Webpage</button>
+                    <button onClick={exportCSV} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">CSV Spreadsheet</button>
+                    <button onClick={exportTXT} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors border-b border-border/30">Plain Text</button>
+                    <button onClick={exportJSON} className="w-full text-left px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:text-primary transition-colors">Raw JSON</button>
                   </div>
                 )}
               </div>
               
-              <Button 
-                variant="outline" 
-                onClick={() => { setIsRefreshing(true); fetchData(); }} 
-                className="bg-card text-muted-foreground hover:text-foreground shadow-sm px-3"
-                title="Refresh Data"
-              >
+              <Button variant="outline" onClick={() => { setIsRefreshing(true); fetchData(); }} className="bg-card text-muted-foreground hover:text-foreground shadow-sm px-3" title="Refresh Data">
                 <RefreshCcw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-primary' : ''}`} />
               </Button>
             </div>
@@ -328,7 +343,7 @@ export default function HistoryPage() {
             {["All Evaluations", "Initial Screening (Live)", "L1 Tech Round (Uploaded)"].map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => { setActiveTab(tab); setSelectedIds([]); }}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   activeTab === tab 
                     ? "bg-primary/10 text-primary border border-primary/20" 
@@ -355,21 +370,14 @@ export default function HistoryPage() {
             <div className="flex flex-wrap lg:flex-nowrap gap-4">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> Sort By</span>
-                <select 
-                  value={sortBy} onChange={(e) => setSortBy(e.target.value)}
-                  className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none"
-                >
+                <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none">
                   <option value="Date">Date</option>
                   <option value="Score">Score</option>
                 </select>
               </div>
-
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> Status</span>
-                <select 
-                  value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-                  className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none"
-                >
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none">
                   <option value="All Statuses">All Statuses</option>
                   <option value="pending">Pending</option>
                   <option value="selected">Selected</option>
@@ -378,13 +386,9 @@ export default function HistoryPage() {
                   <option value="doubtful">Doubtful</option>
                 </select>
               </div>
-
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> ForgePro Verdict</span>
-                <select 
-                  value={recFilter} onChange={(e) => setRecFilter(e.target.value)}
-                  className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none"
-                >
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"><Filter className="w-3 h-3 inline mr-1" /> Verdict</span>
+                <select value={recFilter} onChange={(e) => setRecFilter(e.target.value)} className="bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none">
                   <option value="All Recommendations">All Recommendations</option>
                   <option value="Strong Hire">Strong Hire</option>
                   <option value="Lean Hire">Lean Hire</option>
@@ -393,6 +397,21 @@ export default function HistoryPage() {
               </div>
             </div>
           </div>
+
+          {/* 🚀 UPGRADE: The Select All & Mass Delete Toolbar */}
+          <AnimatePresence>
+             {selectedIds.length > 0 && (
+                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex items-center justify-between bg-destructive/10 border border-destructive/30 px-4 py-3 rounded-lg sticky top-20 z-40 backdrop-blur-md shadow-lg">
+                   <div className="flex items-center gap-3">
+                     <span className="w-6 h-6 rounded-full bg-destructive text-white flex items-center justify-center text-xs font-bold">{selectedIds.length}</span>
+                     <span className="text-sm font-semibold text-destructive uppercase tracking-wider">Candidates Selected</span>
+                   </div>
+                   <Button variant="destructive" size="sm" onClick={() => setShowPasswordModal(true)} className="shadow-[0_0_15px_rgba(239,68,68,0.4)]">
+                     <Trash2 className="w-4 h-4 mr-2" /> Mass Delete
+                   </Button>
+                </motion.div>
+             )}
+          </AnimatePresence>
 
           {loading ? (
             <div className="py-20 flex justify-center">
@@ -406,17 +425,37 @@ export default function HistoryPage() {
             </div>
           ) : (
             <div className="space-y-4">
+              
+              {/* 🚀 UPGRADE: Select All Header Row */}
+              <div className="flex items-center px-4 pt-2">
+                 <input 
+                   type="checkbox" 
+                   checked={selectedIds.length === filteredEvals.length && filteredEvals.length > 0}
+                   onChange={handleSelectAll}
+                   className="w-4 h-4 accent-primary cursor-pointer border-border rounded"
+                 />
+                 <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-4">Select All in View</span>
+              </div>
+
               {filteredEvals.map((ev, i) => (
                 <motion.div 
                   key={ev.id} variants={fadeUp} custom={i}
-                  onClick={() => navigate(`/result/${ev.id}`)}
-                  className="cursor-pointer glass p-5 rounded-xl border border-border/50 hover:border-primary/50 transition-all shadow-sm flex flex-col md:flex-row items-center gap-6 group"
+                  className={`glass p-5 rounded-xl border transition-all shadow-sm flex flex-col md:flex-row items-center gap-6 group relative ${selectedIds.includes(ev.id) ? 'border-destructive/50 bg-destructive/5' : 'border-border/50 hover:border-primary/50'}`}
                 >
-                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
+                  
+                  {/* 🚀 UPGRADE: Checkbox inside the row */}
+                  <input 
+                    type="checkbox" 
+                    checked={selectedIds.includes(ev.id)}
+                    onChange={(e) => handleSelectOne(e, ev.id)}
+                    className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 accent-primary cursor-pointer z-20"
+                  />
+
+                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20 ml-6 cursor-pointer" onClick={() => navigate(`/result/${ev.id}`)}>
                     <User className="w-5 h-5 text-primary" />
                   </div>
                   
-                  <div className="flex-1 text-center md:text-left">
+                  <div className="flex-1 text-center md:text-left cursor-pointer" onClick={() => navigate(`/result/${ev.id}`)}>
                     <h3 className="text-lg font-bold text-foreground group-hover:text-primary transition-colors">{ev.candidateName}</h3>
                     <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 text-sm text-muted-foreground mt-1">
                       <span>{ev.position}</span>
@@ -433,16 +472,16 @@ export default function HistoryPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end">
+                  <div className="flex items-center gap-6 w-full md:w-auto justify-between md:justify-end cursor-pointer" onClick={() => navigate(`/result/${ev.id}`)}>
                     <RecommendationBadge recommendation={ev.hiring_recommendation} />
                     
                     <div className="text-center shrink-0 w-16">
                       <div className="text-2xl font-black text-foreground group-hover:text-primary transition-colors">{ev.scores?.overall_score || 0}</div>
                     </div>
 
-                    <div className="flex items-center gap-2 border-l border-border/50 pl-6">
+                    <div className="flex items-center gap-2 border-l border-border/50 pl-6 h-full z-20">
                       <button 
-                        onClick={(e) => handleDelete(e, ev.id)}
+                        onClick={(e) => { e.stopPropagation(); setSelectedIds([ev.id]); setShowPasswordModal(true); }}
                         className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
                         title="Delete Evaluation"
                       >

@@ -227,7 +227,6 @@ async def create_interview_session(request: Request, background_tasks: Backgroun
     try:
         data = await request.json()
         
-        # 🚀 UPGRADE: Foolproof Config Injector. Bypasses schema errors entirely.
         dur = int(data.get("duration_minutes", 10))
         voice = str(data.get("voice_type", "female"))
         jd = data.get("job_description", "")
@@ -266,7 +265,6 @@ async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
     if datetime.utcnow() - session.created_at > timedelta(hours=24): raise HTTPException(status_code=403, detail="This interview link has expired (24-hour limit). Please contact your recruiter.")
     if session.status != "pending": raise HTTPException(status_code=403, detail="This interview session has already been attempted or completed and is now permanently locked.")
     
-    # 🚀 UPGRADE: Unpacking the Foolproof Config
     jd = session.job_description or ""
     dur = 10
     voice = "female"
@@ -467,6 +465,7 @@ async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db:
     db.refresh(ev)
     return db_to_response(ev)
 
+# 🚀 THE UPGRADE: The cloud vacuum parses HF paths dynamically to catch both Live and Uploaded files.
 @app.delete("/api/evaluations/{eval_id}")
 async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
@@ -484,6 +483,10 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
         
         if v_file:
             actual_filename = v_file.replace("[UPLOADED]", "").strip()
+            # Handle if the URL was somehow passed entirely
+            if "huggingface.co" in actual_filename:
+                actual_filename = actual_filename.split("/")[-1]
+
             local_vid = RECORDINGS_DIR / actual_filename
             local_audio = RECORDINGS_DIR / f"{actual_filename}.mp3"
             
@@ -494,7 +497,7 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
                 try: os.remove(local_audio)
                 except: pass
 
-            if "[UPLOADED]" in v_file and hf_token and hf_repo_id:
+            if hf_token and hf_repo_id:
                 try:
                     from huggingface_hub import HfApi
                     api = HfApi()
