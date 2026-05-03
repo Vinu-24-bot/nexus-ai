@@ -92,7 +92,9 @@ class AudioQueueManager {
       const utterance = new SpeechSynthesisUtterance(text);
       const voices = window.speechSynthesis.getVoices();
       const isFemale = gender === "female";
-      const targetKeywords = isFemale ? ["female", "woman", "jenny", "samantha", "karen"] : ["male", "man", "guy", "david", "mark"];
+      
+      // 🚀 THE FIX: Aggressive browser TTS matching. Defaults to a female voice (Zira/Google US) if targeted matching fails.
+      const targetKeywords = isFemale ? ["female", "woman", "zira", "samantha", "karen", "google us english"] : ["male", "man", "guy", "david", "mark"];
       let bestMatch = null;
       let highestScore = -1;
 
@@ -100,13 +102,20 @@ class AudioQueueManager {
         if (!v.lang.startsWith("en")) continue;
         let score = 0;
         if (v.lang === "en-US") score += 5; 
-        if (targetKeywords.some(k => v.name.toLowerCase().includes(k))) score += 5;
+        if (targetKeywords.some(k => v.name.toLowerCase().includes(k))) score += 10;
+        
         if (score > highestScore) { highestScore = score; bestMatch = v; }
       }
 
-      if (bestMatch) utterance.voice = bestMatch;
+      if (bestMatch) {
+          utterance.voice = bestMatch;
+      } else if (isFemale) {
+          // Absolute fallback if it fails to find "female" keywords
+          utterance.voice = voices.find(v => v.name.includes("Zira") || v.name.includes("Google US English")) || voices[0];
+      }
+
       utterance.rate = 1.0; 
-      utterance.pitch = gender === "female" ? 1.05 : 0.95;
+      utterance.pitch = isFemale ? 1.1 : 0.95;
       this.currentUtterance = utterance;
       
       utterance.onend = () => { this.currentUtterance = null; resolve(); };
@@ -262,14 +271,17 @@ export default function InterviewPage() {
   const storedVoice = localStorage.getItem(`forgepro_voice_${sessionId}`);
   const rawVoice = String(state?.voiceGender || storedVoice || fetchedData?.voice_gender || "female").toLowerCase();
   
-  // 🚀 THE FIX 2: Prevent "indian_female" from accidentally triggering the "male" voice.
   const isMale = rawVoice === "male" || rawVoice === "en-us-guyneural";
   const voiceGender = isMale ? "male" : "female";
   
-  const storedDuration = parseInt(localStorage.getItem(`forgepro_duration_${sessionId}`) || "0");
+  // 🚀 THE FIX: Harden state retrieval for 15-minute selection
   const sessionDurationState = Number(state?.durationMinutes);
   const sessionDurationDB = Number(fetchedData?.duration_minutes);
-  const durationMinutes = sessionDurationState > 0 ? sessionDurationState : (storedDuration > 0 ? storedDuration : (sessionDurationDB > 0 ? sessionDurationDB : 10));
+  const storedDuration = parseInt(localStorage.getItem(`forgepro_duration_${sessionId}`) || "0");
+  
+  const durationMinutes = sessionDurationState > 0 ? sessionDurationState : 
+                         (storedDuration > 0 ? storedDuration : 
+                         (sessionDurationDB > 0 ? sessionDurationDB : 10));
   
   const rawQuestions = state?.questions || fetchedData?.questions || [];
   
@@ -423,7 +435,6 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation]);
 
-  // 🚀 THE FIX 3: Real-Time Pixel Delta Analyzer for Advanced Liveness / Face Tracking
   const startSecurityTelemetry = () => {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -449,8 +460,8 @@ export default function InterviewPage() {
                   diff += Math.abs(currentData.data[i] - lastImageData.data[i]);
               }
               
-              // A pixel difference < 1500 indicates the background is totally frozen (camera covered or person left)
-              if (diff < 1500) {
+              // 🚀 THE FIX: Increased threshold to 35,000 to ignore webcam sensor grain/noise
+              if (diff < 35000) {
                   noMovementCounter++;
               } else {
                   noMovementCounter = 0;

@@ -65,7 +65,6 @@ def _validate_result(result: dict) -> dict:
             result[field] = "Data unavailable." if field != "scores" else { "technical_proficiency": 50, "relevance_to_jd": 50, "communication": 50, "confidence_level": 50, "overall_score": 50 }
     return result
 
-# 🚀 THE FIX: Injected [TARGET_ROLE] so the AI grades directly against the specific position
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Target Role, the Job Description, the Candidate's Resume, the Interview Transcript, and the Behavioral Telemetry.
 
@@ -126,14 +125,14 @@ RULES:
    - Next 50% of questions: "medium" (DEEP DIVE into specific projects from their [CANDIDATE_RESUME] mapped directly to the [JOB_DESCRIPTION]).
    - Final questions: "hard" (Advanced architecture, scaling tradeoffs, and complex system design).
 2. RELEVANCY OVERRIDE: Every single question MUST be specifically mapped against BOTH the [CANDIDATE_RESUME] and [JOB_DESCRIPTION]. Do not ask generic textbook questions.
-3. CONCISE LENGTH: Keep questions perfectly balanced, between 15 to 30 words. 
+3. CONCISE LENGTH (CRITICAL): You must ask extremely short, direct questions. MAXIMUM OF 20 WORDS PER QUESTION. Do not compound questions. 
 
 Output ONLY valid JSON:
 {
   "questions": [
     {
       "id": 1,
-      "question": "A concise, 15-30 word question.",
+      "question": "A concise, 15-20 word question.",
       "category": "technical | behavioral | situational",
       "difficulty": "easy | medium | hard"
     }
@@ -158,13 +157,12 @@ Context of the conversation:
 YOUR GOAL: Keep the interview flowing rapidly and dynamically adapt to their skill level.
 
 RULES:
-1. IF THEY SKIP OR DON'T KNOW: You MUST set "is_sufficient": true. Say exactly: "No problem, let's move on."
-2. IF SILENCE: You MUST set "is_sufficient": true. Say exactly: "Let's move ahead to the next topic."
-3. DYNAMIC ADAPTATION: If their answer is detailed and valid, set "is_sufficient": true. Acknowledge a specific technical detail they just said (under 10 words). THEN, slightly adapt/increase the complexity of the {next_question} before asking it to test their limits.
+1. DYNAMIC ADAPTATION: Acknowledge a specific technical detail they just said (under 10 words). THEN, slightly adapt/increase the complexity of the {next_question} before asking it to test their limits.
+2. BE BRIEF: Your total response MUST be under 30 words. 
 
 Output ONLY valid JSON:
 {
-  "response_text": "Your highly conversational acknowledgment, immediately followed by the adapted next question.",
+  "response_text": "Your short conversational acknowledgment, immediately followed by the adapted next question.",
   "is_sufficient": true
 }
 """
@@ -264,7 +262,6 @@ async def parse_resume_to_json(raw_text: str) -> dict:
     try: return await _call_ai_cascade(prompt, force_json=True, max_tokens=1500, groq_model="llama-3.1-8b-instant", prioritize_gemini=True)
     except: return {"candidate_info": {"name": "Extraction Error", "email": "Error", "phone": "Error", "links": []}, "executive_summary": "Parsing failed.", "core_skills": {"languages_and_frameworks": [], "cloud_and_infrastructure": [], "databases_and_tools": []}, "experience_and_projects": [], "education_and_certifications": []}
 
-# 🚀 THE FIX: evaluate_candidate now properly injects the `position` argument
 async def evaluate_candidate(job_description: str, resume: str, transcript: str, position: str, behavior_data: dict = None) -> dict:
     behavior_data = behavior_data or {}
     jd_safe = job_description or "Standard IT Role"
@@ -348,6 +345,16 @@ async def generate_jd(position: str) -> str:
     return await _call_groq_text(prompt)
 
 async def get_answer_acknowledgment(question: str, answer: str, next_question: str = None) -> dict:
+    # 🚀 THE FIX: Python-level Hard Stop for candidate skipping questions
+    skip_phrases = ["don't know", "dont know", "no idea", "pass", "skip", "move on", "not sure", "no clue", "haven't heard", "havent heard"]
+    answer_lower = answer.lower()
+    
+    if any(phrase in answer_lower for phrase in skip_phrases) or len(answer.split()) < 4:
+        return {
+            "response_text": f"Understood. Let's move on. {next_question}", 
+            "is_sufficient": True
+        }
+
     prompt = format_prompt(DYNAMIC_INTERVIEW_TURN_PROMPT, question=question, answer=answer, next_question=next_question)
     try:
         result = await _call_ai_cascade(prompt, force_json=True, max_tokens=200, groq_model="llama-3.1-8b-instant")
