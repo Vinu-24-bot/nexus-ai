@@ -3,13 +3,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Search, Download, RefreshCcw, Trash2, ArrowRight, 
-  Filter, ChevronDown, Loader2, User, Calendar, AlertTriangle, Lock
+  Filter, ChevronDown, Loader2, User, Calendar, AlertTriangle
 } from "lucide-react";
 import { getEvaluations, deleteEvaluation } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import RecommendationBadge from "@/components/RecommendationBadge";
 
@@ -19,7 +18,6 @@ const API_BASE = import.meta.env.VITE_API_URL ||
     : "https://bats-ai-backend.onrender.com");
 const API_URL = `${API_BASE}/api`;
 
-// 🚀 UPGRADE: The environment variable password (you set this in Vercel dashboard!)
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "forgepro2026"; 
 
 const fadeUp = {
@@ -52,10 +50,7 @@ export default function HistoryPage() {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 🚀 UPGRADE: State for Mass Deletion 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [passwordInput, setPasswordInput] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchData = async () => {
@@ -107,8 +102,12 @@ export default function HistoryPage() {
     else setSelectedIds(prev => prev.filter(item => item !== id));
   };
 
+  // 🚀 UPGRADE: Replaced fragile React Modal with indestructible window.prompt
   const executeMassDelete = async () => {
-    if (passwordInput !== ADMIN_PASSWORD) {
+    const pwd = window.prompt("Admin Verification:\nEnter Master Password to permanently delete the selected candidate files:");
+    if (pwd === null) return; 
+    
+    if (pwd !== ADMIN_PASSWORD) {
         toast.error("Incorrect Admin Password");
         return;
     }
@@ -125,11 +124,28 @@ export default function HistoryPage() {
     
     setEvaluations(evaluations.filter(ev => !selectedIds.includes(ev.id)));
     setSelectedIds([]);
-    setShowPasswordModal(false);
-    setPasswordInput("");
     setIsDeleting(false);
     
     toast.success(`Successfully purged ${successCount} candidates. HuggingFace sync initiated.`);
+  };
+
+  const handleSingleDelete = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation(); 
+    const pwd = window.prompt("Admin Verification:\nEnter Master Password to permanently delete this candidate file:");
+    if (pwd === null) return; 
+    
+    if (pwd !== ADMIN_PASSWORD) {
+        toast.error("Incorrect Admin Password");
+        return;
+    }
+
+    try {
+      await deleteEvaluation(id);
+      setEvaluations(evaluations.filter((ev) => ev.id !== id));
+      toast.success("Evaluation deleted securely. HuggingFace sync initiated.");
+    } catch (error) {
+      toast.error("Failed to delete evaluation");
+    }
   };
 
   const generateCohortHTML = () => {
@@ -271,34 +287,6 @@ export default function HistoryPage() {
   return (
     <div className="min-h-screen bg-background nexus-grid pb-20">
       <Navbar />
-      
-      {/* 🚀 UPGRADE: Password Modal for Secure Mass Delete */}
-      <AnimatePresence>
-        {showPasswordModal && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-card border border-border/50 shadow-2xl rounded-xl p-6 w-full max-w-sm space-y-4">
-               <div className="flex items-center gap-3 text-destructive mb-2">
-                 <ShieldAlert className="w-6 h-6" />
-                 <h2 className="text-xl font-bold">Admin Verification</h2>
-               </div>
-               <p className="text-sm text-muted-foreground">You are about to permanently delete {selectedIds.length} candidate files from Postgres and Hugging Face. This cannot be undone.</p>
-               <Input 
-                 type="password" 
-                 placeholder="Enter Master Password" 
-                 value={passwordInput} 
-                 onChange={(e) => setPasswordInput(e.target.value)}
-                 className="bg-background"
-               />
-               <div className="flex justify-end gap-3 mt-4">
-                 <Button variant="ghost" onClick={() => {setShowPasswordModal(false); setPasswordInput("");}}>Cancel</Button>
-                 <Button variant="destructive" disabled={isDeleting} onClick={executeMassDelete}>
-                   {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Purge Data"}
-                 </Button>
-               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-6xl">
         <motion.div initial="hidden" animate="visible" className="space-y-6">
@@ -398,7 +386,6 @@ export default function HistoryPage() {
             </div>
           </div>
 
-          {/* 🚀 UPGRADE: The Select All & Mass Delete Toolbar */}
           <AnimatePresence>
              {selectedIds.length > 0 && (
                 <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex items-center justify-between bg-destructive/10 border border-destructive/30 px-4 py-3 rounded-lg sticky top-20 z-40 backdrop-blur-md shadow-lg">
@@ -406,8 +393,9 @@ export default function HistoryPage() {
                      <span className="w-6 h-6 rounded-full bg-destructive text-white flex items-center justify-center text-xs font-bold">{selectedIds.length}</span>
                      <span className="text-sm font-semibold text-destructive uppercase tracking-wider">Candidates Selected</span>
                    </div>
-                   <Button variant="destructive" size="sm" onClick={() => setShowPasswordModal(true)} className="shadow-[0_0_15px_rgba(239,68,68,0.4)]">
-                     <Trash2 className="w-4 h-4 mr-2" /> Mass Delete
+                   <Button variant="destructive" size="sm" onClick={executeMassDelete} disabled={isDeleting} className="shadow-[0_0_15px_rgba(239,68,68,0.4)]">
+                     {isDeleting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />} 
+                     Mass Delete
                    </Button>
                 </motion.div>
              )}
@@ -426,7 +414,6 @@ export default function HistoryPage() {
           ) : (
             <div className="space-y-4">
               
-              {/* 🚀 UPGRADE: Select All Header Row */}
               <div className="flex items-center px-4 pt-2">
                  <input 
                    type="checkbox" 
@@ -443,7 +430,6 @@ export default function HistoryPage() {
                   className={`glass p-5 rounded-xl border transition-all shadow-sm flex flex-col md:flex-row items-center gap-6 group relative ${selectedIds.includes(ev.id) ? 'border-destructive/50 bg-destructive/5' : 'border-border/50 hover:border-primary/50'}`}
                 >
                   
-                  {/* 🚀 UPGRADE: Checkbox inside the row */}
                   <input 
                     type="checkbox" 
                     checked={selectedIds.includes(ev.id)}
@@ -481,7 +467,7 @@ export default function HistoryPage() {
 
                     <div className="flex items-center gap-2 border-l border-border/50 pl-6 h-full z-20">
                       <button 
-                        onClick={(e) => { e.stopPropagation(); setSelectedIds([ev.id]); setShowPasswordModal(true); }}
+                        onClick={(e) => handleSingleDelete(e, ev.id)}
                         className="p-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
                         title="Delete Evaluation"
                       >

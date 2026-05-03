@@ -465,7 +465,7 @@ async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db:
     db.refresh(ev)
     return db_to_response(ev)
 
-# 🚀 THE UPGRADE: The cloud vacuum parses HF paths dynamically to catch both Live and Uploaded files.
+# 🚀 UPGRADE: Rock-solid parsing of HF paths to guarantee L1 uploaded files are wiped.
 @app.delete("/api/evaluations/{eval_id}")
 async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
@@ -483,7 +483,6 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
         
         if v_file:
             actual_filename = v_file.replace("[UPLOADED]", "").strip()
-            # Handle if the URL was somehow passed entirely
             if "huggingface.co" in actual_filename:
                 actual_filename = actual_filename.split("/")[-1]
 

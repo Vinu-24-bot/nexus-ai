@@ -65,13 +65,15 @@ def _validate_result(result: dict) -> dict:
             result[field] = "Data unavailable." if field != "scores" else { "technical_proficiency": 50, "relevance_to_jd": 50, "communication": 50, "confidence_level": 50, "overall_score": 50 }
     return result
 
+# 🚀 UPGRADE: Waffle Penalty, HOTS Bonus, and Progressive Accuracy injected.
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Target Role, the Job Description, the Candidate's Resume, the Interview Transcript, and the Behavioral Telemetry.
 
 *** ENTERPRISE EVALUATION PROTOCOL ***
 1. HOLISTIC MATCHING: Your final scores MUST explicitly reflect the alignment between the [CANDIDATE_RESUME], the [JOB_DESCRIPTION], the [TARGET_ROLE], and the relevancy of their answers in the [INTERVIEW_TRANSCRIPT].
 2. L1 TECH ROUND: If the transcript explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
-3. STRICT SCORING: Provide a highly accurate, RUTHLESS score out of 100 based strictly on the evidence. DO NOT HALLUCINATE COMPETENCE. If the candidate gives vague, short, or skipped answers, the score MUST be below 40. If the interview was aborted early or contains almost no technical answers, apply a massive penalty and score it below 20. 
+3. WAFFLE PENALTY: If the candidate gives excessively long, rambling answers that lack valid technical substance or attempt to dodge the core question, apply a severe penalty to their communication and technical scores. Do not reward waffling.
+4. HOTS BONUS & PROGRESSION: Evaluate the mixture of answers. If the candidate successfully answers the 'Hard / HOTS' (Higher Order Thinking Skills) questions perfectly, they MUST be given a significant score boost/extra edge. If they only nail the Basics but fail the Hard questions, score them appropriately for a junior/mid level, but cap their overall ceiling.
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
@@ -111,23 +113,20 @@ Synthesize the findings reliably. Output ONLY valid JSON matching this exact str
 {transcript}
 """
 
+# 🚀 UPGRADE: Forces AI to generate exactly 30 questions categorized cleanly for the Infinite Pacing Loop
 QUESTION_GENERATION_PROMPT = """You are "BATS ForgePro", an elite, human-like AI technical interviewer.
-Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY {num_questions} highly unique, targeted questions.
+Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY 30 highly unique, targeted questions.
 
-The target interview difficulty level is: {interview_level}.
-- If L1 (Junior): Focus on foundational syntax, standard problem-solving, and basic concepts from their resume.
-- If L2 (Mid-Level): Focus on complex project experience, debugging, and framework internals.
-- If L3/L4 (Senior/Lead): Focus heavily on system architecture, scaling tradeoffs, infrastructure, and leadership.
+The target interview level is: {interview_level}. Modify the depth based on this level, but you MUST provide all 30 questions broken down exactly like this:
+- 10 'easy' questions: Basic fundamentals, syntax, and smooth background intros.
+- 10 'medium' questions: Complex project experience, debugging, framework internals mapped directly to the [JOB_DESCRIPTION].
+- 10 'hard' questions: HOTS (Higher Order Thinking Skills), advanced architecture, scaling tradeoffs, and complex system design.
 
 RULES:
-1. STRICT PROGRESSIVE CURRICULUM: You MUST generate the questions in this exact order: 
-   - Questions 1 & 2: "easy" (Basic fundamentals & smooth background intro to build confidence).
-   - Next 50% of questions: "medium" (DEEP DIVE into specific projects from their [CANDIDATE_RESUME] mapped directly to the [JOB_DESCRIPTION]).
-   - Final questions: "hard" (Advanced architecture, scaling tradeoffs, and complex system design).
-2. RELEVANCY OVERRIDE: Every single question MUST be specifically mapped against BOTH the [CANDIDATE_RESUME] and [JOB_DESCRIPTION]. Do not ask generic textbook questions.
-3. CONCISE LENGTH (CRITICAL): You must ask extremely short, direct questions. MAXIMUM OF 20 WORDS PER QUESTION. Do not compound questions. 
+1. RELEVANCY OVERRIDE: Every single question MUST be specifically mapped against BOTH the [CANDIDATE_RESUME] and [JOB_DESCRIPTION]. Do not ask generic textbook questions.
+2. CONCISE LENGTH (CRITICAL): You must ask extremely short, direct questions. MAXIMUM OF 20 WORDS PER QUESTION. Do not compound questions. 
 
-Output ONLY valid JSON:
+Output ONLY valid JSON containing EXACTLY 30 questions:
 {
   "questions": [
     {
@@ -200,7 +199,6 @@ async def generate_speech_audio(text: str, gender: str = "female") -> bytes:
             
     return audio_data
 
-# 🚀 UPGRADE: Hardened transcription accuracy via AI context prompting and English locking
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
     async with httpx.AsyncClient(timeout=120) as client:
@@ -284,13 +282,8 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
 
     is_breach = "SECURITY BREACH" in transcript_safe.upper() or "SECURITY BREACH" in remarks_safe.upper()
 
-    candidate_only_text = " ".join(re.findall(r'A\d+: (.*?)(?=\n\nQ|\Z)', transcript_safe, re.DOTALL | re.IGNORECASE))
-    intro_match = re.search(r'Introduction:\s*Candidate: (.*?)(?=\n\nQ|\Z)', transcript_safe, re.DOTALL | re.IGNORECASE)
-    if intro_match:
-        candidate_only_text += " " + intro_match.group(1)
-        
-    candidate_only_text = candidate_only_text.replace("<SILENCE>", "").strip()
-    total_spoken_words = len(candidate_only_text.split())
+    # 🚀 UPGRADE: Counts the actual number of questions answered to stop AI scoring hallucinations on short sessions!
+    answers_given = len(re.findall(r'A\d+:', transcript_safe, re.IGNORECASE))
 
     if is_breach:
         return {
@@ -313,15 +306,16 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     except Exception as e:
         return _validate_result({})
 
-    if total_spoken_words < 30 and not "(Pre-recorded" in transcript_safe:
-        result["scores"]["technical_proficiency"] = min(result["scores"].get("technical_proficiency", 0), 15)
-        result["scores"]["relevance_to_jd"] = min(result["scores"].get("relevance_to_jd", 0), 15)
-        result["scores"]["communication"] = min(result["scores"].get("communication", 0), 15)
-        result["scores"]["confidence_level"] = min(result["scores"].get("confidence_level", 0), 15)
+    # 🚀 UPGRADE: Hard Python Override. If they answered < 2 questions, their score gets crushed.
+    if answers_given < 2 and not "(Pre-recorded" in transcript_safe:
+        result["scores"]["technical_proficiency"] = min(result["scores"].get("technical_proficiency", 0), 10)
+        result["scores"]["relevance_to_jd"] = min(result["scores"].get("relevance_to_jd", 0), 10)
+        result["scores"]["communication"] = min(result["scores"].get("communication", 0), 10)
+        result["scores"]["confidence_level"] = min(result["scores"].get("confidence_level", 0), 10)
         result["hiring_recommendation"] = "Reject"
         result["candidate_status"]["level"] = "Needs Improvement"
         result["sentiment"]["rating"] = "Negative"
-        result["justification"] = "[SYSTEM OVERRIDE DEDUCTION]: Candidate ended the interview early and failed to provide substantial technical evidence. AI score has been forcefully capped. " + result.get("justification", "")
+        result["justification"] = f"[SYSTEM OVERRIDE DEDUCTION]: Candidate aborted the interview and only provided {answers_given} technical answers. AI score has been forcefully capped to prevent false-positives. " + result.get("justification", "")
 
     tab_switches = behavior_data.get("tab_switches", 0)
     esc_presses = behavior_data.get("esc_presses", 0)
@@ -346,15 +340,16 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
 
     return result
 
-async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 25, interview_level: str = "L2"):
+async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 30, interview_level: str = "L2"):
     jd_safe = job_description or "Standard Tech Role"
     resume_safe = resume or "Candidate Resume"
-    prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=jd_safe[:3000], resume=resume_safe[:4000], num_questions=num_questions, interview_level=interview_level)
+    # Overriding num_questions to 30 to guarantee the frontend has enough ammo for the infinite loop
+    prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=jd_safe[:3000], resume=resume_safe[:4000], num_questions=30, interview_level=interview_level)
     try:
-        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=2000, groq_model="llama-3.3-70b-versatile")
+        result = await _call_ai_cascade(prompt, force_json=True, max_tokens=3000, groq_model="llama-3.3-70b-versatile")
         return result.get("questions", [])
     except Exception:
-        return [{"id": 1, "question": "Could you briefly outline your most relevant project?", "category": "technical", "difficulty": "medium"}]
+        return [{"id": 1, "question": "Could you briefly outline your most relevant project?", "category": "technical", "difficulty": "easy"}]
 
 async def generate_jd(position: str) -> str:
     prompt = format_prompt(JD_GENERATION_PROMPT, position=position)

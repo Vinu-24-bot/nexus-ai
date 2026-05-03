@@ -203,7 +203,6 @@ export default function InterviewPage() {
   const [fetchedData, setFetchedData] = useState<any>(null);
   const [isInitializing, setIsInitializing] = useState(!!sessionId && !state);
 
-  const [currentQ, setCurrentQ] = useState(-1);
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [introPhase, setIntroPhase] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
@@ -233,9 +232,14 @@ export default function InterviewPage() {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
-  // 🚀 UPGRADE: Hard State Binding for Timer & Voice 
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [voiceGender, setVoiceGender] = useState<"indian_female" | "female" | "male">("female");
+
+  // 🚀 UPGRADE: Dynamic Time-Based Pacing Indices
+  const [easyIdx, setEasyIdx] = useState(0);
+  const [medIdx, setMedIdx] = useState(0);
+  const [hardIdx, setHardIdx] = useState(0);
+  const [currentQuestion, setCurrentQuestion] = useState<InterviewQuestion | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const totalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -268,12 +272,10 @@ export default function InterviewPage() {
     "Finalizing Enterprise Report..."
   ];
 
-  // 🚀 THE FIX: This single useEffect rules them all and prevents Stale Closures
   useEffect(() => {
     let dur = 10;
     let v: "indian_female" | "female" | "male" = "female";
 
-    // 1. Process Duration
     const sourceDur = state?.durationMinutes || fetchedData?.duration_minutes;
     if (sourceDur) {
         dur = Number(sourceDur);
@@ -282,7 +284,6 @@ export default function InterviewPage() {
         if (stored > 0) dur = stored;
     }
 
-    // 2. Process Voice
     const sourceVoice = String(state?.voiceGender || fetchedData?.voice_gender || localStorage.getItem(`forgepro_voice_${sessionId}`) || "female").toLowerCase();
     if (sourceVoice.includes("indian") || sourceVoice === "indian_female") {
         v = "indian_female";
@@ -290,11 +291,9 @@ export default function InterviewPage() {
         v = "male";
     }
 
-    // 3. Lock State
     setDurationMinutes(dur);
     setVoiceGender(v);
 
-    // 4. Update LocalStorage 
     if (dur > 0) localStorage.setItem(`forgepro_duration_${sessionId}`, dur.toString());
     if (v) localStorage.setItem(`forgepro_voice_${sessionId}`, v);
 
@@ -309,14 +308,21 @@ export default function InterviewPage() {
   
   const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
     { id: 1, question: "Could you briefly describe your most impactful project?", category: "technical", difficulty: "easy" },
-    { id: 2, question: "What is the most challenging bug you've faced recently?", category: "behavioral", difficulty: "medium" }
+    { id: 2, question: "What is the most challenging bug you've faced recently?", category: "behavioral", difficulty: "medium" },
+    { id: 3, question: "How do you handle scaling bottlenecks in a system architecture?", category: "technical", difficulty: "hard" }
   ];
 
-  const finalQuestionsList = activeQuestions; 
-  const totalQuestions = finalQuestionsList.length;
-  const currentQuestion = introPhase ? null : (finalQuestionsList[currentQ] || null);
-  const progress = totalQuestions > 0 ? (Math.max(0, currentQ) / totalQuestions) * 100 : 0;
+  // 🚀 UPGRADE: Split questions safely by difficulty for the Infinite Timer Loop
+  const easyQs = activeQuestions.filter((q: any) => q.difficulty === 'easy' || q.difficulty?.toLowerCase().includes('basic'));
+  const medQs = activeQuestions.filter((q: any) => q.difficulty === 'medium');
+  const hardQs = activeQuestions.filter((q: any) => q.difficulty === 'hard' || q.difficulty?.toLowerCase().includes('hots'));
   
+  const totalQCount = activeQuestions.length;
+  const safeEasy = easyQs.length > 0 ? easyQs : activeQuestions.slice(0, Math.ceil(totalQCount / 3));
+  const safeMed = medQs.length > 0 ? medQs : activeQuestions.slice(Math.ceil(totalQCount / 3), Math.ceil((totalQCount * 2) / 3));
+  const safeHard = hardQs.length > 0 ? hardQs : activeQuestions.slice(Math.ceil((totalQCount * 2) / 3));
+
+  const timeProgress = totalElapsed / (durationMinutes * 60);
   const timeRemaining = Math.max(0, (durationMinutes * 60) - totalElapsed);
 
   useEffect(() => {
@@ -328,11 +334,10 @@ export default function InterviewPage() {
           const session = await res.json();
           
           const actualDuration = session.duration_minutes || Number(localStorage.getItem(`forgepro_duration_${sessionId}`)) || 10;
-          const targetQCount = actualDuration >= 15 ? 25 : 20;
           
           const qRes = await fetch(`${API_URL}/generate-questions`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: targetQCount, interview_level: session.interview_level || "L2" })
+            body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: 30, interview_level: session.interview_level || "L2" })
           });
           const qData = await qRes.json();
           setFetchedData({ ...session, questions: qData.questions });
@@ -793,6 +798,7 @@ export default function InterviewPage() {
     }
   }, [voiceGender, startSpeechRecognition]);
 
+  // 🚀 UPGRADE: Infinite Dynamic Pacing engine. Questions escalate strictly based on the timer progress, preventing early cutoffs.
   const handleAnswerSubmit = useCallback(async (e: any) => {
     if (!isRecording) return;
     
@@ -817,11 +823,24 @@ export default function InterviewPage() {
     setAccumulatedTranscript(totalAnswerSoFar);
 
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
-    let nextIndex = introPhase ? 0 : currentQ + 1;
-    let nextQData = finalQuestionsList[nextIndex];
-    let nextQText = nextQData ? nextQData.question : "Okay, that concludes all the technical questions.";
-
+    
+    // Calculate Pacing
+    const currProgress = totalElapsed / (durationMinutes * 60);
     const isTimeUp = ((durationMinutes * 60) - totalElapsed) <= 30;
+
+    let nextQData;
+    if (currProgress < 0.33) {
+        nextQData = safeEasy[easyIdx % safeEasy.length];
+        setEasyIdx(e => e + 1);
+    } else if (currProgress < 0.66) {
+        nextQData = safeMed[medIdx % safeMed.length];
+        setMedIdx(m => m + 1);
+    } else {
+        nextQData = safeHard[hardIdx % safeHard.length];
+        setHardIdx(h => h + 1);
+    }
+
+    let nextQText = nextQData ? nextQData.question : "Okay, that concludes all the technical questions.";
 
     let dynamicResponse = "";
     let isSufficient = true;
@@ -849,21 +868,21 @@ export default function InterviewPage() {
       setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
       setAccumulatedTranscript(""); 
 
-      if (isTimeUp || (!introPhase && currentQ >= totalQuestions - 1)) {
+      if (isTimeUp) {
         finalizeInterviewAndUpload("Time Expired or Complete.");
         return;
       }
 
       if (introPhase) {
-        setIntroPhase(false); setCurrentQ(0);
-      } else {
-        setCurrentQ(nextIndex); 
+        setIntroPhase(false);
       }
+      
+      setCurrentQuestion(nextQData as InterviewQuestion);
     }
 
     await speakAndRecord(dynamicResponse);
 
-  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentQ, totalQuestions, finalQuestionsList, voiceGender, startSpeechRecognition, totalElapsed, durationMinutes, speakAndRecord]);
+  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, easyIdx, medIdx, hardIdx, safeEasy, safeMed, safeHard, voiceGender, startSpeechRecognition, totalElapsed, durationMinutes, speakAndRecord]);
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
     isTerminatingRef.current = true;
@@ -1167,8 +1186,10 @@ export default function InterviewPage() {
 
             {currentQuestion && !isSpeaking && (
               <AnimatePresence mode="wait">
-                <motion.div key={currentQ} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="glass rounded-xl p-6 shadow-sm border border-border/50">
-                  <span className="text-xs font-bold text-primary uppercase tracking-wider mb-2 block">Question {currentQ + 1} of {totalQuestions}</span>
+                <motion.div key={currentQuestion.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="glass rounded-xl p-6 shadow-sm border border-border/50">
+                  <span className="text-xs font-bold text-primary uppercase tracking-wider mb-2 block">
+                     Phase: {currentQuestion.difficulty || "Technical"} 
+                  </span>
                   <p className="text-lg font-medium text-foreground leading-relaxed">{currentQuestion.question}</p>
                 </motion.div>
               </AnimatePresence>
