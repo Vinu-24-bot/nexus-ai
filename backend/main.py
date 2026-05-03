@@ -402,7 +402,6 @@ async def create_evaluation(req: EvaluationRequest, background_tasks: Background
                 behavior_data = json.loads(parts[1])
             except: pass
 
-        # 🚀 THE FIX: Passed 'clean_remarks' directly so the AI module catches the "SECURITY BREACH" text!
         ai_result = await evaluate_candidate(req.job_description, req.resume, final_transcript, req.position, clean_remarks, behavior_data)
         candidate_id = generate_candidate_id(req.candidate_name, req.position)
 

@@ -233,7 +233,7 @@ export default function InterviewPage() {
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
-  // 🚀 THE FIX: Strictly bind duration state to eliminate React race-conditions 
+  // 🚀 THE FIX: Single source of truth for duration. No more variable shadowing or race conditions.
   const [durationMinutes, setDurationMinutes] = useState(10);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -268,21 +268,20 @@ export default function InterviewPage() {
   ];
 
   useEffect(() => {
+    let dur = 10;
     if (state?.durationMinutes) {
-      setDurationMinutes(state.durationMinutes);
-      localStorage.setItem(`forgepro_duration_${sessionId}`, state.durationMinutes.toString());
+        dur = state.durationMinutes;
+    } else if (fetchedData?.duration_minutes) {
+        dur = fetchedData.duration_minutes;
+    } else {
+        const stored = parseInt(localStorage.getItem(`forgepro_duration_${sessionId}`) || "0");
+        if (stored > 0) dur = stored;
     }
-    if (state?.voiceGender) {
-      localStorage.setItem(`forgepro_voice_${sessionId}`, state.voiceGender);
-    }
-  }, [state, sessionId]);
-
-  useEffect(() => {
-    if (fetchedData) {
-      const actualDur = Number(localStorage.getItem(`forgepro_duration_${sessionId}`)) || fetchedData.duration_minutes || 10;
-      setDurationMinutes(actualDur);
-    }
-  }, [fetchedData, sessionId]);
+    setDurationMinutes(dur);
+    
+    if (state?.durationMinutes) localStorage.setItem(`forgepro_duration_${sessionId}`, state.durationMinutes.toString());
+    if (state?.voiceGender) localStorage.setItem(`forgepro_voice_${sessionId}`, state.voiceGender);
+  }, [state, fetchedData, sessionId]);
 
   const candidateName = state?.candidateName || fetchedData?.candidate_name || "Candidate";
   const position = state?.position || fetchedData?.position || "Technical Role";
@@ -309,6 +308,8 @@ export default function InterviewPage() {
   const totalQuestions = finalQuestionsList.length;
   const currentQuestion = introPhase ? null : (finalQuestionsList[currentQ] || null);
   const progress = totalQuestions > 0 ? (Math.max(0, currentQ) / totalQuestions) * 100 : 0;
+  
+  // 🚀 THE FIX: This now uses the safe, locked-in React State value.
   const timeRemaining = Math.max(0, (durationMinutes * 60) - totalElapsed);
 
   useEffect(() => {
@@ -450,7 +451,7 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation, handleForceEndInterview]);
 
-  // 🚀 THE FIX: Advanced Pixel-Delta Analyzer (Checks every 1.5 seconds)
+  // 🚀 THE FIX: Purged the "Frozen Pixel" trap. The vault now ONLY strikes if the camera is physically covered (Darkness).
   const startSecurityTelemetry = () => {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -495,7 +496,8 @@ export default function InterviewPage() {
             currentLiveness = Math.min(99, Math.max(12, Math.floor((diff / 40000) * 100)));
 
             if (now - lastRefTime > 1500) {
-                if (avgBrightness < 15 || diff < 2000) {
+                // If the screen is pitch black, the camera is covered.
+                if (avgBrightness < 10) {
                     staticIntervals++;
                 } else {
                     staticIntervals = 0; 
@@ -507,9 +509,8 @@ export default function InterviewPage() {
                 if (staticIntervals >= 3) {
                     faces = 0;
                     currentLiveness = 12;
-                    const reason = avgBrightness < 15 ? "Camera is physically covered or completely dark." : "Camera feed is completely frozen (software lock).";
-                    handleSecurityViolation(reason);
-                    staticIntervals = -2;
+                    handleSecurityViolation("Camera is physically covered or completely dark.");
+                    staticIntervals = -2; 
                 }
             }
           }

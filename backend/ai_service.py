@@ -71,7 +71,7 @@ You are running a deep-dive evaluation. You have the Target Role, the Job Descri
 *** ENTERPRISE EVALUATION PROTOCOL ***
 1. HOLISTIC MATCHING: Your final scores MUST explicitly reflect the alignment between the [CANDIDATE_RESUME], the [JOB_DESCRIPTION], the [TARGET_ROLE], and the relevancy of their answers in the [INTERVIEW_TRANSCRIPT].
 2. L1 TECH ROUND: If the transcript explicitly contains exactly "(Pre-recorded interview video uploaded", rely heavily on the [CANDIDATE_RESUME] for scoring.
-3. STRICT SCORING: Provide a highly accurate, RUTHLESS score out of 100 based strictly on the evidence. DO NOT HALLUCINATE COMPETENCE. If the candidate gives vague, short, or skipped answers, the score MUST be below 40. If the interview was aborted early or contains almost no technical answers, apply a massive penalty and score it below 20. 
+3. STRICT SCORING: Provide a highly accurate, RUTHLESS score out of 100 based strictly on the evidence. DO NOT HALLUCINATE COMPETENCE. If the candidate gives vague, short, or skipped answers, the score MUST be below 40.
 
 Synthesize the findings reliably. Output ONLY valid JSON matching this exact structure:
 {
@@ -298,13 +298,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
             "hiring_recommendation": "Reject",
             "justification": "CRITICAL PENALTY: Zero-Tolerance Engine Activated. Candidate violated testing conditions. Score locked to 0/100."
         }
-        
-    if total_spoken_words < 30 and not "(Pre-recorded interview video uploaded" in transcript_safe:
-         transcript_safe += f"\n\n[SYSTEM ALERT]: The candidate ended the interview early and answered almost no questions (Total Words: {total_spoken_words}). You MUST apply a massive penalty to their score. DO NOT score them above 30/100 under any circumstances."
-
-    avg_latency = behavior_data.get("avg_latency", 0)
-    if avg_latency > 0:
-        transcript_safe += f"\n\n[BEHAVIORAL METADATA]: The candidate took an average of {avg_latency} seconds to start speaking after being asked a question. Factor this hesitation into their confidence score."
 
     prompt = format_prompt(EVALUATION_PROMPT, position=pos_safe[:200], job_description=jd_safe[:4000], resume=resume_safe[:5000], transcript=transcript_safe)
     
@@ -313,6 +306,17 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
         result = _validate_result(result)
     except Exception as e:
         return _validate_result({})
+
+    # 🚀 THE FIX: HARD PYTHON MATH OVERRIDE. Stops AI from hallucinating a good score on a 30s interview!
+    if total_spoken_words < 30 and not "(Pre-recorded" in transcript_safe:
+        result["scores"]["technical_proficiency"] = min(result["scores"].get("technical_proficiency", 0), 15)
+        result["scores"]["relevance_to_jd"] = min(result["scores"].get("relevance_to_jd", 0), 15)
+        result["scores"]["communication"] = min(result["scores"].get("communication", 0), 15)
+        result["scores"]["confidence_level"] = min(result["scores"].get("confidence_level", 0), 15)
+        result["hiring_recommendation"] = "Reject"
+        result["candidate_status"]["level"] = "Needs Improvement"
+        result["sentiment"]["rating"] = "Negative"
+        result["justification"] = "[SYSTEM OVERRIDE DEDUCTION]: Candidate ended the interview early and failed to provide substantial technical evidence. AI score has been forcefully capped. " + result.get("justification", "")
 
     tab_switches = behavior_data.get("tab_switches", 0)
     esc_presses = behavior_data.get("esc_presses", 0)
