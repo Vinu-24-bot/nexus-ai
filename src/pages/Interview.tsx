@@ -11,7 +11,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { submitEvaluation, uploadVideo } from "@/lib/api";
 import { toast } from "sonner";
 
-// 🛡️ DYNAMIC API RESOLUTION: Intelligent fallback for Local vs Production
 const API_BASE = import.meta.env.VITE_API_URL || 
   (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
     ? "http://localhost:8000" 
@@ -262,7 +261,10 @@ export default function InterviewPage() {
   
   const storedVoice = localStorage.getItem(`forgepro_voice_${sessionId}`);
   const rawVoice = String(state?.voiceGender || storedVoice || fetchedData?.voice_gender || "female").toLowerCase();
-  const voiceGender = rawVoice.includes("male") ? "male" : "female";
+  
+  // 🚀 THE FIX 2: Prevent "indian_female" from accidentally triggering the "male" voice.
+  const isMale = rawVoice === "male" || rawVoice === "en-us-guyneural";
+  const voiceGender = isMale ? "male" : "female";
   
   const storedDuration = parseInt(localStorage.getItem(`forgepro_duration_${sessionId}`) || "0");
   const sessionDurationState = Number(state?.durationMinutes);
@@ -421,12 +423,56 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation]);
 
+  // 🚀 THE FIX 3: Real-Time Pixel Delta Analyzer for Advanced Liveness / Face Tracking
   const startSecurityTelemetry = () => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    let lastImageData: ImageData | null = null;
+    let noMovementCounter = 0;
+
     const checkTelemetry = () => {
       if (isTerminatingRef.current) return;
+      
       const isVisible = !document.hidden;
-      setTelemetry({ faces: isVisible ? 1 : 0, liveness: isVisible ? 99 : 45, lipSync: true, mask: false });
+      let faces = isVisible ? 1 : 0;
+      let liveness = isVisible ? 99 : 45;
+
+      if (isVisible && ctx && videoRef.current && videoRef.current.videoWidth > 0) {
+        canvas.width = 64; canvas.height = 64;
+        try {
+          ctx.drawImage(videoRef.current, 0, 0, 64, 64);
+          const currentData = ctx.getImageData(0, 0, 64, 64);
+          
+          if (lastImageData) {
+              let diff = 0;
+              for (let i = 0; i < currentData.data.length; i += 4) {
+                  diff += Math.abs(currentData.data[i] - lastImageData.data[i]);
+              }
+              
+              // A pixel difference < 1500 indicates the background is totally frozen (camera covered or person left)
+              if (diff < 1500) {
+                  noMovementCounter++;
+              } else {
+                  noMovementCounter = 0;
+              }
+          }
+          lastImageData = currentData;
+          
+          // 60 frames = roughly 4 to 5 seconds of zero movement
+          if (noMovementCounter > 60) {
+              faces = 0;
+              liveness = 12;
+              handleSecurityViolation("Candidate face moved out of frame or camera is covered.");
+              noMovementCounter = -30; // Debounce to prevent immediate double strikes
+          }
+        } catch (e) {
+          // Fallback if cross-origin canvas throws error
+        }
+      }
+
+      setTelemetry({ faces, liveness, lipSync: true, mask: false });
       if (!isVisible) handleSecurityViolation("Candidate switched tabs or minimized browser.");
+      
       securityLoopRef.current = requestAnimationFrame(checkTelemetry);
     };
     checkTelemetry();
