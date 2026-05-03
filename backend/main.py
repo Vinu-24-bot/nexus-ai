@@ -177,17 +177,20 @@ def append_to_hf_dataset(eval_data: dict, candidate_id: str):
     except Exception as e:
         print(f"[BATS] Background Dataset Sync Error: {e}")
 
-def send_system_email(to_email: str, subject: str, body: str):
+# 🚀 THE FIX: Switched from sync thread-blocking to fully async.
+# This prevents the email from getting stuck in the queue behind large video uploads.
+async def send_system_email(to_email: str, subject: str, body: str):
     gas_url = os.getenv("GOOGLE_SCRIPT_URL")
     if not gas_url:
         return
 
     payload = {"to": to_email, "subject": subject, "body": body}
     try:
-        with httpx.Client(timeout=15.0) as client:
-            client.post(gas_url, json=payload)
-    except Exception:
-        pass
+        # Use httpx.AsyncClient instead of synchronous client
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            await client.post(gas_url, json=payload)
+    except Exception as e:
+        print(f"[BATS ForgePro] Async Email Send Error: {e}")
 
 class TTSRequest(BaseModel):
     text: str
@@ -544,27 +547,22 @@ async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db:
     db.refresh(ev)
     return db_to_response(ev)
 
-# 🚀 THE FIX: Nuclear Erase implemented with Background Tasks
 @app.delete("/api/evaluations/{eval_id}")
 async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
     if not ev: 
         raise HTTPException(404, "Evaluation not found")
 
-    # 1. Grab the filenames before we delete the database record
     video_filename = ev.video_filename
     candidate_id = ev.id
 
-    # 2. Delete from Postgres Database
     db.delete(ev)
     db.commit()
 
-    # 3. The Nuclear Cleanup Function (Runs in the background)
     def cleanup_cloud_files(v_file: str, c_id: str):
         hf_token = os.getenv("HF_TOKEN")
         hf_repo_id = os.getenv("HF_REPO_ID")
         
-        # Clean up local Render storage
         if v_file:
             actual_filename = v_file.replace("[UPLOADED]", "").strip()
             local_vid = RECORDINGS_DIR / actual_filename
@@ -577,7 +575,6 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
                 try: os.remove(local_audio)
                 except: pass
 
-            # Clean up Hugging Face Video Storage
             if "[UPLOADED]" in v_file and hf_token and hf_repo_id:
                 try:
                     from huggingface_hub import HfApi
@@ -586,7 +583,6 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
                 except Exception as e:
                     print(f"[BATS ForgePro] HF Video Delete Error: {e}")
 
-        # Clean up Hugging Face Training Dataset JSON
         if hf_token and hf_repo_id:
             try:
                 from huggingface_hub import HfApi
@@ -595,7 +591,6 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
             except Exception as e:
                 print(f"[BATS ForgePro] HF Dataset Delete Error: {e}")
 
-    # Fire the cleanup task silently
     background_tasks.add_task(cleanup_cloud_files, video_filename, candidate_id)
 
     return {"message": "Candidate deleted successfully and cloud storage cleanup initiated"}
