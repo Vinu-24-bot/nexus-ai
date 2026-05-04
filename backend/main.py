@@ -144,10 +144,11 @@ def append_to_hf_dataset(eval_data: dict, candidate_id: str):
     except Exception as e:
         print(f"[BATS] Background Dataset Sync Error: {e}")
 
-async def send_system_email(to_email: str, subject: str, body: str):
+# 🚀 THE FIX: Injected reply_to parameter to seamlessly route replies to the recruiter.
+async def send_system_email(to_email: str, subject: str, body: str, reply_to: str = ""):
     gas_url = os.getenv("GOOGLE_SCRIPT_URL")
     if not gas_url: return
-    payload = {"to": to_email, "subject": subject, "body": body}
+    payload = {"to": to_email, "subject": subject, "body": body, "replyTo": reply_to}
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             await client.post(gas_url, json=payload)
@@ -247,7 +248,9 @@ async def create_interview_session(request: Request, background_tasks: Backgroun
         interview_link = f"{frontend_url}/interview/{new_session.id}"
         talent_name = data.get("talent_associate_name", "The ForgePro Team")
         candidate_body = f"""Hello {new_session.candidate_name},\n\nYou have been invited to a BATS ForgePro Initial Screening for the {new_session.position} role ({new_session.interview_level}).\n\nYour Talent Associate, {talent_name}, has set up a secure interview vault for you.\nPlease ensure you are on a laptop/desktop, as you will be required to share your screen and camera to proceed.\n\nStart Interview: {interview_link}\n\nBest regards,\n{talent_name}\nBATS ForgePro Talent Acquisition"""
-        background_tasks.add_task(send_system_email, new_session.candidate_email, f"Interview Invitation: {new_session.position}", candidate_body)
+        
+        # 🚀 THE FIX: Appended recruiter email as the replyTo target
+        background_tasks.add_task(send_system_email, new_session.candidate_email, f"Interview Invitation: {new_session.position}", candidate_body, new_session.recruiter_email)
         
         if new_session.recruiter_email:
             dashboard_link = f"{frontend_url}/dashboard"
@@ -499,7 +502,6 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
                 try:
                     from huggingface_hub import HfApi
                     api = HfApi()
-                    # 🚀 THE FIX: Enforced repo_type="dataset" to properly hunt down the file
                     api.delete_file(path_in_repo=f"recordings/{actual_filename}", repo_id=hf_repo_id, token=hf_token, repo_type="dataset")
                 except Exception as e: print(f"HF Delete Error: {e}")
 
@@ -507,7 +509,6 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
             try:
                 from huggingface_hub import HfApi
                 api = HfApi()
-                # 🚀 THE FIX: Enforced repo_type="dataset" here too
                 api.delete_file(path_in_repo=f"training_data/{c_id}.json", repo_id=hf_repo_id, token=hf_token, repo_type="dataset")
             except Exception as e: print(f"HF Delete Error: {e}")
 
