@@ -65,7 +65,6 @@ def _validate_result(result: dict) -> dict:
             result[field] = "Data unavailable." if field != "scores" else { "technical_proficiency": 50, "relevance_to_jd": 50, "communication": 50, "confidence_level": 50, "overall_score": 50 }
     return result
 
-# 🚀 UPGRADE: Waffle Penalty, HOTS Bonus, and Progressive Accuracy injected.
 EVALUATION_PROMPT = """You are "BATS ForgePro", an elite AI Executive Recruiter System used by Tier-1 tech companies.
 You are running a deep-dive evaluation. You have the Target Role, the Job Description, the Candidate's Resume, the Interview Transcript, and the Behavioral Telemetry.
 
@@ -113,7 +112,6 @@ Synthesize the findings reliably. Output ONLY valid JSON matching this exact str
 {transcript}
 """
 
-# 🚀 UPGRADE: Forces AI to generate exactly 30 questions categorized cleanly for the Infinite Pacing Loop
 QUESTION_GENERATION_PROMPT = """You are "BATS ForgePro", an elite, human-like AI technical interviewer.
 Analyze BOTH the Job Description AND the Candidate's Resume to generate EXACTLY 30 highly unique, targeted questions.
 
@@ -199,6 +197,7 @@ async def generate_speech_audio(text: str, gender: str = "female") -> bytes:
             
     return audio_data
 
+# 🚀 UPGRADE: Forced 0.0 Temperature for deterministic, perfect word-for-word accuracy.
 async def transcribe_audio(file_path: str) -> str:
     if not GROQ_API_KEY: raise ValueError("GROQ_API_KEY is required.")
     async with httpx.AsyncClient(timeout=120) as client:
@@ -208,7 +207,8 @@ async def transcribe_audio(file_path: str) -> str:
                 "model": "whisper-large-v3", 
                 "response_format": "text",
                 "language": "en",
-                "prompt": "Technical software engineering interview transcript discussing coding, system design, scalable architecture, frameworks, algorithms, and logical problem solving."
+                "temperature": "0.0",
+                "prompt": "Technical software engineering interview transcript discussing coding, system design, scalable architecture, frameworks, algorithms, and logical problem solving. Ensure exact, word-for-word accuracy and capture all technical jargon perfectly."
             }
             url = "https://api.groq.com/openai/v1/audio/transcriptions"
             resp = await client.post(url, headers={"Authorization": f"Bearer {GROQ_API_KEY}"}, files=files, data=data)
@@ -282,7 +282,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
 
     is_breach = "SECURITY BREACH" in transcript_safe.upper() or "SECURITY BREACH" in remarks_safe.upper()
 
-    # 🚀 UPGRADE: Counts the actual number of questions answered to stop AI scoring hallucinations on short sessions!
     answers_given = len(re.findall(r'A\d+:', transcript_safe, re.IGNORECASE))
 
     if is_breach:
@@ -306,7 +305,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
     except Exception as e:
         return _validate_result({})
 
-    # 🚀 UPGRADE: Hard Python Override. If they answered < 2 questions, their score gets crushed.
     if answers_given < 2 and not "(Pre-recorded" in transcript_safe:
         result["scores"]["technical_proficiency"] = min(result["scores"].get("technical_proficiency", 0), 10)
         result["scores"]["relevance_to_jd"] = min(result["scores"].get("relevance_to_jd", 0), 10)
@@ -343,7 +341,6 @@ async def evaluate_candidate(job_description: str, resume: str, transcript: str,
 async def generate_interview_questions(job_description: str, resume: str, num_questions: int = 30, interview_level: str = "L2"):
     jd_safe = job_description or "Standard Tech Role"
     resume_safe = resume or "Candidate Resume"
-    # Overriding num_questions to 30 to guarantee the frontend has enough ammo for the infinite loop
     prompt = format_prompt(QUESTION_GENERATION_PROMPT, job_description=jd_safe[:3000], resume=resume_safe[:4000], num_questions=30, interview_level=interview_level)
     try:
         result = await _call_ai_cascade(prompt, force_json=True, max_tokens=3000, groq_model="llama-3.3-70b-versatile")

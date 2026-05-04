@@ -465,7 +465,6 @@ async def update_selection_status(eval_id: str, req: SelectionStatusRequest, db:
     db.refresh(ev)
     return db_to_response(ev)
 
-# 🚀 UPGRADE: Rock-solid parsing of HF paths to guarantee L1 uploaded files are wiped.
 @app.delete("/api/evaluations/{eval_id}")
 async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
@@ -500,15 +499,17 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
                 try:
                     from huggingface_hub import HfApi
                     api = HfApi()
-                    api.delete_file(path_in_repo=f"recordings/{actual_filename}", repo_id=hf_repo_id, token=hf_token)
-                except Exception as e: pass
+                    # 🚀 THE FIX: Enforced repo_type="dataset" to properly hunt down the file
+                    api.delete_file(path_in_repo=f"recordings/{actual_filename}", repo_id=hf_repo_id, token=hf_token, repo_type="dataset")
+                except Exception as e: print(f"HF Delete Error: {e}")
 
         if hf_token and hf_repo_id:
             try:
                 from huggingface_hub import HfApi
                 api = HfApi()
-                api.delete_file(path_in_repo=f"training_data/{c_id}.json", repo_id=hf_repo_id, token=hf_token)
-            except Exception as e: pass
+                # 🚀 THE FIX: Enforced repo_type="dataset" here too
+                api.delete_file(path_in_repo=f"training_data/{c_id}.json", repo_id=hf_repo_id, token=hf_token, repo_type="dataset")
+            except Exception as e: print(f"HF Delete Error: {e}")
 
     background_tasks.add_task(cleanup_cloud_files, video_filename, candidate_id)
     return {"message": "Candidate deleted successfully and cloud storage cleanup initiated"}
