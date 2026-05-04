@@ -94,10 +94,7 @@ class AudioQueueManager {
       
       const isIndian = gender === "indian_female";
       const isFemale = gender === "female";
-      
-      const targetKeywords = isIndian ? ["india", "en-in", "ravi", "heera", "aditi"] : 
-                             isFemale ? ["female", "woman", "zira", "samantha", "karen", "google us english"] : 
-                             ["male", "man", "guy", "david", "mark"];
+      const isMale = gender === "male";
                              
       let bestMatch = null;
       let highestScore = -1;
@@ -107,21 +104,29 @@ class AudioQueueManager {
         let score = 0;
         
         if (isIndian && v.lang === "en-IN") score += 10;
-        else if (!isIndian && v.lang === "en-US") score += 5; 
+        else if (!isIndian && (v.lang === "en-US" || v.lang === "en-GB")) score += 5; 
         
-        if (targetKeywords.some(k => v.name.toLowerCase().includes(k))) score += 10;
+        const nameLower = v.name.toLowerCase();
+        
+        if (isIndian && (nameLower.includes("india") || nameLower.includes("neerja") || nameLower.includes("heera") || nameLower.includes("aditi"))) score += 10;
+        else if (isMale && (nameLower.includes("david") || nameLower.includes("mark") || nameLower.includes("guy") || nameLower === "male")) score += 10;
+        else if (isFemale && (nameLower.includes("zira") || nameLower.includes("samantha") || nameLower.includes("jenny") || nameLower === "female")) score += 10;
         
         if (score > highestScore) { highestScore = score; bestMatch = v; }
       }
 
-      if (bestMatch) {
+      if (bestMatch && highestScore > 0) {
           utterance.voice = bestMatch;
-      } else if (isFemale || isIndian) {
-          utterance.voice = voices.find(v => v.name.includes("Zira") || v.name.includes("Google US English")) || voices[0];
+      } else {
+          if (isMale) {
+              utterance.voice = voices.find(v => v.name.includes("David") || v.name.includes("Mark")) || voices[0];
+          } else {
+              utterance.voice = voices.find(v => v.name.includes("Zira") || v.name.includes("Google US English")) || voices[0];
+          }
       }
 
       utterance.rate = 1.0; 
-      utterance.pitch = (isFemale || isIndian) ? 1.1 : 0.95;
+      utterance.pitch = isMale ? 0.9 : (isIndian ? 1.05 : 1.1);
       this.currentUtterance = utterance;
       
       utterance.onend = () => { this.currentUtterance = null; resolve(); };
@@ -286,10 +291,13 @@ export default function InterviewPage() {
     }
 
     const sourceVoice = String(state?.voiceGender || fetchedData?.voice_gender || localStorage.getItem(`forgepro_voice_${sessionId}`) || "female").toLowerCase();
-    if (sourceVoice.includes("indian") || sourceVoice === "indian_female") {
+    
+    if (sourceVoice === "indian_female" || sourceVoice.includes("indian")) {
         v = "indian_female";
-    } else if (sourceVoice.includes("male") || sourceVoice.includes("guy")) {
+    } else if (sourceVoice === "male" || sourceVoice === "male (us)") {
         v = "male";
+    } else {
+        v = "female";
     }
 
     setDurationMinutes(dur);
@@ -1185,7 +1193,7 @@ export default function InterviewPage() {
               <AnimatePresence mode="wait">
                 <motion.div key={currentQuestion.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="glass rounded-xl p-6 shadow-sm border border-border/50">
                   <span className="text-xs font-bold text-primary uppercase tracking-wider mb-2 block">
-                     Difficulty: {currentQuestion.difficulty || "Technical"} 
+                     Interview Question 
                   </span>
                   <p className="text-lg font-medium text-foreground leading-relaxed">{currentQuestion.question}</p>
                 </motion.div>
