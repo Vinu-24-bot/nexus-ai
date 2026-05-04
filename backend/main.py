@@ -25,7 +25,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text  
 
-from database import Base, engine, get_db
+# 🚀 UPGRADE: Imported SessionLocal to safely handle background database connections
+from database import Base, engine, get_db, SessionLocal
 from models import Evaluation, InterviewSession, CandidateFeedback
 from schemas import (
     EvaluationRequest, EvaluationResponse, QuestionGenerationRequest,
@@ -112,19 +113,47 @@ def extract_audio(video_path: str, audio_path: str) -> bool:
         print(f"[BATS] Audio Extraction Error: {e}")
         return False
 
-def upload_to_hf_sync(file_path: Path, filename: str) -> str:
+# 🚀 UPGRADE: Independent Background Task to upload massive videos safely without OOMing the main thread
+def process_background_video_upload(eval_id: str, video_path_str: str, filename: str, folder_name: str):
     hf_token = os.getenv("HF_TOKEN")
     hf_repo_id = os.getenv("HF_REPO_ID")
-    if not hf_token or not hf_repo_id: return None
+    if not hf_token or not hf_repo_id:
+        return
+
     try:
         from huggingface_hub import HfApi
         api = HfApi()
-        repo_path = f"recordings/{filename}"
-        api.upload_file(path_or_fileobj=str(file_path), path_in_repo=repo_path, repo_id=hf_repo_id, repo_type="dataset", token=hf_token)
-        return f"https://huggingface.co/datasets/{hf_repo_id}/resolve/main/{repo_path}"
+        repo_path = f"{folder_name}/{filename}"
+        
+        # Uploads via memory-safe stream
+        api.upload_file(
+            path_or_fileobj=video_path_str,
+            path_in_repo=repo_path,
+            repo_id=hf_repo_id,
+            repo_type="dataset",
+            token=hf_token
+        )
+        cloud_url = f"https://huggingface.co/datasets/{hf_repo_id}/resolve/main/{repo_path}"
+
+        # Secure DB Update
+        db = SessionLocal()
+        try:
+            ev = db.query(Evaluation).filter(Evaluation.id == eval_id).first()
+            if ev:
+                ev.video_filename = f"[UPLOADED] {cloud_url}"
+                db.commit()
+        finally:
+            db.close()
+
+        # Vaporize local file to protect Render Disk Space
+        if os.path.exists(video_path_str):
+            os.remove(video_path_str)
+        audio_path = video_path_str + ".mp3"
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+
     except Exception as e:
-        print(f"[BATS ForgePro] HF Upload failed: {e}")
-        return None
+        print(f"[BATS ForgePro] Background Video Upload Error: {e}")
 
 def append_to_hf_dataset(eval_data: dict, candidate_id: str):
     hf_token = os.getenv("HF_TOKEN")
@@ -144,7 +173,6 @@ def append_to_hf_dataset(eval_data: dict, candidate_id: str):
     except Exception as e:
         print(f"[BATS] Background Dataset Sync Error: {e}")
 
-# 🚀 THE FIX: Ironclad Google Script connection with follow_redirects=True to prevent dropped payloads
 async def send_system_email(to_email: str, subject: str, body: str, reply_to: str = ""):
     gas_url = os.getenv("GOOGLE_SCRIPT_URL")
     if not gas_url: return
@@ -388,6 +416,12 @@ async def acknowledge_answer(req: AcknowledgmentRequest):
 @app.post("/api/evaluate")
 async def create_evaluation(req: EvaluationRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
+        clean_remarks = req.remarks or "Completed normally."
+        is_l1 = "L1_TECH_ROUND" in clean_remarks.upper()
+        
+        # 🚀 UPGRADE: Dynamic Smart Folder Routing
+        folder_name = "l1_tech_rounds" if is_l1 else "initial_screenings"
+        
         final_transcript = req.transcript
         actual_video_filename = req.video_filename.replace("[UPLOADED]", "").strip() if req.video_filename else None
         final_video_storage = req.video_filename
@@ -397,15 +431,21 @@ async def create_evaluation(req: EvaluationRequest, background_tasks: Background
             if video_path.exists():
                 audio_path = RECORDINGS_DIR / f"{actual_video_filename}.mp3"
                 if extract_audio(str(video_path), str(audio_path)):
-                    try: final_transcript = await transcribe_audio(str(audio_path))
+                    try: 
+                        new_transcript = await transcribe_audio(str(audio_path))
+                        # Prevents overwriting manual L1 transcripts
+                        is_placeholder = "(Pre-recorded" in final_transcript if final_transcript else True
+                        if is_placeholder or not final_transcript.strip():
+                            final_transcript = new_transcript
+                        else:
+                            final_transcript = final_transcript + "\n\n[AUTO-TRANSCRIPT EXTRACTED]:\n" + new_transcript
                     except: pass
-                cloud_url = await asyncio.to_thread(upload_to_hf_sync, video_path, actual_video_filename)
-                if cloud_url: final_video_storage = f"[UPLOADED] {cloud_url}"
+                
+                # 🚀 CRITICAL FIX: We DO NOT block to upload to HF here anymore. Fixes Render OOM/Timeout.
 
         gc.collect()
 
         behavior_data = {}
-        clean_remarks = req.remarks or "Completed normally."
         if "METRICS_PAYLOAD:" in clean_remarks:
             try:
                 parts = clean_remarks.split("METRICS_PAYLOAD:")
@@ -435,6 +475,11 @@ async def create_evaluation(req: EvaluationRequest, background_tasks: Background
         response_data = db_to_response(evaluation)
         save_result_file(evaluation.id, evaluation.candidate_name, response_data)
         
+        # 🚀 UPGRADE: Delegated massive file I/O to background tasks
+        if actual_video_filename and actual_video_filename != "LIVE_SCREENING":
+            if video_path.exists():
+                background_tasks.add_task(process_background_video_upload, candidate_id, str(video_path), actual_video_filename, folder_name)
+
         dataset_payload = {
             "position": req.position, "job_description": req.job_description,
             "resume": req.resume, "transcript": final_transcript, "scores": ai_result.get("scores", {})
@@ -501,7 +546,13 @@ async def delete_evaluation(eval_id: str, background_tasks: BackgroundTasks, db:
                 try:
                     from huggingface_hub import HfApi
                     api = HfApi()
-                    api.delete_file(path_in_repo=f"recordings/{actual_filename}", repo_id=hf_repo_id, token=hf_token, repo_type="dataset")
+                    # 🚀 UPGRADE: The Triple-Threat Vacuum. Destroys the file regardless of which folder it was saved in!
+                    try: api.delete_file(path_in_repo=f"initial_screenings/{actual_filename}", repo_id=hf_repo_id, token=hf_token, repo_type="dataset")
+                    except: pass
+                    try: api.delete_file(path_in_repo=f"l1_tech_rounds/{actual_filename}", repo_id=hf_repo_id, token=hf_token, repo_type="dataset")
+                    except: pass
+                    try: api.delete_file(path_in_repo=f"recordings/{actual_filename}", repo_id=hf_repo_id, token=hf_token, repo_type="dataset")
+                    except: pass
                 except Exception as e: print(f"HF Delete Error: {e}")
 
         if hf_token and hf_repo_id:
