@@ -15,7 +15,7 @@ const API_BASE = import.meta.env.VITE_API_URL ||
   (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
     ? "http://localhost:8000" 
     : "https://bats-ai-backend.onrender.com");
-const API_URL = `${API_BASE}/api`;
+const API_URL = API_BASE + "/api";
 
 interface InterviewQuestion { id: number; question: string; category: string; difficulty: string; }
 interface LocationState { candidateName: string; position: string; jobDescription: string; resume: string; questions: InterviewQuestion[]; voiceGender: "indian_female" | "female" | "male"; durationMinutes: number; }
@@ -62,7 +62,7 @@ class AudioQueueManager {
     const timeoutId = setTimeout(() => controller.abort(), 10000);
     
     try {
-      const response = await fetch(`${API_URL}/tts`, {
+      const response = await fetch(API_URL + "/tts", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, gender }),
@@ -159,7 +159,7 @@ const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number
         <div className="flex items-center gap-4">
           <div className="flex gap-1">
             {[1, 2, 3].map((s) => (
-              <div key={s} className={`w-3 h-3 rounded-full ${strikes >= s ? "bg-destructive animate-pulse" : "bg-muted"}`} />
+              <div key={s} className={"w-3 h-3 rounded-full " + (strikes >= s ? "bg-destructive animate-pulse" : "bg-muted")} />
             ))}
           </div>
           <div className="flex items-center gap-2 text-xs font-bold text-destructive animate-pulse tracking-widest">
@@ -201,7 +201,9 @@ export default function InterviewPage() {
   const state = location.state as LocationState | undefined;
 
   const [fetchedData, setFetchedData] = useState<any>(null);
-  const [isInitializing, setIsInitializing] = useState(!!sessionId && !state);
+  
+  const isDirectLink = !!sessionId && !state;
+  const [isInitializing, setIsInitializing] = useState(isDirectLink);
 
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [introPhase, setIntroPhase] = useState(true);
@@ -235,7 +237,6 @@ export default function InterviewPage() {
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [voiceGender, setVoiceGender] = useState<"indian_female" | "female" | "male">("female");
 
-  // 🚀 UPGRADE: Dynamic Time-Based Pacing Indices
   const [easyIdx, setEasyIdx] = useState(0);
   const [medIdx, setMedIdx] = useState(0);
   const [hardIdx, setHardIdx] = useState(0);
@@ -312,7 +313,6 @@ export default function InterviewPage() {
     { id: 3, question: "How do you handle scaling bottlenecks in a system architecture?", category: "technical", difficulty: "hard" }
   ];
 
-  // 🚀 UPGRADE: Split questions safely by difficulty for the Infinite Timer Loop
   const easyQs = activeQuestions.filter((q: any) => q.difficulty === 'easy' || q.difficulty?.toLowerCase().includes('basic'));
   const medQs = activeQuestions.filter((q: any) => q.difficulty === 'medium');
   const hardQs = activeQuestions.filter((q: any) => q.difficulty === 'hard' || q.difficulty?.toLowerCase().includes('hots'));
@@ -322,11 +322,11 @@ export default function InterviewPage() {
   const safeMed = medQs.length > 0 ? medQs : activeQuestions.slice(Math.ceil(totalQCount / 3), Math.ceil((totalQCount * 2) / 3));
   const safeHard = hardQs.length > 0 ? hardQs : activeQuestions.slice(Math.ceil((totalQCount * 2) / 3));
 
-  const timeProgress = totalElapsed / (durationMinutes * 60);
+  const progress = (totalElapsed / (durationMinutes * 60)) * 100;
   const timeRemaining = Math.max(0, (durationMinutes * 60) - totalElapsed);
 
   useEffect(() => {
-    if (sessionId && !state) {
+    if (sessionId && !state && isInitializing) {
       const fetchSessionDetails = async () => {
         try {
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
@@ -340,15 +340,16 @@ export default function InterviewPage() {
             body: JSON.stringify({ job_description: session.job_description, resume: session.resume_text, num_questions: 30, interview_level: session.interview_level || "L2" })
           });
           const qData = await qRes.json();
+          
           setFetchedData({ ...session, questions: qData.questions });
         } catch (err: any) {
           toast.error(err.message);
-          navigate("/");
+          navigate("/"); 
         } finally { setIsInitializing(false); }
       };
       fetchSessionDetails();
     }
-  }, [sessionId, state, navigate]);
+  }, [sessionId, state, navigate, isInitializing]);
 
   useEffect(() => {
     if (interviewStep === "submitting") {
@@ -526,7 +527,6 @@ export default function InterviewPage() {
             }
           }
         } catch (e) {
-          // Fallback if cross-origin canvas throws error
         }
       }
 
@@ -798,7 +798,6 @@ export default function InterviewPage() {
     }
   }, [voiceGender, startSpeechRecognition]);
 
-  // 🚀 UPGRADE: Infinite Dynamic Pacing engine. Questions escalate strictly based on the timer progress, preventing early cutoffs.
   const handleAnswerSubmit = useCallback(async (e: any) => {
     if (!isRecording) return;
     
@@ -824,15 +823,14 @@ export default function InterviewPage() {
 
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
     
-    // Calculate Pacing
-    const currProgress = totalElapsed / (durationMinutes * 60);
+    const currProgress = (totalElapsed / (durationMinutes * 60)) * 100;
     const isTimeUp = ((durationMinutes * 60) - totalElapsed) <= 30;
 
     let nextQData;
-    if (currProgress < 0.33) {
+    if (currProgress < 33) {
         nextQData = safeEasy[easyIdx % safeEasy.length];
         setEasyIdx(e => e + 1);
-    } else if (currProgress < 0.66) {
+    } else if (currProgress < 66) {
         nextQData = safeMed[medIdx % safeMed.length];
         setMedIdx(m => m + 1);
     } else {
@@ -924,9 +922,12 @@ export default function InterviewPage() {
       if (fullBlob.size > 0) finalAnswers.push({ questionId: -1, transcript: "", videoBlob: fullBlob });
 
       const questionAnswers = finalAnswers.filter((a) => a.questionId !== -1);
+      
+      const questionMap = new Map(activeQuestions.map(q => [q.id, q]));
+      
       let fullTranscript = questionAnswers.map((a, i) => {
         if (a.questionId === 0) return `Introduction:\nCandidate: ${a.transcript}`;
-        const q = finalQuestionsList.find((q) => q.id === a.questionId);
+        const q = questionMap.get(a.questionId);
         return `Q${i} [${q?.difficulty || "Medium"}]: ${q?.question || "Unknown"}\nA${i}: ${a.transcript}`;
       }).join("\n\n");
 
@@ -974,7 +975,7 @@ export default function InterviewPage() {
       toast.error("Network issue submitting evaluation, but data was saved locally.");
       setInterviewStep("feedback");
     }
-  }, [answers, finalQuestionsList, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording, telemetry, totalElapsed]);
+  }, [answers, activeQuestions, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording, telemetry, totalElapsed]);
 
   const submitFeedback = async () => {
     if (!sessionId) { setFeedbackSubmitted(true); return; }
@@ -989,8 +990,8 @@ export default function InterviewPage() {
 
   const formatTime = (s: number) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
-  if (isInitializing) return <div className="min-h-screen bg-background flex items-center justify-center"><Loader2 className="w-12 h-12 text-primary animate-spin" /></div>;
-  if (!state && !fetchedData) return null;
+  if (isInitializing) return <div className="min-h-screen bg-background flex items-center justify-center space-y-4 flex-col"><Loader2 className="w-12 h-12 text-primary animate-spin" /><span className="text-muted-foreground font-display text-sm tracking-widest">LOADING FORGEPRO VAULT...</span></div>;
+  if (!state && !fetchedData) return null; 
 
   if (interviewStep === "submitting") {
     return (
@@ -1022,7 +1023,7 @@ export default function InterviewPage() {
                 <h3 className="text-xl font-semibold text-center">How was your ForgePro experience?</h3>
                 <div className="flex justify-center gap-2">
                   {[1,2,3,4,5].map((star) => (
-                    <Star key={star} onClick={() => setRating(star)} className={`w-10 h-10 cursor-pointer ${rating >= star ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground"}`} />
+                    <Star key={star} onClick={() => setRating(star)} className={"w-10 h-10 cursor-pointer " + (rating >= star ? "text-yellow-400 fill-yellow-400" : "text-muted-foreground")} />
                   ))}
                 </div>
                 <Textarea placeholder="Thoughts on the AI?" value={feedbackText} onChange={(e) => setFeedbackText(e.target.value)} className="bg-card min-h-[100px]" />
@@ -1120,7 +1121,6 @@ export default function InterviewPage() {
 
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-6xl flex flex-col gap-6">
         
-        {/* Top Header Row */}
         <motion.div initial="hidden" animate="visible" className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-display font-bold text-foreground">Interviewing: {candidateName}</h1>
@@ -1141,12 +1141,10 @@ export default function InterviewPage() {
           </div>
         </motion.div>
 
-        {/* Progress Bar */}
         <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-          <motion.div className="h-full bg-primary rounded-full" initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 0.3 }} />
+          <motion.div className="h-full bg-primary rounded-full" initial={{ width: 0 }} animate={{ width: progress + "%" }} transition={{ duration: 0.3 }} />
         </div>
 
-        {/* Cinematic Centered Video View */}
         <div className="w-full max-w-4xl mx-auto mt-4 mb-2">
           <div className="relative rounded-2xl overflow-hidden bg-black aspect-video border border-primary/20 shadow-[0_0_50px_rgba(0,240,255,0.15)] ring-1 ring-white/5">
             <video ref={videoRef} muted playsInline className="w-full h-full object-cover block" style={{ transform: "scaleX(-1)" }} />
@@ -1170,15 +1168,14 @@ export default function InterviewPage() {
           </div>
         </div>
 
-        {/* Lower Grid: Question & Transcript */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl mx-auto w-full">
           
           <div className="lg:col-span-2 space-y-4">
             {aiMessage && isSpeaking && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-5 border-l-4 border-nexus-amber shadow-sm">
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-xl p-5 border-l-4 border-accent shadow-sm">
                 <div className="flex items-center gap-2 mb-2">
-                  <Volume2 className="w-4 h-4 text-nexus-amber animate-pulse" />
-                  <span className="text-xs font-bold text-nexus-amber uppercase tracking-wider">ForgePro Interviewer</span>
+                  <Volume2 className="w-4 h-4 text-accent animate-pulse" />
+                  <span className="text-xs font-bold text-accent uppercase tracking-wider">ForgePro Interviewer</span>
                 </div>
                 <p className="text-base text-foreground leading-relaxed">{aiMessage}</p>
               </motion.div>
@@ -1188,7 +1185,7 @@ export default function InterviewPage() {
               <AnimatePresence mode="wait">
                 <motion.div key={currentQuestion.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="glass rounded-xl p-6 shadow-sm border border-border/50">
                   <span className="text-xs font-bold text-primary uppercase tracking-wider mb-2 block">
-                     Phase: {currentQuestion.difficulty || "Technical"} 
+                     Difficulty: {currentQuestion.difficulty || "Technical"} 
                   </span>
                   <p className="text-lg font-medium text-foreground leading-relaxed">{currentQuestion.question}</p>
                 </motion.div>
@@ -1200,7 +1197,7 @@ export default function InterviewPage() {
             <div className="glass rounded-xl p-5 border border-border/50 shadow-sm h-full flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <Mic className={`w-4 h-4 ${isRecording && !isSpeaking ? "text-green-500 animate-pulse" : "text-muted-foreground"}`} />
+                  <Mic className={"w-4 h-4 " + (isRecording && !isSpeaking ? "text-green-500 animate-pulse" : "text-muted-foreground")} />
                   <span className="text-sm font-bold text-foreground uppercase tracking-wider">Live Transcript</span>
                 </div>
               </div>
