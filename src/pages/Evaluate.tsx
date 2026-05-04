@@ -271,7 +271,7 @@ export default function EvaluatePage() {
           
           <motion.div variants={fadeUp} custom={0} className="text-center mb-4">
             <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
-              Start ForgePro Interview
+              Start ForgePro Screening
             </h1>
           </motion.div>
 
