@@ -62,6 +62,12 @@ const StatusBadge = ({ status }: { status: string }) => {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+
+  // 🔒 Enterprise Auth Lock
+  useEffect(() => {
+    if (localStorage.getItem("forgepro_auth") !== "true") navigate("/");
+  }, [navigate]);
+
   const [results, setResults] = useState<EvaluationResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

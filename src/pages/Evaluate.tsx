@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import {
   FileText, Briefcase, User, Loader2, Sparkles, Upload, X, CheckCircle2,
   WifiOff, Mail, Copy, Send, Clock, Mic, MessageSquare, RotateCcw, Building2
@@ -68,6 +69,13 @@ const fadeUp = {
 };
 
 export default function EvaluatePage() {
+  const navigate = useNavigate();
+
+  // 🔒 Enterprise Auth Lock
+  useEffect(() => {
+    if (localStorage.getItem("forgepro_auth") !== "true") navigate("/");
+  }, [navigate]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingJD, setIsGeneratingJD] = useState(false);

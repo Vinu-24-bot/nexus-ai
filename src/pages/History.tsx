@@ -37,6 +37,12 @@ const isInitialScreening = (r: EvaluationResult) => {
 
 export default function HistoryPage() {
   const navigate = useNavigate();
+
+  // 🔒 Enterprise Auth Lock
+  useEffect(() => {
+    if (localStorage.getItem("forgepro_auth") !== "true") navigate("/");
+  }, [navigate]);
+
   const [evaluations, setEvaluations] = useState<EvaluationResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);

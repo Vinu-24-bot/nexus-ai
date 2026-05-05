@@ -81,6 +81,12 @@ Experience Level: Mid to Senior (2-5+ years)`;
 
 export default function UploadAnalysisPage() {
   const navigate = useNavigate();
+
+  // 🔒 Enterprise Auth Lock
+  useEffect(() => {
+    if (localStorage.getItem("forgepro_auth") !== "true") navigate("/");
+  }, [navigate]);
+
   const videoInputRef = useRef<HTMLInputElement>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
 

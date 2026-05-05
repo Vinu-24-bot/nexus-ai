@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   ArrowLeft, CheckCircle2, AlertTriangle, MessageSquare,
@@ -278,7 +278,7 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
                 <option value="2" className="text-black">2.0x Speed</option>
               </select>
             </div>
-
+            
             {/* 🚀 INJECTED DOWNLOAD BUTTON */}
             <a 
               href={src} 
@@ -290,7 +290,7 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
             >
               <Download className="w-5 h-5" />
             </a>
-            
+
             <button onClick={toggleFullscreen} className="hover:text-primary transition-colors">
               {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
             </button>
@@ -302,6 +302,13 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
 };
 
 export default function ResultPage() {
+  const navigate = useNavigate();
+
+  // 🔒 Enterprise Auth Lock
+  useEffect(() => {
+    if (localStorage.getItem("forgepro_auth") !== "true") navigate("/");
+  }, [navigate]);
+
   const { id } = useParams();
   const [result, setResult] = useState<EvaluationResult | null>(null);
   const [loading, setLoading] = useState(true);
