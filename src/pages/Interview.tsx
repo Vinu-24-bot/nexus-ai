@@ -23,6 +23,37 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
+// 🚀 UPGRADE: Phonetic Auto-Corrector for Tech Interviews
+const correctPhonetics = (text: string) => {
+  let t = text;
+  const fixes: Record<string, string> = {
+    "eat way": "8-way",
+    "eight way": "8-way",
+    "reacts": "React",
+    "note js": "Node.js",
+    "no js": "Node.js",
+    "next js": "Next.js",
+    "view js": "Vue.js",
+    "type script": "TypeScript",
+    "java script": "JavaScript",
+    "sequel": "SQL",
+    "my sequel": "MySQL",
+    "post gres": "PostgreSQL",
+    "a w s": "AWS",
+    "g c p": "GCP",
+    "doc er": "Docker",
+    "coober netties": "Kubernetes",
+    "k 8 s": "Kubernetes",
+    "a p i": "API",
+    "j son": "JSON"
+  };
+  Object.keys(fixes).forEach(k => {
+    const regex = new RegExp(`\\b${k}\\b`, 'gi');
+    t = t.replace(regex, fixes[k]);
+  });
+  return t;
+};
+
 class AudioQueueManager {
   private queue: {text: string, gender: "indian_female" | "female" | "male", resolve: () => void}[] = [];
   public isPlaying = false;
@@ -180,7 +211,6 @@ const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number
   </header>
 );
 
-// 🚀 UPGRADE: Prevent Garbage Collection of Audio Nodes for pristine Bluetooth Mic Recording
 const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | null) => {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -188,7 +218,6 @@ const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | nul
     const dest = ctx.createMediaStreamDestination();
     let hasAudio = false;
 
-    // 🛡️ Binds nodes to the window object so Chrome GC cannot delete the mic track
     (window as any).__forgepro_audio_ctx = ctx;
     (window as any).__forgepro_audio_sources = [];
 
@@ -374,8 +403,8 @@ export default function InterviewPage() {
   useEffect(() => {
     return () => {
       audioQueue.cancel();
-      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
-      if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach((t) => t.stop());
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach(t => t.stop());
       if (totalTimerRef.current) clearInterval(totalTimerRef.current);
       if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
       if (securityLoopRef.current) cancelAnimationFrame(securityLoopRef.current);
@@ -669,9 +698,10 @@ export default function InterviewPage() {
         }
         
         const fullText = (nativeFinalAccumulator + interim).trim();
-        liveTranscriptRef.current = fullText;
-        setLiveTranscript(fullText);
-        handleSpeechIntent(fullText);
+        const correctedText = correctPhonetics(fullText);
+        liveTranscriptRef.current = correctedText;
+        setLiveTranscript(correctedText);
+        handleSpeechIntent(correctedText);
     };
     
     recognition.onerror = (event: any) => {
@@ -708,7 +738,7 @@ export default function InterviewPage() {
         const res = await fetch(`${API_URL}/transcribe-chunk`, { method: "POST", body: formData });
         if (res.ok) {
            const data = await res.json();
-           if (data.text) return data.text;
+           if (data.text) return correctPhonetics(data.text);
         }
       } catch (e) {}
     }
@@ -754,7 +784,7 @@ export default function InterviewPage() {
     else if (reason === "MIC_ERROR") finalChunk += " [SYSTEM: MIC_ERROR]";
     else if (reason === "SILENCE" && finalChunk.length === 0 && accumulatedTranscript.length === 0) finalChunk = "<SILENCE>";
 
-    const totalAnswerSoFar = finalChunk === "<SILENCE>" ? "<SILENCE>" : (accumulatedTranscript + " " + finalChunk).trim();
+    const totalAnswerSoFar = finalChunk === "<SILENCE>" ? "<SILENCE>" : correctPhonetics((accumulatedTranscript + " " + finalChunk).trim());
     setAccumulatedTranscript(totalAnswerSoFar);
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
 
@@ -794,8 +824,20 @@ export default function InterviewPage() {
     const availablePool = activeQuestions.filter((q: any) => !usedQIds.has(q.id));
     
     if (availablePool.length > 0) {
-        let pool = availablePool.filter((q: any) => nextDiff === "easy" ? (q.difficulty === "easy" || q.difficulty?.toLowerCase().includes("basic") || q.category === "behavioral") : nextDiff === "medium" ? q.difficulty === "medium" : (q.difficulty === "hard" || q.difficulty?.toLowerCase().includes("hots")));
+        let pool = availablePool.filter((q: any) => {
+            const diffMatch = nextDiff === "easy" 
+              ? (q.difficulty === "easy" || q.difficulty?.toLowerCase().includes("basic") || q.category === "behavioral") 
+              : nextDiff === "medium" 
+                ? q.difficulty === "medium" 
+                : (q.difficulty === "hard" || q.difficulty?.toLowerCase().includes("hots"));
+            
+            const catMatch = (!isSufficient || isSkipOrEmpty) ? (currentQuestion && q.category ? q.category !== currentQuestion.category : true) : true;
+            return diffMatch && catMatch;
+        });
+
+        if (pool.length === 0) pool = availablePool.filter((q: any) => nextDiff === "easy" ? (q.difficulty === "easy" || q.difficulty?.toLowerCase().includes("basic") || q.category === "behavioral") : nextDiff === "medium" ? q.difficulty === "medium" : (q.difficulty === "hard" || q.difficulty?.toLowerCase().includes("hots")));
         if (pool.length === 0) pool = availablePool; 
+        
         nextQData = pool[0];
     }
 
@@ -880,12 +922,14 @@ export default function InterviewPage() {
       fullTranscript += `\n\n[SYSTEM_EVALUATION_DIRECTIVE]:
 - Total Session Time: ${minutes}m ${seconds}s.
 - Interview Target Duration: ${durationMinutes}m.
-- Status: ${isAborted ? 'ENDED EARLY BY USER' : 'COMPLETED'}.
-- Transcription Context & Accuracy Correction: This is an auto-generated STT transcript. You MUST intelligently auto-correct phonetic errors based on the ${position} role (e.g., 'eat way' -> '8-way', 'reacts' -> 'Redux', 'note js' -> 'Node.js'). Do not penalize the candidate for STT software misspellings. Grade their underlying technical intent.
-- Scoring Rules: Evaluate accurately and fairly against the Resume, Role, and Job Description.
+- Status: ${isAborted ? 'ENDED EARLY BY USER / ABORTED' : 'COMPLETED'}.
+- Transcription Accuracy Reminder: This transcript was generated via phonetic STT. Intelligently auto-correct any obvious technical misspellings based on the ${position} role before evaluating.
+- SCORING MANDATE: Evaluate strictly on the depth, relevancy to JD, and accuracy of the answers provided. 
+- DURATION CONTEXT: The target was ${durationMinutes}m. The candidate only completed ${minutes}m ${seconds}s. 
 - Rule 1: Apply a penalty for vague, fluff-filled answers lacking technical depth.
 - Rule 2: Reward Higher Order Thinking Skills (HOTS) - explaining 'why' and 'how'.
-- Rule 3 (Time Context): The interview lasted ${minutes}m ${seconds}s. DO NOT artificially severely penalize the score just because it was short. Base the final score strictly and purely on the actual performance, accuracy, relevancy, and confidence demonstrated in the provided answers. If they answered perfectly for 2.5 minutes, reflect that accuracy fairly.`;
+- Rule 3: Do NOT artificially severe penalize the score just because it was short. Base the final score strictly and purely on the actual performance, accuracy, relevancy, and confidence demonstrated in the provided answers.
+- Rule 4 (Knowledge Gap Penalty): If the transcript shows the candidate skipped a question, said "I don't know", or gave an insufficient answer (causing the AI to move to a new topic), strictly penalize their score for that knowledge gap. Do not give them a free pass on skipped topics.`;
 
       let primaryVideoFilename: string = "LIVE_SCREENING";
       const timestamp = Date.now();
