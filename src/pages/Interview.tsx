@@ -180,7 +180,7 @@ const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number
   </header>
 );
 
-// 🚀 UPGRADE: Advanced Web Audio API Mixer to guarantee Mic + System Audio capture
+// 🚀 Advanced Web Audio API Mixer to guarantee Mic + System Audio capture
 const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | null) => {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -188,7 +188,6 @@ const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | nul
     const dest = ctx.createMediaStreamDestination();
     let hasAudio = false;
 
-    // Safely isolate and mix the microphone stream
     if (stream1 && stream1.getAudioTracks().length > 0) {
       const micStream = new MediaStream([stream1.getAudioTracks()[0]]);
       const source1 = ctx.createMediaStreamSource(micStream);
@@ -199,7 +198,6 @@ const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | nul
       hasAudio = true;
     }
 
-    // Safely isolate and mix the system audio (AI voice) stream
     if (stream2 && stream2.getAudioTracks().length > 0) {
       const sysStream = new MediaStream([stream2.getAudioTracks()[0]]);
       const source2 = ctx.createMediaStreamSource(sysStream);
@@ -264,7 +262,7 @@ export default function InterviewPage() {
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [voiceGender, setVoiceGender] = useState<"indian_female" | "female" | "male">("female");
 
-  // 🚀 UPGRADE: Linear Question Tracker prevents repeating questions
+  // Linear Question Tracker prevents repeating questions
   const [qIndex, setQIndex] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState<InterviewQuestion | null>(null);
 
@@ -288,6 +286,7 @@ export default function InterviewPage() {
   const isHandlingSubmitRef = useRef(false);
   const securityLoopRef = useRef<number | null>(null);
 
+  // 🛡️ The Master Kill-Switch to prevent ghost fetches and duplicate audio
   const isTerminatingRef = useRef(false);
 
   const [submitStatusIndex, setSubmitStatusIndex] = useState(0);
@@ -334,7 +333,6 @@ export default function InterviewPage() {
   const jobDescription = state?.jobDescription || fetchedData?.job_description || "";
   const resume = state?.resume || fetchedData?.resume_text || "";
   
-  // 🚀 UPGRADE: Consolidates all questions into a single, flat, non-repeating array
   const sortedQuestions = useMemo(() => {
     const rawQuestions = state?.questions || fetchedData?.questions || [];
     const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
@@ -415,7 +413,7 @@ export default function InterviewPage() {
 
   const handleForceEndInterview = useCallback(async (isEarlyLeave = false, reason = "") => {
     if (isTerminatingRef.current) return;
-    isTerminatingRef.current = true;
+    isTerminatingRef.current = true; // 🛡️ Activate Kill Switch
 
     if (isRecordingRef.current && recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch {}
@@ -433,7 +431,7 @@ export default function InterviewPage() {
         handleForceEndInterview(true, `SECURITY BREACH: ${reason} (3 Strikes Exceeded).`);
       } else {
         toast.warning(`Security Violation (${newStrikes}/3): ${reason}.`);
-        audioQueue.speak(`Security warning. ${reason}.`, voiceGender);
+        if (!isTerminatingRef.current) audioQueue.speak(`Security warning. ${reason}.`, voiceGender);
       }
       return newStrikes;
     });
@@ -562,7 +560,7 @@ export default function InterviewPage() {
       setTelemetry({ faces, liveness: currentLiveness, lipSync: true, mask: false });
       if (!isVisible) handleSecurityViolation("Candidate switched tabs or minimized browser.");
       
-      securityLoopRef.current = requestAnimationFrame(checkTelemetry);
+      if (!isTerminatingRef.current) securityLoopRef.current = requestAnimationFrame(checkTelemetry);
     };
     checkTelemetry();
   };
@@ -608,7 +606,7 @@ export default function InterviewPage() {
     await audioQueue.speak("Activating security vault. Scanning face mesh and environment.", voiceGender);
     
     setTimeout(() => {
-        startActualInterview();
+        if (!isTerminatingRef.current) startActualInterview();
     }, 1000);
   };
 
@@ -626,7 +624,7 @@ export default function InterviewPage() {
     
     setTimeout(async () => {
       const introText = `Identity verified. Hello ${candidateName}. Your screen and camera are secured. Please introduce yourself and state your role.`;
-      await speakAndRecord(introText);
+      if (!isTerminatingRef.current) await speakAndRecord(introText);
     }, 800);
   };
 
@@ -672,6 +670,8 @@ export default function InterviewPage() {
   };
 
   const startSpeechRecognition = useCallback(() => {
+    if (isTerminatingRef.current) return;
+    
     setLiveTranscript("");
     liveTranscriptRef.current = "";
     isRecordingRef.current = true;
@@ -683,7 +683,9 @@ export default function InterviewPage() {
 
     if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     watchdogIntervalRef.current = setInterval(() => {
+      if (isTerminatingRef.current) return;
       if (!isRecordingRef.current || isHandlingSubmitRef.current) return;
+      
       const now = Date.now();
       const timeSinceStart = now - recordingStartRef.current;
       const timeSinceLastSpeech = now - lastSpeechRef.current;
@@ -705,12 +707,14 @@ export default function InterviewPage() {
     }, 500);
 
     const handleSpeechIntent = (text: string) => {
+        if (isTerminatingRef.current) return;
         const skipRegex = /(skip|don'?t know|no idea|move on|next question|not sure|pass|don'?t have any idea|no clue|haven'?t heard)/i;
         const isExactSkip = skipRegex.test(text.toLowerCase());
         
         if (isExactSkip && !isHandlingSubmitRef.current) {
             isHandlingSubmitRef.current = true; 
             setTimeout(() => {
+               if (isTerminatingRef.current) return;
                const btn = document.getElementById("auto-submit-btn");
                if (btn) { btn.dataset.reason = "INTENT"; btn.click(); }
             }, 300);
@@ -733,6 +737,7 @@ export default function InterviewPage() {
 
     // @ts-ignore
     recognition.onresult = (event) => {
+        if (isTerminatingRef.current) return;
         const now = Date.now();
         if (lastSpeechRef.current === recordingStartRef.current) {
             const latencySecs = ((now - questionEndTimeRef.current) / 1000).toFixed(1);
@@ -757,6 +762,7 @@ export default function InterviewPage() {
     };
     
     recognition.onerror = (event: any) => {
+        if (isTerminatingRef.current) return;
         if (event.error === 'network' || event.error === 'audio-capture') {
             const btn = document.getElementById("auto-submit-btn");
             if (btn && !isHandlingSubmitRef.current) { btn.dataset.reason = "MIC_ERROR"; btn.click(); }
@@ -764,6 +770,7 @@ export default function InterviewPage() {
     };
     
     recognition.onend = () => { 
+        if (isTerminatingRef.current) return;
         if (isRecordingRef.current) { 
             try { recognition.start(); } catch {} 
         } 
@@ -808,6 +815,8 @@ export default function InterviewPage() {
   }, []);
 
   const speakAndRecord = useCallback(async (questionText: string) => {
+    if (isTerminatingRef.current) return; // 🛡️ Prevent speaking if terminated
+    
     setIsSpeaking(true);
     setIsAnalyzing(false);
     isSpeakingRef.current = true;
@@ -816,6 +825,8 @@ export default function InterviewPage() {
     audioQueue.cancel();
     await audioQueue.speak(questionText, voiceGender);
     
+    if (isTerminatingRef.current) return; // 🛡️ Stop recording if terminated while speaking
+
     if (isSpeakingRef.current) {
       setIsSpeaking(false);
       isSpeakingRef.current = false;
@@ -828,6 +839,7 @@ export default function InterviewPage() {
   }, [voiceGender, startSpeechRecognition]);
 
   const handleAnswerSubmit = useCallback(async (e: any) => {
+    if (isTerminatingRef.current) return; // 🛡️ Block ghost submissions
     if (!isRecording) return;
     
     isHandlingSubmitRef.current = true;
@@ -841,6 +853,8 @@ export default function InterviewPage() {
     }
 
     const newTranscriptChunk = await stopRecording(); 
+    if (isTerminatingRef.current) return; // 🛡️ Check again
+
     let finalChunk = newTranscriptChunk.trim();
 
     if (reason === "OVER_TIME_LIMIT") finalChunk += " [SYSTEM: OVER_TIME_LIMIT]";
@@ -852,7 +866,6 @@ export default function InterviewPage() {
 
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
     
-    // 🚀 UPGRADE: Completely prevents repeating questions by using a flat array index
     const nextQData = sortedQuestions[qIndex];
     let nextQText = nextQData ? nextQData.question : "Okay, that concludes all the technical questions.";
 
@@ -878,13 +891,14 @@ export default function InterviewPage() {
         isSufficient = true; 
     }
 
+    if (isTerminatingRef.current) return; // 🛡️ Block ghost audio after async fetch
+
     if (isSufficient) {
       setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
       setAccumulatedTranscript(""); 
 
       const isTimeUp = ((durationMinutes * 60) - totalElapsed) <= 30;
 
-      // If time is up, OR if we have run completely out of questions in the array
       if (isTimeUp || !nextQData) {
         finalizeInterviewAndUpload("Time Expired or Complete.");
         return;
@@ -894,7 +908,7 @@ export default function InterviewPage() {
         setIntroPhase(false);
       }
       
-      setQIndex(prev => prev + 1); // Safely advance to the next unique question
+      setQIndex(prev => prev + 1); 
       setCurrentQuestion(nextQData as InterviewQuestion);
     }
 
@@ -903,10 +917,13 @@ export default function InterviewPage() {
   }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, qIndex, sortedQuestions, voiceGender, startSpeechRecognition, totalElapsed, durationMinutes, speakAndRecord]);
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
-    isTerminatingRef.current = true;
+    isTerminatingRef.current = true; // 🛡️ Activate Kill Switch immediately
+    
+    // Purge all ongoing loops and audio
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
     if (securityLoopRef.current) cancelAnimationFrame(securityLoopRef.current);
     if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
+    audioQueue.cancel(); 
     
     const fullBlob = await stopFullRecording();
     if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{});
@@ -922,7 +939,7 @@ export default function InterviewPage() {
     const closingMsg = isCheat ? `Interview terminated due to security violation.` : `Thank you. That concludes your interview.`;
     setAiMessage(closingMsg);
     
-    audioQueue.cancel();
+    // Speak closing message just once
     await audioQueue.speak(closingMsg, voiceGender);
     setIsSpeaking(false);
     setAiMessage("");
@@ -942,7 +959,6 @@ export default function InterviewPage() {
       if (fullBlob.size > 0) finalAnswers.push({ questionId: -1, transcript: "", videoBlob: fullBlob });
 
       const questionAnswers = finalAnswers.filter((a) => a.questionId !== -1);
-      
       const questionMap = new Map(sortedQuestions.map(q => [q.id, q]));
       
       let fullTranscript = questionAnswers.map((a, i) => {
@@ -952,6 +968,18 @@ export default function InterviewPage() {
       }).join("\n\n");
 
       if (forcedTerminationReason) fullTranscript += `\n\n[SYSTEM LOG]: ${forcedTerminationReason}`;
+
+      // 🚀 THE EVALUATION FIX: Strict rules for Aborted/Short Interviews
+      const isAborted = forcedTerminationReason && !forcedTerminationReason.includes("Time Expired");
+      const minutes = Math.floor(totalElapsed / 60);
+      const seconds = totalElapsed % 60;
+      
+      fullTranscript += `\n\n[SYSTEM_EVALUATION_DIRECTIVE]:
+- Total Session Time: ${minutes}m ${seconds}s.
+- Interview Target Duration: ${durationMinutes}m.
+- Status: ${isAborted ? 'ABORTED / TERMINATED EARLY' : 'COMPLETED'}.
+- Scoring Rules: Evaluate accurately against the Resume, Role, and Job Description. Apply the Waffle Penalty for fluff and HOTS Bonus for deep technical answers. DO NOT grade too leniently or too strictly—it must be perfectly justified.
+- Critical Short-Interview Rule: If the candidate aborted the interview very early (e.g., under 3 minutes) or failed to complete the technical assessment, the overall score MUST be severely penalized (e.g., below 40/100). Do NOT average a high score for an incomplete 1-2 minute interview!`;
 
       let primaryVideoFilename: string = "LIVE_SCREENING";
       const timestamp = Date.now();
