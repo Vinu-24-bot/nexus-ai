@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   FileText, Briefcase, User, Loader2, Sparkles, Upload, X, CheckCircle2,
-  WifiOff, Mail, Copy, Send, Clock, Mic, MessageSquare, RotateCcw, Building2
+  WifiOff, Mail, Copy, Send, Clock, Mic, MessageSquare, RotateCcw, Building2, LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -71,9 +71,9 @@ const fadeUp = {
 export default function EvaluatePage() {
   const navigate = useNavigate();
 
-  // 🔒 Enterprise Auth Lock
+  // 🔒 Enterprise Auth Lock (Session Storage)
   useEffect(() => {
-    if (localStorage.getItem("forgepro_auth") !== "true") navigate("/");
+    if (sessionStorage.getItem("forgepro_auth") !== "true") navigate("/");
   }, [navigate]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -277,10 +277,13 @@ export default function EvaluatePage() {
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-4xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
           
-          <motion.div variants={fadeUp} custom={0} className="text-center mb-4">
+          <motion.div variants={fadeUp} custom={0} className="relative text-center mb-4">
             <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
               Start ForgePro Screening
             </h1>
+            <Button variant="outline" size="sm" onClick={() => { sessionStorage.removeItem("forgepro_auth"); window.location.href = "/"; }} className="absolute right-0 top-0 text-destructive border-destructive/30 hover:bg-destructive/10 hidden md:flex">
+              <LogOut className="w-4 h-4 mr-2" /> Logout
+            </Button>
           </motion.div>
 
           <motion.div variants={fadeUp} custom={0.2} className="glass rounded-xl p-6 border-primary/20 relative overflow-hidden mb-6 shadow-sm">
