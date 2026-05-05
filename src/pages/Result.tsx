@@ -68,7 +68,6 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [hasError, setHasError] = useState(false);
 
-  // 🛡️ THE FIX: Employs the `1e101` Chrome hack to instantly calculate broken WebM durations.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -279,17 +278,37 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
               </select>
             </div>
             
-            {/* 🚀 INJECTED DOWNLOAD BUTTON */}
-            <a 
-              href={src} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              download={`ForgePro_Recording_${Date.now()}.webm`} 
-              className="hover:text-primary transition-colors" 
-              title="Download Video File"
+            {/* 🚀 INJECTED: Asynchronous Blob Fetcher to force local download instead of new tab */}
+            <button 
+              onClick={async (e) => {
+                e.preventDefault();
+                const toastId = toast.loading("Fetching secure video file...");
+                try {
+                  const response = await fetch(src);
+                  if (!response.ok) throw new Error("Network response was not ok");
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.style.display = "none";
+                  a.href = url;
+                  a.download = `ForgePro_Recording_${Date.now()}.webm`;
+                  document.body.appendChild(a);
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                  document.body.removeChild(a);
+                  toast.dismiss(toastId);
+                  toast.success("Download complete!");
+                } catch (error) {
+                  toast.dismiss(toastId);
+                  toast.error("Direct download blocked by browser security. Opening secure link...");
+                  window.open(src, "_blank"); // Fallback
+                }
+              }}
+              className="hover:text-primary transition-colors cursor-pointer" 
+              title="Force Download Video"
             >
               <Download className="w-5 h-5" />
-            </a>
+            </button>
 
             <button onClick={toggleFullscreen} className="hover:text-primary transition-colors">
               {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
