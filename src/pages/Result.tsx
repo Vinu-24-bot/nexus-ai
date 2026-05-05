@@ -205,6 +205,7 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
         onTimeUpdate={handleTimeUpdate} 
         onError={() => setHasError(true)} 
         preload="auto"
+        crossOrigin="anonymous"
       />
       
       {!isPlaying && (
@@ -277,6 +278,18 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
                 <option value="2" className="text-black">2.0x Speed</option>
               </select>
             </div>
+
+            {/* 🚀 INJECTED DOWNLOAD BUTTON */}
+            <a 
+              href={src} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              download={`ForgePro_Recording_${Date.now()}.webm`} 
+              className="hover:text-primary transition-colors" 
+              title="Download Video File"
+            >
+              <Download className="w-5 h-5" />
+            </a>
             
             <button onClick={toggleFullscreen} className="hover:text-primary transition-colors">
               {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
