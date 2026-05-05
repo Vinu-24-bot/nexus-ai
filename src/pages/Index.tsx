@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { 
   Lock, User, Key, ArrowRight, ShieldCheck, 
-  Brain, Activity, Video, Globe, Zap, BarChart3, Target, LogOut
+  Brain, Activity, Video, Globe, Zap, BarChart3, Target
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -128,7 +128,7 @@ function AuthScreen({ onLogin }: { onLogin: () => void }) {
   );
 }
 
-function HomeScreen({ onLogout }: { onLogout: () => void }) {
+function HomeScreen() {
   return (
     <div className="min-h-screen bg-background transition-colors duration-300">
       <Navbar />
@@ -154,9 +154,6 @@ function HomeScreen({ onLogout }: { onLogout: () => void }) {
                   View Dashboard
                 </Button>
               </Link>
-              <Button variant="destructive" onClick={onLogout} className="h-14 px-8 text-base font-semibold bg-destructive/10 text-destructive border border-destructive/30 hover:bg-destructive/20">
-                <LogOut className="mr-2 w-5 h-5" /> Secure Logout
-              </Button>
             </motion.div>
           </motion.div>
           <motion.div initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 1.2, ease: "easeOut" }} className="flex-1 relative w-full max-w-[400px] lg:max-w-[550px] aspect-square flex items-center justify-center">
@@ -211,13 +208,5 @@ export default function IndexPage() {
     return <AuthScreen onLogin={() => setIsAuth(true)} />;
   }
 
-  return (
-    <HomeScreen 
-      onLogout={() => {
-        sessionStorage.removeItem("forgepro_auth");
-        setIsAuth(false);
-        toast.success("Successfully logged out.");
-      }} 
-    />
-  );
+  return <HomeScreen />;
 }

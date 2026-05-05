@@ -8,7 +8,7 @@ import ScoreRing from "@/components/ScoreRing";
 import {
   ArrowRight, Users, TrendingUp, Loader2, RefreshCw,
   WifiOff, BarChart3, CheckCircle2, Medal, GitPullRequest,
-  MessageSquare, Trash2, Pin, Star, Mic, Upload, LogOut
+  MessageSquare, Trash2, Pin, Star, Mic, Upload
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -204,9 +204,6 @@ export default function DashboardPage() {
               <Button variant="outline" size="sm" onClick={() => { fetchData(true); fetchFeedbacks(); }} disabled={refreshing} className="h-8">
                 <RefreshCw className={`w-3.5 h-3.5 mr-2 ${refreshing ? "animate-spin" : ""}`} />
                 Sync
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => { sessionStorage.removeItem("forgepro_auth"); window.location.href = "/"; }} className="h-8 text-destructive border-destructive/30 hover:bg-destructive/10">
-                <LogOut className="w-3.5 h-3.5 mr-2" /> Logout
               </Button>
             </div>
           </motion.div>

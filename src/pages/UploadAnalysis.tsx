@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   Upload, FileText, Briefcase, User, Loader2, Brain, Sparkles, X,
-  CheckCircle2, Video, AlertCircle, Wifi, WifiOff, MessageSquare, RotateCcw, LogOut
+  CheckCircle2, Video, AlertCircle, Wifi, WifiOff, MessageSquare, RotateCcw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -280,14 +280,11 @@ export default function UploadAnalysisPage() {
       <div className="container mx-auto px-6 pt-24 pb-16 max-w-4xl">
         <motion.div initial="hidden" animate="visible" className="space-y-8">
           
-          <motion.div variants={fadeUp} custom={0} className="relative text-center mb-4">
+          <motion.div variants={fadeUp} custom={0} className="text-center space-y-3">
             <h1 className="text-2xl md:text-3xl font-display font-bold text-foreground leading-tight">
               Analyze Pre-Recorded Interviews With <br />
               <span className="text-primary">BATS ForgePro</span>
             </h1>
-            <Button variant="outline" size="sm" onClick={() => { sessionStorage.removeItem("forgepro_auth"); window.location.href = "/"; }} className="absolute right-0 top-0 text-destructive border-destructive/30 hover:bg-destructive/10 hidden md:flex">
-              <LogOut className="w-4 h-4 mr-2" /> Logout
-            </Button>
           </motion.div>
 
           <motion.div variants={fadeUp} custom={0.2} className="glass rounded-xl p-6 border-primary/20 relative overflow-hidden mb-6 shadow-sm">

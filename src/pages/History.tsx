@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Search, Download, RefreshCcw, Trash2, ArrowRight, 
-  Filter, ChevronDown, Loader2, User, Calendar, AlertTriangle, LogOut
+  Filter, ChevronDown, Loader2, User, Calendar, AlertTriangle
 } from "lucide-react";
 import { getEvaluations, deleteEvaluation } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
@@ -38,7 +38,7 @@ const isInitialScreening = (r: EvaluationResult) => {
 export default function HistoryPage() {
   const navigate = useNavigate();
 
-  // 🔒 Enterprise Auth Lock
+  // 🔒 Enterprise Auth Lock (Session Storage)
   useEffect(() => {
     if (sessionStorage.getItem("forgepro_auth") !== "true") navigate("/");
   }, [navigate]);
@@ -329,10 +329,6 @@ export default function HistoryPage() {
               
               <Button variant="outline" onClick={() => { setIsRefreshing(true); fetchData(); }} className="bg-card text-muted-foreground hover:text-foreground shadow-sm px-3" title="Refresh Data">
                 <RefreshCcw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-primary' : ''}`} />
-              </Button>
-
-              <Button variant="outline" onClick={() => { sessionStorage.removeItem("forgepro_auth"); window.location.href = "/"; }} className="text-destructive border-destructive/30 hover:bg-destructive/10 px-3" title="Logout">
-                <LogOut className="w-4 h-4" />
               </Button>
             </div>
           </div>

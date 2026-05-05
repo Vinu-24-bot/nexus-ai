@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
   FileText, Briefcase, User, Loader2, Sparkles, Upload, X, CheckCircle2,
-  WifiOff, Mail, Copy, Send, Clock, Mic, MessageSquare, RotateCcw, Building2, LogOut
+  WifiOff, Mail, Copy, Send, Clock, Mic, MessageSquare, RotateCcw, Building2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -237,7 +237,6 @@ export default function EvaluatePage() {
         })
       });
 
-      // 🚀 THE FIX: Properly extract the actual backend error instead of hiding it behind "Failed to fetch"
       if (!res.ok) {
         let errMsg = `Server Error (${res.status})`;
         try {
@@ -281,9 +280,6 @@ export default function EvaluatePage() {
             <h1 className="text-3xl md:text-4xl font-display font-bold text-foreground">
               Start ForgePro Screening
             </h1>
-            <Button variant="outline" size="sm" onClick={() => { sessionStorage.removeItem("forgepro_auth"); window.location.href = "/"; }} className="absolute right-0 top-0 text-destructive border-destructive/30 hover:bg-destructive/10 hidden md:flex">
-              <LogOut className="w-4 h-4 mr-2" /> Logout
-            </Button>
           </motion.div>
 
           <motion.div variants={fadeUp} custom={0.2} className="glass rounded-xl p-6 border-primary/20 relative overflow-hidden mb-6 shadow-sm">
@@ -575,9 +571,6 @@ export default function EvaluatePage() {
                     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/20">
                       <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
                       <span className="text-xs text-primary font-medium truncate">{resumeFileName}</span>
-                      <button onClick={clearUploadedResume} className="ml-auto shrink-0">
-                        <X className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
-                      </button>
                     </div>
                   )}
                   <Textarea
