@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
@@ -180,21 +180,43 @@ const CandidateHeader = ({ isLive, strikes }: { isLive: boolean, strikes: number
   </header>
 );
 
+// 🚀 UPGRADE: Advanced Web Audio API Mixer to guarantee Mic + System Audio capture
 const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | null) => {
   try {
-    const ctx = new window.AudioContext();
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AudioContextClass();
     const dest = ctx.createMediaStreamDestination();
     let hasAudio = false;
+
+    // Safely isolate and mix the microphone stream
     if (stream1 && stream1.getAudioTracks().length > 0) {
-      ctx.createMediaStreamSource(stream1).connect(dest);
+      const micStream = new MediaStream([stream1.getAudioTracks()[0]]);
+      const source1 = ctx.createMediaStreamSource(micStream);
+      const gain1 = ctx.createGain();
+      gain1.gain.value = 1.5; // Boost mic volume to prevent suppression
+      source1.connect(gain1);
+      gain1.connect(dest);
       hasAudio = true;
     }
+
+    // Safely isolate and mix the system audio (AI voice) stream
     if (stream2 && stream2.getAudioTracks().length > 0) {
-      ctx.createMediaStreamSource(stream2).connect(dest);
+      const sysStream = new MediaStream([stream2.getAudioTracks()[0]]);
+      const source2 = ctx.createMediaStreamSource(sysStream);
+      const gain2 = ctx.createGain();
+      gain2.gain.value = 1.0; 
+      source2.connect(gain2);
+      gain2.connect(dest);
       hasAudio = true;
     }
-    return hasAudio ? dest.stream.getAudioTracks()[0] : null;
+
+    if (hasAudio) {
+      ctx.resume(); // CRITICAL: Forces audio context to wake up
+      return dest.stream.getAudioTracks()[0];
+    }
+    return null;
   } catch (e) {
+    console.error("Audio mixing error. Falling back to default mic:", e);
     return stream1?.getAudioTracks()[0] || null;
   }
 };
@@ -242,9 +264,8 @@ export default function InterviewPage() {
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [voiceGender, setVoiceGender] = useState<"indian_female" | "female" | "male">("female");
 
-  const [easyIdx, setEasyIdx] = useState(0);
-  const [medIdx, setMedIdx] = useState(0);
-  const [hardIdx, setHardIdx] = useState(0);
+  // 🚀 UPGRADE: Linear Question Tracker prevents repeating questions
+  const [qIndex, setQIndex] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState<InterviewQuestion | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -313,22 +334,22 @@ export default function InterviewPage() {
   const jobDescription = state?.jobDescription || fetchedData?.job_description || "";
   const resume = state?.resume || fetchedData?.resume_text || "";
   
-  const rawQuestions = state?.questions || fetchedData?.questions || [];
-  
-  const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
-    { id: 1, question: "Could you briefly describe your most impactful project?", category: "technical", difficulty: "easy" },
-    { id: 2, question: "What is the most challenging bug you've faced recently?", category: "behavioral", difficulty: "medium" },
-    { id: 3, question: "How do you handle scaling bottlenecks in a system architecture?", category: "technical", difficulty: "hard" }
-  ];
+  // 🚀 UPGRADE: Consolidates all questions into a single, flat, non-repeating array
+  const sortedQuestions = useMemo(() => {
+    const rawQuestions = state?.questions || fetchedData?.questions || [];
+    const activeQuestions = rawQuestions.length > 0 ? rawQuestions : [
+      { id: 1, question: "Could you briefly describe your most impactful project?", category: "technical", difficulty: "easy" },
+      { id: 2, question: "What is the most challenging bug you've faced recently?", category: "behavioral", difficulty: "medium" },
+      { id: 3, question: "How do you handle scaling bottlenecks in a system architecture?", category: "technical", difficulty: "hard" }
+    ];
 
-  const easyQs = activeQuestions.filter((q: any) => q.difficulty === 'easy' || q.difficulty?.toLowerCase().includes('basic'));
-  const medQs = activeQuestions.filter((q: any) => q.difficulty === 'medium');
-  const hardQs = activeQuestions.filter((q: any) => q.difficulty === 'hard' || q.difficulty?.toLowerCase().includes('hots'));
-  
-  const totalQCount = activeQuestions.length;
-  const safeEasy = easyQs.length > 0 ? easyQs : activeQuestions.slice(0, Math.ceil(totalQCount / 3));
-  const safeMed = medQs.length > 0 ? medQs : activeQuestions.slice(Math.ceil(totalQCount / 3), Math.ceil((totalQCount * 2) / 3));
-  const safeHard = hardQs.length > 0 ? hardQs : activeQuestions.slice(Math.ceil((totalQCount * 2) / 3));
+    const easy = activeQuestions.filter((q: any) => q.difficulty === 'easy' || q.difficulty?.toLowerCase().includes('basic'));
+    const med = activeQuestions.filter((q: any) => q.difficulty === 'medium');
+    const hard = activeQuestions.filter((q: any) => q.difficulty === 'hard' || q.difficulty?.toLowerCase().includes('hots'));
+    
+    if (easy.length === 0 && med.length === 0 && hard.length === 0) return activeQuestions;
+    return [...easy, ...med, ...hard];
+  }, [state, fetchedData]);
 
   const progress = (totalElapsed / (durationMinutes * 60)) * 100;
   const timeRemaining = Math.max(0, (durationMinutes * 60) - totalElapsed);
@@ -831,21 +852,8 @@ export default function InterviewPage() {
 
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
     
-    const currProgress = (totalElapsed / (durationMinutes * 60)) * 100;
-    const isTimeUp = ((durationMinutes * 60) - totalElapsed) <= 30;
-
-    let nextQData;
-    if (currProgress < 33) {
-        nextQData = safeEasy[easyIdx % safeEasy.length];
-        setEasyIdx(e => e + 1);
-    } else if (currProgress < 66) {
-        nextQData = safeMed[medIdx % safeMed.length];
-        setMedIdx(m => m + 1);
-    } else {
-        nextQData = safeHard[hardIdx % safeHard.length];
-        setHardIdx(h => h + 1);
-    }
-
+    // 🚀 UPGRADE: Completely prevents repeating questions by using a flat array index
+    const nextQData = sortedQuestions[qIndex];
     let nextQText = nextQData ? nextQData.question : "Okay, that concludes all the technical questions.";
 
     let dynamicResponse = "";
@@ -874,7 +882,10 @@ export default function InterviewPage() {
       setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
       setAccumulatedTranscript(""); 
 
-      if (isTimeUp) {
+      const isTimeUp = ((durationMinutes * 60) - totalElapsed) <= 30;
+
+      // If time is up, OR if we have run completely out of questions in the array
+      if (isTimeUp || !nextQData) {
         finalizeInterviewAndUpload("Time Expired or Complete.");
         return;
       }
@@ -883,12 +894,13 @@ export default function InterviewPage() {
         setIntroPhase(false);
       }
       
+      setQIndex(prev => prev + 1); // Safely advance to the next unique question
       setCurrentQuestion(nextQData as InterviewQuestion);
     }
 
     await speakAndRecord(dynamicResponse);
 
-  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, easyIdx, medIdx, hardIdx, safeEasy, safeMed, safeHard, voiceGender, startSpeechRecognition, totalElapsed, durationMinutes, speakAndRecord]);
+  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, qIndex, sortedQuestions, voiceGender, startSpeechRecognition, totalElapsed, durationMinutes, speakAndRecord]);
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
     isTerminatingRef.current = true;
@@ -931,7 +943,7 @@ export default function InterviewPage() {
 
       const questionAnswers = finalAnswers.filter((a) => a.questionId !== -1);
       
-      const questionMap = new Map(activeQuestions.map(q => [q.id, q]));
+      const questionMap = new Map(sortedQuestions.map(q => [q.id, q]));
       
       let fullTranscript = questionAnswers.map((a, i) => {
         if (a.questionId === 0) return `Introduction:\nCandidate: ${a.transcript}`;
@@ -983,7 +995,7 @@ export default function InterviewPage() {
       toast.error("Network issue submitting evaluation, but data was saved locally.");
       setInterviewStep("feedback");
     }
-  }, [answers, activeQuestions, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording, telemetry, totalElapsed]);
+  }, [answers, sortedQuestions, candidateName, position, jobDescription, resume, sessionId, voiceGender, stopFullRecording, telemetry, totalElapsed]);
 
   const submitFeedback = async () => {
     if (!sessionId) { setFeedbackSubmitted(true); return; }
