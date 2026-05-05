@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { BarChart3, FileText, Home, Mic, Upload, Moon, Sun, Monitor } from "lucide-react";
+import { BarChart3, FileText, Home, Mic, Upload, Moon, Sun, Monitor, LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const navItems = [
@@ -14,6 +14,9 @@ const navItems = [
 export default function Navbar() {
   const location = useLocation();
   const [theme, setTheme] = useState<"dark" | "light" | "slate">("dark");
+  
+  // Quick auth check to ensure we only show the logout button to admins
+  const isAuth = typeof window !== 'undefined' && sessionStorage.getItem("forgepro_auth") === "true";
 
   useEffect(() => {
     const savedTheme = (localStorage.getItem("forgepro_theme") as "dark" | "light" | "slate") || "dark";
@@ -48,6 +51,11 @@ export default function Navbar() {
     
     return () => clearInterval(interval);
   }, []);
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("forgepro_auth");
+    window.location.href = "/"; // Instantly purges state and returns to login
+  };
 
   return (
     <motion.nav
@@ -102,31 +110,45 @@ export default function Navbar() {
           })}
         </div>
 
-        {/* THEME SWITCHER */}
-        <div className="flex items-center gap-2 p-1 rounded-lg bg-muted/50 border border-border">
-          <button
-            onClick={() => setTheme("dark")}
-            className={`p-1.5 rounded-md transition-all ${theme === "dark" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
-            title="Dark Mode"
-          >
-            <Moon className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setTheme("slate")}
-            className={`p-1.5 rounded-md transition-all ${theme === "slate" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
-            title="Slate Mode"
-          >
-            <Monitor className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setTheme("light")}
-            className={`p-1.5 rounded-md transition-all ${theme === "light" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
-            title="Light Mode"
-          >
-            <Sun className="w-4 h-4" />
-          </button>
-        </div>
+        {/* RIGHT SIDE: THEME SWITCHER & LOGOUT */}
+        <div className="flex items-center gap-3">
+          
+          <div className="flex items-center gap-2 p-1 rounded-lg bg-muted/50 border border-border">
+            <button
+              onClick={() => setTheme("dark")}
+              className={`p-1.5 rounded-md transition-all ${theme === "dark" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              title="Dark Mode"
+            >
+              <Moon className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setTheme("slate")}
+              className={`p-1.5 rounded-md transition-all ${theme === "slate" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              title="Slate Mode"
+            >
+              <Monitor className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setTheme("light")}
+              className={`p-1.5 rounded-md transition-all ${theme === "light" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              title="Light Mode"
+            >
+              <Sun className="w-4 h-4" />
+            </button>
+          </div>
 
+          {/* DYNAMIC LOGOUT BUTTON */}
+          {isAuth && (
+            <button
+              onClick={handleLogout}
+              className="p-2 rounded-lg bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive/20 transition-all flex items-center justify-center"
+              title="Secure Logout"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
+
+        </div>
       </div>
     </motion.nav>
   );
