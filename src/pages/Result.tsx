@@ -6,7 +6,7 @@ import {
   HelpCircle, FileText, Sparkles, Loader2, Play, Pause,
   Smile, Meh, Frown, Shield, Download, Copy, UserCheck, UserX, ShieldAlert,
   Clock, Maximize, Minimize, Rewind, FastForward, Volume2, VolumeX, Settings,
-  VideoOff, ChevronDown
+  VideoOff, ChevronDown, LogOut
 } from "lucide-react";
 import { getEvaluation, updateSelectionStatus } from "@/lib/api";
 import { EvaluationResult } from "@/types/evaluation";
@@ -68,6 +68,7 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [hasError, setHasError] = useState(false);
 
+  // 🛡️ THE FIX: Employs the `1e101` Chrome hack to instantly calculate broken WebM durations.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -715,6 +716,9 @@ ${result.justification}
                 <span className={`px-4 py-1.5 rounded-full text-xs font-bold border uppercase tracking-wider ${statusStyles[result.selection_status?.toLowerCase() || "pending"]}`}>
                   {result.selection_status || "pending"}
                 </span>
+                <Button variant="outline" size="sm" onClick={() => { sessionStorage.removeItem("forgepro_auth"); window.location.href = "/"; }} className="text-destructive border-destructive/30 hover:bg-destructive/10 px-3" title="Logout">
+                  <LogOut className="w-4 h-4" />
+                </Button>
               </div>
             </div>
           </motion.div>
