@@ -296,7 +296,6 @@ export default function InterviewPage() {
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [voiceGender, setVoiceGender] = useState<"indian_female" | "female" | "male">("female");
 
-  // 🚀 AI Topic Tracker
   const [usedQIds, setUsedQIds] = useState<Set<number>>(new Set());
   const [usedCategories, setUsedCategories] = useState<Set<string>>(new Set());
   const [currentDifficulty, setCurrentDifficulty] = useState<"easy" | "medium" | "hard">("easy");
@@ -488,17 +487,27 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation, handleForceEndInterview]);
 
-  // 🚀 UPGRADE: Center-Weighted Biometric Liveness (Detects static photos & missing faces)
+  // 🚀 UPGRADE: Anti-Stutter & Throttled Center-Weighted Face Liveness Math
   const startSecurityTelemetry = () => {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     
     let referenceImageData: ImageData | null = null;
     let lastRefTime = Date.now();
+    let lastExecutionTime = 0; 
     let staticIntervals = 0;
 
     const checkTelemetry = () => {
       if (isTerminatingRef.current) return;
+      
+      const now = Date.now();
+      // THROTTLE: Run heavy pixel math only every 250ms (4 FPS) to prevent video stuttering
+      if (now - lastExecutionTime < 250) {
+          if (!isTerminatingRef.current) securityLoopRef.current = requestAnimationFrame(checkTelemetry);
+          return;
+      }
+      lastExecutionTime = now;
+
       const isVisible = !document.hidden;
       let faces = isVisible ? 1 : 0;
       let currentLiveness = isVisible ? 99 : 15;
@@ -508,7 +517,6 @@ export default function InterviewPage() {
         try {
           ctx.drawImage(videoRef.current, 0, 0, 64, 64);
           const currentData = ctx.getImageData(0, 0, 64, 64);
-          const now = Date.now();
           
           if (!referenceImageData) { 
               referenceImageData = currentData; lastRefTime = now; 
@@ -526,7 +534,6 @@ export default function InterviewPage() {
 
                     const pxDiff = Math.abs(r - referenceImageData.data[i]) + Math.abs(g - referenceImageData.data[i+1]) + Math.abs(b - referenceImageData.data[i+2]);
                     
-                    // Center region where face MUST be (x: 16 to 48, y: 16 to 48)
                     if (x > 16 && x < 48 && y > 16 && y < 48) {
                         centerMotion += pxDiff;
                     }
@@ -538,9 +545,8 @@ export default function InterviewPage() {
 
             if (now - lastRefTime > 1000) {
                 if (avgBrightness < 10) {
-                    staticIntervals++; // Screen covered
+                    staticIntervals++; 
                 } else if (centerMotion < 800) {
-                    // Less than 800 variance means the center is totally frozen (photo) or empty background
                     staticIntervals++;
                     currentLiveness = Math.max(12, currentLiveness - 40); 
                 } else {
@@ -553,7 +559,7 @@ export default function InterviewPage() {
                 if (staticIntervals >= 3) {
                     faces = 0; currentLiveness = 12;
                     handleSecurityViolation("No active face detected in frame, or camera is frozen.");
-                    staticIntervals = -1; // Reset to allow buffer for next warning
+                    staticIntervals = -1; 
                 }
             }
           }
@@ -856,12 +862,10 @@ export default function InterviewPage() {
     }
     setCurrentDifficulty(nextDiff);
 
-    // 🚀 UPGRADE: Strict Category Sweeper (Never repeat a topic if skipped/failed)
     let nextQData = null;
     let availablePool = activeQuestions.filter((q: any) => !usedQIds.has(q.id));
     let catPool = availablePool.filter((q: any) => !usedCategories.has(q.category));
 
-    // If we exhausted all categories, reset category tracking but keep the used IDs blocked
     if (catPool.length === 0 && availablePool.length > 0) {
         setUsedCategories(new Set());
         catPool = availablePool;
@@ -959,7 +963,6 @@ export default function InterviewPage() {
 
       if (forcedTerminationReason) fullTranscript += `\n\n[SYSTEM LOG]: ${forcedTerminationReason}`;
 
-      // 🚀 UPGRADE: Time-Weighted Evaluation Penalty
       const isAborted = forcedTerminationReason && !forcedTerminationReason.includes("Time Expired") && !forcedTerminationReason.includes("Completed");
       const minutes = Math.floor(totalElapsed / 60);
       const seconds = totalElapsed % 60;
