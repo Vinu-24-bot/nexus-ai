@@ -257,13 +257,12 @@ const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | nul
 export default function InterviewPage() {
   const { sessionId } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const state = location.state as LocationState | undefined;
 
   const [fetchedData, setFetchedData] = useState<any>(null);
   const isDirectLink = !!sessionId && !state;
   const [isInitializing, setIsInitializing] = useState(isDirectLink);
-  
-  // 🚀 THE FIX: New error state instead of navigate("/")
   const [sessionError, setSessionError] = useState(false);
 
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
@@ -297,7 +296,9 @@ export default function InterviewPage() {
   const [durationMinutes, setDurationMinutes] = useState(10);
   const [voiceGender, setVoiceGender] = useState<"indian_female" | "female" | "male">("female");
 
+  // 🚀 AI Topic Tracker
   const [usedQIds, setUsedQIds] = useState<Set<number>>(new Set());
+  const [usedCategories, setUsedCategories] = useState<Set<string>>(new Set());
   const [currentDifficulty, setCurrentDifficulty] = useState<"easy" | "medium" | "hard">("easy");
   const [currentQuestion, setCurrentQuestion] = useState<InterviewQuestion | null>(null);
 
@@ -369,7 +370,6 @@ export default function InterviewPage() {
   const progress = (totalElapsed / (durationMinutes * 60)) * 100;
   const timeRemaining = Math.max(0, (durationMinutes * 60) - totalElapsed);
 
-  // 🚀 THE FIX: Handles Backend Wakeup Without Redirecting to Login!
   useEffect(() => {
     if (sessionId && !state && isInitializing) {
       const fetchSessionDetails = async () => {
@@ -488,6 +488,7 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation, handleForceEndInterview]);
 
+  // 🚀 UPGRADE: Center-Weighted Biometric Liveness (Detects static photos & missing faces)
   const startSecurityTelemetry = () => {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -508,23 +509,51 @@ export default function InterviewPage() {
           ctx.drawImage(videoRef.current, 0, 0, 64, 64);
           const currentData = ctx.getImageData(0, 0, 64, 64);
           const now = Date.now();
-          if (!referenceImageData) { referenceImageData = currentData; lastRefTime = now; } 
-          else {
-            let diff = 0; let totalBrightness = 0;
-            for (let i = 0; i < currentData.data.length; i += 4) {
-                totalBrightness += (currentData.data[i] + currentData.data[i+1] + currentData.data[i+2]) / 3;
-                diff += Math.abs(currentData.data[i] - referenceImageData.data[i]) + Math.abs(currentData.data[i+1] - referenceImageData.data[i+1]) + Math.abs(currentData.data[i+2] - referenceImageData.data[i+2]);
-            }
-            const avgBrightness = totalBrightness / (64 * 64);
-            currentLiveness = Math.min(99, Math.max(12, Math.floor((diff / 40000) * 100)));
+          
+          if (!referenceImageData) { 
+              referenceImageData = currentData; lastRefTime = now; 
+          } else {
+            let centerMotion = 0; 
+            let totalBrightness = 0;
 
-            if (now - lastRefTime > 1500) {
-                if (avgBrightness < 10) staticIntervals++; else staticIntervals = 0; 
-                referenceImageData = currentData; lastRefTime = now;
+            for (let y = 0; y < 64; y++) {
+                for (let x = 0; x < 64; x++) {
+                    const i = (y * 64 + x) * 4;
+                    const r = currentData.data[i];
+                    const g = currentData.data[i+1];
+                    const b = currentData.data[i+2];
+                    totalBrightness += (r + g + b) / 3;
+
+                    const pxDiff = Math.abs(r - referenceImageData.data[i]) + Math.abs(g - referenceImageData.data[i+1]) + Math.abs(b - referenceImageData.data[i+2]);
+                    
+                    // Center region where face MUST be (x: 16 to 48, y: 16 to 48)
+                    if (x > 16 && x < 48 && y > 16 && y < 48) {
+                        centerMotion += pxDiff;
+                    }
+                }
+            }
+            
+            const avgBrightness = totalBrightness / (64 * 64);
+            currentLiveness = Math.min(99, Math.max(12, Math.floor((centerMotion / 15000) * 100)));
+
+            if (now - lastRefTime > 1000) {
+                if (avgBrightness < 10) {
+                    staticIntervals++; // Screen covered
+                } else if (centerMotion < 800) {
+                    // Less than 800 variance means the center is totally frozen (photo) or empty background
+                    staticIntervals++;
+                    currentLiveness = Math.max(12, currentLiveness - 40); 
+                } else {
+                    staticIntervals = 0; 
+                }
+                
+                referenceImageData = currentData; 
+                lastRefTime = now;
+
                 if (staticIntervals >= 3) {
                     faces = 0; currentLiveness = 12;
-                    handleSecurityViolation("Camera is physically covered or completely dark.");
-                    staticIntervals = -2; 
+                    handleSecurityViolation("No active face detected in frame, or camera is frozen.");
+                    staticIntervals = -1; // Reset to allow buffer for next warning
                 }
             }
           }
@@ -827,24 +856,29 @@ export default function InterviewPage() {
     }
     setCurrentDifficulty(nextDiff);
 
+    // 🚀 UPGRADE: Strict Category Sweeper (Never repeat a topic if skipped/failed)
     let nextQData = null;
-    const availablePool = activeQuestions.filter((q: any) => !usedQIds.has(q.id));
-    
+    let availablePool = activeQuestions.filter((q: any) => !usedQIds.has(q.id));
+    let catPool = availablePool.filter((q: any) => !usedCategories.has(q.category));
+
+    // If we exhausted all categories, reset category tracking but keep the used IDs blocked
+    if (catPool.length === 0 && availablePool.length > 0) {
+        setUsedCategories(new Set());
+        catPool = availablePool;
+    }
+
     if (availablePool.length > 0) {
-        let pool = availablePool.filter((q: any) => {
+        let pool = catPool.filter((q: any) => {
             const diffMatch = nextDiff === "easy" 
               ? (q.difficulty === "easy" || q.difficulty?.toLowerCase().includes("basic") || q.category === "behavioral") 
               : nextDiff === "medium" 
                 ? q.difficulty === "medium" 
                 : (q.difficulty === "hard" || q.difficulty?.toLowerCase().includes("hots"));
-            
-            const catMatch = (!isSufficient || isSkipOrEmpty) ? (currentQuestion && q.category ? q.category !== currentQuestion.category : true) : true;
-            return diffMatch && catMatch;
+            return diffMatch;
         });
 
-        if (pool.length === 0) pool = availablePool.filter((q: any) => nextDiff === "easy" ? (q.difficulty === "easy" || q.difficulty?.toLowerCase().includes("basic") || q.category === "behavioral") : nextDiff === "medium" ? q.difficulty === "medium" : (q.difficulty === "hard" || q.difficulty?.toLowerCase().includes("hots")));
+        if (pool.length === 0) pool = catPool; 
         if (pool.length === 0) pool = availablePool; 
-        
         nextQData = pool[0];
     }
 
@@ -854,7 +888,10 @@ export default function InterviewPage() {
     if (isSufficient || isSkipOrEmpty) {
       setAnswers((prev) => [...prev, { questionId: introPhase ? 0 : (currentQuestion?.id || 0), transcript: totalAnswerSoFar, videoBlob: null }]);
       setAccumulatedTranscript(""); 
-      if (nextQData) setUsedQIds(prev => new Set(prev).add(nextQData.id));
+      if (nextQData) {
+        setUsedQIds(prev => new Set(prev).add(nextQData.id));
+        setUsedCategories(prev => new Set(prev).add(nextQData.category));
+      }
 
       const isTimeUp = ((durationMinutes * 60) - totalElapsed) <= 30;
 
@@ -869,7 +906,7 @@ export default function InterviewPage() {
     if (isTerminatingRef.current) return;
     await speakAndRecord(dynamicResponse);
 
-  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentDifficulty, usedQIds, activeQuestions, voiceGender, startSpeechRecognition, totalElapsed, durationMinutes, speakAndRecord]);
+  }, [isRecording, stopRecording, accumulatedTranscript, introPhase, currentQuestion, currentDifficulty, usedQIds, usedCategories, activeQuestions, voiceGender, startSpeechRecognition, totalElapsed, durationMinutes, speakAndRecord]);
 
   const finalizeInterviewAndUpload = useCallback(async (forcedTerminationReason: string = "") => {
     isTerminatingRef.current = true; 
@@ -922,21 +959,24 @@ export default function InterviewPage() {
 
       if (forcedTerminationReason) fullTranscript += `\n\n[SYSTEM LOG]: ${forcedTerminationReason}`;
 
+      // 🚀 UPGRADE: Time-Weighted Evaluation Penalty
       const isAborted = forcedTerminationReason && !forcedTerminationReason.includes("Time Expired") && !forcedTerminationReason.includes("Completed");
       const minutes = Math.floor(totalElapsed / 60);
       const seconds = totalElapsed % 60;
       
+      const completionRatio = Math.min(1.0, totalElapsed / (durationMinutes * 60));
+      const completionPercent = Math.round(completionRatio * 100);
+
       fullTranscript += `\n\n[SYSTEM_EVALUATION_DIRECTIVE]:
 - Total Session Time: ${minutes}m ${seconds}s.
 - Interview Target Duration: ${durationMinutes}m.
+- Completion Percentage: ${completionPercent}%.
 - Status: ${isAborted ? 'ENDED EARLY BY USER / ABORTED' : 'COMPLETED'}.
 - Transcription Accuracy Reminder: This transcript was generated via phonetic STT. Intelligently auto-correct any obvious technical misspellings based on the ${position} role before evaluating.
 - SCORING MANDATE: Evaluate strictly on the depth, relevancy to JD, and accuracy of the answers provided. 
-- DURATION CONTEXT: The target was ${durationMinutes}m. The candidate only completed ${minutes}m ${seconds}s. 
-- Rule 1: Apply a penalty for vague, fluff-filled answers lacking technical depth.
-- Rule 2: Reward Higher Order Thinking Skills (HOTS) - explaining 'why' and 'how'.
-- Rule 3: Do NOT artificially severe penalize the score just because it was short. Base the final score strictly and purely on the actual performance, accuracy, relevancy, and confidence demonstrated in the provided answers.
-- Rule 4 (Knowledge Gap Penalty): If the transcript shows the candidate skipped a question, said "I don't know", or gave an insufficient answer (causing the AI to move to a new topic), strictly penalize their score for that knowledge gap. Do not give them a free pass on skipped topics.`;
+- CRITICAL PENALTY RULE: The candidate only completed ${completionPercent}% of the interview. If the interview completion is under 40% AND their answers were only mediocre, basic, or 'okay', you MUST severely penalize the final score. A short interview with basic answers MUST NOT receive a 60+/100. It should be scored in the 30-45 range because they failed to demonstrate sustained competence.
+- KNOWLEDGE GAP PENALTY: If the candidate skipped a question, said "I don't know", or waffled, penalize their technical and relevance scores heavily.
+- Be highly accurate, mathematically justified, and ruthless about fluff.`;
 
       let primaryVideoFilename: string = "LIVE_SCREENING";
       const timestamp = Date.now();
@@ -994,7 +1034,6 @@ export default function InterviewPage() {
 
   const formatTime = (s: number) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
-  // 🚀 THE FIX: Handles Backend Wakeup Without Redirecting to Login!
   if (isInitializing) return <div className="min-h-screen bg-background flex items-center justify-center space-y-4 flex-col"><Loader2 className="w-12 h-12 text-primary animate-spin" /><span className="text-muted-foreground font-display text-sm tracking-widest">LOADING FORGEPRO VAULT...</span></div>;
   
   if (sessionError) {
