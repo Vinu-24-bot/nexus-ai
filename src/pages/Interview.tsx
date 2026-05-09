@@ -23,7 +23,7 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-// 🚀 Phonetic Auto-Corrector for Tech Interviews
+// 🚀 Phonetic Auto-Corrector
 const correctPhonetics = (text: string) => {
   let t = text;
   const fixes: Record<string, string> = {
@@ -249,7 +249,6 @@ const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | nul
     }
     return null;
   } catch (e) {
-    console.error("Audio mixing error. Falling back to default mic:", e);
     return stream1?.getAudioTracks()[0] || null;
   }
 };
@@ -387,7 +386,6 @@ export default function InterviewPage() {
           setFetchedData({ ...session, questions: qData.questions });
           setIsInitializing(false);
         } catch (err: any) {
-          console.error(err);
           setSessionError(true);
           toast.error("Network timeout. The security vault server is waking up.");
           setIsInitializing(false);
@@ -413,7 +411,7 @@ export default function InterviewPage() {
       if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach(t => t.stop());
       if (totalTimerRef.current) clearInterval(totalTimerRef.current);
       if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
-      if (securityLoopRef.current) cancelAnimationFrame(securityLoopRef.current);
+      if (securityLoopRef.current) clearTimeout(securityLoopRef.current);
       if (recognitionRef.current) { try { recognitionRef.current.stop(); } catch {} }
       if (turnRecorderRef.current) { try { turnRecorderRef.current.stop(); } catch {} }
     };
@@ -487,46 +485,37 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation, handleForceEndInterview]);
 
-  // 🚀 UPGRADE: Anti-Stutter & Throttled Center-Weighted Face Liveness Math
+  // 🚀 UPGRADE: Zero-Lag 1FPS Center-Weighted Liveness Math
   const startSecurityTelemetry = () => {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     
     let referenceImageData: ImageData | null = null;
-    let lastRefTime = Date.now();
-    let lastExecutionTime = 0; 
     let staticIntervals = 0;
 
     const checkTelemetry = () => {
       if (isTerminatingRef.current) return;
       
-      const now = Date.now();
-      // THROTTLE: Run heavy pixel math only every 250ms (4 FPS) to prevent video stuttering
-      if (now - lastExecutionTime < 250) {
-          if (!isTerminatingRef.current) securityLoopRef.current = requestAnimationFrame(checkTelemetry);
-          return;
-      }
-      lastExecutionTime = now;
-
       const isVisible = !document.hidden;
       let faces = isVisible ? 1 : 0;
       let currentLiveness = isVisible ? 99 : 15;
 
       if (isVisible && ctx && videoRef.current && videoRef.current.videoWidth > 0) {
-        canvas.width = 64; canvas.height = 64;
+        // Reduced resolution from 64x64 to 32x32 = 4x less CPU rendering lag
+        canvas.width = 32; canvas.height = 32;
         try {
-          ctx.drawImage(videoRef.current, 0, 0, 64, 64);
-          const currentData = ctx.getImageData(0, 0, 64, 64);
+          ctx.drawImage(videoRef.current, 0, 0, 32, 32);
+          const currentData = ctx.getImageData(0, 0, 32, 32);
           
           if (!referenceImageData) { 
-              referenceImageData = currentData; lastRefTime = now; 
+              referenceImageData = currentData;
           } else {
             let centerMotion = 0; 
             let totalBrightness = 0;
 
-            for (let y = 0; y < 64; y++) {
-                for (let x = 0; x < 64; x++) {
-                    const i = (y * 64 + x) * 4;
+            for (let y = 0; y < 32; y++) {
+                for (let x = 0; x < 32; x++) {
+                    const i = (y * 32 + x) * 4;
                     const r = currentData.data[i];
                     const g = currentData.data[i+1];
                     const b = currentData.data[i+2];
@@ -534,33 +523,32 @@ export default function InterviewPage() {
 
                     const pxDiff = Math.abs(r - referenceImageData.data[i]) + Math.abs(g - referenceImageData.data[i+1]) + Math.abs(b - referenceImageData.data[i+2]);
                     
-                    if (x > 16 && x < 48 && y > 16 && y < 48) {
+                    // Box is now 16x16 inside the 32x32 center
+                    if (x > 8 && x < 24 && y > 8 && y < 24) {
                         centerMotion += pxDiff;
                     }
                 }
             }
             
-            const avgBrightness = totalBrightness / (64 * 64);
-            currentLiveness = Math.min(99, Math.max(12, Math.floor((centerMotion / 15000) * 100)));
+            const avgBrightness = totalBrightness / 1024;
+            currentLiveness = Math.min(99, Math.max(12, Math.floor((centerMotion / 4000) * 100)));
 
-            if (now - lastRefTime > 1000) {
-                if (avgBrightness < 10) {
-                    staticIntervals++; 
-                } else if (centerMotion < 800) {
-                    staticIntervals++;
-                    currentLiveness = Math.max(12, currentLiveness - 40); 
-                } else {
-                    staticIntervals = 0; 
-                }
-                
-                referenceImageData = currentData; 
-                lastRefTime = now;
+            if (avgBrightness < 10) {
+                staticIntervals++; 
+            } else if (centerMotion < 200) {
+                // Tightened strictness for face movement detection
+                staticIntervals++;
+                currentLiveness = Math.max(12, currentLiveness - 40); 
+            } else {
+                staticIntervals = 0; 
+            }
+            
+            referenceImageData = currentData; 
 
-                if (staticIntervals >= 3) {
-                    faces = 0; currentLiveness = 12;
-                    handleSecurityViolation("No active face detected in frame, or camera is frozen.");
-                    staticIntervals = -1; 
-                }
+            if (staticIntervals >= 3) {
+                faces = 0; currentLiveness = 12;
+                handleSecurityViolation("No active face detected in frame, or camera is frozen.");
+                staticIntervals = -1; 
             }
           }
         } catch (e) {}
@@ -568,7 +556,9 @@ export default function InterviewPage() {
 
       setTelemetry({ faces, liveness: currentLiveness, lipSync: true, mask: false });
       if (!isVisible) handleSecurityViolation("Candidate switched tabs or minimized browser.");
-      if (!isTerminatingRef.current) securityLoopRef.current = requestAnimationFrame(checkTelemetry);
+      
+      // Strict 1000ms delay instead of requestAnimationFrame ensures 0 frame drops on video
+      if (!isTerminatingRef.current) securityLoopRef.current = window.setTimeout(checkTelemetry, 1000) as unknown as number;
     };
     checkTelemetry();
   };
@@ -653,7 +643,7 @@ export default function InterviewPage() {
       recorder.ondataavailable = e => { if (e.data.size > 0) turnChunksRef.current.push(e.data); };
       recorder.start();
       turnRecorderRef.current = recorder;
-    } catch (e) { console.error("Turn recording failed", e); }
+    } catch (e) {}
   };
 
   const stopTurnRecording = async (): Promise<Blob> => {
@@ -700,7 +690,21 @@ export default function InterviewPage() {
 
     const handleSpeechIntent = (text: string) => {
         if (isTerminatingRef.current) return;
-        const skipRegex = /(skip|don'?t know|no idea|move on|next question|not sure|pass|don'?t have any idea|no clue|haven'?t heard)/i;
+        const skipRegex = /\b(skip|don'?t know|no idea|move on|next question|not sure|pass|don'?t have any idea|no clue|haven'?t heard)\b/i;
+        
+        // 🚀 THE FIX: Repeat Intent Trigger
+        const repeatRegex = /\b(repeat|say that again|pardon|come again|what did you say|didn'?t hear|didn'?t catch|one more time)\b/i;
+
+        if (repeatRegex.test(text.toLowerCase()) && !isHandlingSubmitRef.current) {
+            isHandlingSubmitRef.current = true; 
+            setTimeout(() => {
+               if (isTerminatingRef.current) return;
+               const btn = document.getElementById("auto-submit-btn");
+               if (btn) { btn.dataset.reason = "REPEAT"; btn.click(); }
+            }, 300);
+            return;
+        }
+
         if (skipRegex.test(text.toLowerCase()) && !isHandlingSubmitRef.current) {
             isHandlingSubmitRef.current = true; 
             setTimeout(() => {
@@ -760,7 +764,7 @@ export default function InterviewPage() {
     };
     
     try { recognition.start(); recognitionRef.current = recognition; } 
-    catch(e) { console.error("Native STT Failed", e); }
+    catch(e) {}
   }, [accumulatedTranscript]);
 
   const stopRecording = useCallback(async (): Promise<string> => {
@@ -822,6 +826,17 @@ export default function InterviewPage() {
     if (isTerminatingRef.current) return; 
 
     let finalChunk = newTranscriptChunk.trim();
+
+    // 🚀 THE FIX: Intercept "Repeat" reason and just re-ask the question without penalizing or advancing.
+    if (reason === "REPEAT") {
+        setAccumulatedTranscript("");
+        const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
+        const repeatText = "Sure, I can repeat that. " + currentQText;
+        if (isTerminatingRef.current) return;
+        await speakAndRecord(repeatText);
+        return;
+    }
+
     if (reason === "OVER_TIME_LIMIT") finalChunk += " [SYSTEM: OVER_TIME_LIMIT]";
     else if (reason === "MIC_ERROR") finalChunk += " [SYSTEM: MIC_ERROR]";
     else if (reason === "SILENCE" && finalChunk.length === 0 && accumulatedTranscript.length === 0) finalChunk = "<SILENCE>";
@@ -916,7 +931,7 @@ export default function InterviewPage() {
     isTerminatingRef.current = true; 
     
     if (totalTimerRef.current) clearInterval(totalTimerRef.current);
-    if (securityLoopRef.current) cancelAnimationFrame(securityLoopRef.current);
+    if (securityLoopRef.current) clearTimeout(securityLoopRef.current);
     if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     audioQueue.cancel(); 
     
