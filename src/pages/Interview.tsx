@@ -23,7 +23,7 @@ interface AnswerRecord { questionId: number; transcript: string; videoBlob: Blob
 
 const fadeUp = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.4 } } };
 
-// 🚀 UPGRADE: Phonetic Auto-Corrector for Tech Interviews
+// 🚀 Phonetic Auto-Corrector for Tech Interviews
 const correctPhonetics = (text: string) => {
   let t = text;
   const fixes: Record<string, string> = {
@@ -257,12 +257,14 @@ const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | nul
 export default function InterviewPage() {
   const { sessionId } = useParams();
   const location = useLocation();
-  const navigate = useNavigate();
   const state = location.state as LocationState | undefined;
 
   const [fetchedData, setFetchedData] = useState<any>(null);
   const isDirectLink = !!sessionId && !state;
   const [isInitializing, setIsInitializing] = useState(isDirectLink);
+  
+  // 🚀 THE FIX: New error state instead of navigate("/")
+  const [sessionError, setSessionError] = useState(false);
 
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [introPhase, setIntroPhase] = useState(true);
@@ -367,10 +369,12 @@ export default function InterviewPage() {
   const progress = (totalElapsed / (durationMinutes * 60)) * 100;
   const timeRemaining = Math.max(0, (durationMinutes * 60) - totalElapsed);
 
+  // 🚀 THE FIX: Handles Backend Wakeup Without Redirecting to Login!
   useEffect(() => {
     if (sessionId && !state && isInitializing) {
       const fetchSessionDetails = async () => {
         try {
+          setSessionError(false);
           const res = await fetch(`${API_URL}/sessions/${sessionId}`);
           if (!res.ok) throw new Error("Invalid or expired session link.");
           const session = await res.json();
@@ -382,14 +386,17 @@ export default function InterviewPage() {
           const qData = await qRes.json();
           
           setFetchedData({ ...session, questions: qData.questions });
+          setIsInitializing(false);
         } catch (err: any) {
-          toast.error(err.message);
-          navigate("/"); 
-        } finally { setIsInitializing(false); }
+          console.error(err);
+          setSessionError(true);
+          toast.error("Network timeout. The security vault server is waking up.");
+          setIsInitializing(false);
+        }
       };
       fetchSessionDetails();
     }
-  }, [sessionId, state, navigate, isInitializing]);
+  }, [sessionId, state, isInitializing]);
 
   useEffect(() => {
     if (interviewStep === "submitting") {
@@ -987,7 +994,25 @@ export default function InterviewPage() {
 
   const formatTime = (s: number) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
+  // 🚀 THE FIX: Handles Backend Wakeup Without Redirecting to Login!
   if (isInitializing) return <div className="min-h-screen bg-background flex items-center justify-center space-y-4 flex-col"><Loader2 className="w-12 h-12 text-primary animate-spin" /><span className="text-muted-foreground font-display text-sm tracking-widest">LOADING FORGEPRO VAULT...</span></div>;
+  
+  if (sessionError) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center space-y-6">
+        <CandidateHeader isLive={false} strikes={0} />
+        <ShieldAlert className="w-16 h-16 text-destructive mt-16" />
+        <h2 className="text-2xl font-bold text-foreground text-center px-4">Vault Connection Timeout</h2>
+        <p className="text-muted-foreground text-center max-w-md">
+          The secure enterprise server is currently waking up from standby. Please retry the connection to enter your interview room.
+        </p>
+        <Button onClick={() => setIsInitializing(true)} className="bg-primary text-primary-foreground h-12 px-8">
+          Retry Connection
+        </Button>
+      </div>
+    );
+  }
+
   if (!state && !fetchedData) return null; 
 
   if (interviewStep === "submitting") {
