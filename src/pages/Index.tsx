@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { 
   Lock, User, Key, ArrowRight, ShieldCheck, 
-  Brain, Activity, Video, Globe, Zap, BarChart3, Target
+  Brain, Activity, Video, Globe, Zap, BarChart3, Target, ArrowLeft
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,7 +91,17 @@ function AuthScreen({ onLogin }: { onLogin: () => void }) {
           </motion.div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2, duration: 0.5 }} className="w-full max-w-md">
+        <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2, duration: 0.5 }} className="w-full max-w-md relative z-10">
+          
+          {/* 🚀 THE NEW GO BACK BUTTON FOR FORGE PRO */}
+          <button 
+            onClick={() => window.location.href = "https://bats-enterprise-portal.vercel.app"}
+            className="flex items-center text-sm font-semibold text-muted-foreground hover:text-accent transition-colors mb-5 ml-2 group"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2 group-hover:-translate-x-1 transition-transform" /> 
+            Return to BATS.ai Engine
+          </button>
+
           <div className="glass rounded-2xl p-8 border border-primary/20 shadow-[0_0_50px_rgba(0,240,255,0.05)] relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50 animate-[scan_2s_linear_infinite]" />
             <div className="text-center mb-8">
