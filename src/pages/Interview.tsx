@@ -14,7 +14,7 @@ import { toast } from "sonner";
 const API_BASE = import.meta.env.VITE_API_URL || 
   (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
     ? "http://localhost:8000" 
-    : "https://bats-ai-backend.onrender.com");
+    : "https://vinaykumar26-inoptra.hf.space");
 const API_URL = API_BASE + "/api";
 
 interface InterviewQuestion { id: number; question: string; category: string; difficulty: string; }
@@ -218,9 +218,6 @@ const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | nul
     const dest = ctx.createMediaStreamDestination();
     let hasAudio = false;
 
-    (window as any).__forgepro_audio_ctx = ctx;
-    (window as any).__forgepro_audio_sources = [];
-
     if (stream1 && stream1.getAudioTracks().length > 0) {
       const micStream = new MediaStream([stream1.getAudioTracks()[0]]);
       const source1 = ctx.createMediaStreamSource(micStream);
@@ -228,7 +225,6 @@ const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | nul
       gain1.gain.value = 1.5; 
       source1.connect(gain1);
       gain1.connect(dest);
-      (window as any).__forgepro_audio_sources.push(source1, gain1);
       hasAudio = true;
     }
 
@@ -239,7 +235,6 @@ const mixAudioStreams = (stream1: MediaStream | null, stream2: MediaStream | nul
       gain2.gain.value = 1.0; 
       source2.connect(gain2);
       gain2.connect(dest);
-      (window as any).__forgepro_audio_sources.push(source2, gain2);
       hasAudio = true;
     }
 
@@ -485,7 +480,6 @@ export default function InterviewPage() {
     };
   }, [interviewStep, handleSecurityViolation, handleForceEndInterview]);
 
-  // 🚀 UPGRADE: Zero-Lag 1FPS Center-Weighted Liveness Math
   const startSecurityTelemetry = () => {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -501,7 +495,6 @@ export default function InterviewPage() {
       let currentLiveness = isVisible ? 99 : 15;
 
       if (isVisible && ctx && videoRef.current && videoRef.current.videoWidth > 0) {
-        // Reduced resolution from 64x64 to 32x32 = 4x less CPU rendering lag
         canvas.width = 32; canvas.height = 32;
         try {
           ctx.drawImage(videoRef.current, 0, 0, 32, 32);
@@ -523,7 +516,6 @@ export default function InterviewPage() {
 
                     const pxDiff = Math.abs(r - referenceImageData.data[i]) + Math.abs(g - referenceImageData.data[i+1]) + Math.abs(b - referenceImageData.data[i+2]);
                     
-                    // Box is now 16x16 inside the 32x32 center
                     if (x > 8 && x < 24 && y > 8 && y < 24) {
                         centerMotion += pxDiff;
                     }
@@ -536,7 +528,6 @@ export default function InterviewPage() {
             if (avgBrightness < 10) {
                 staticIntervals++; 
             } else if (centerMotion < 200) {
-                // Tightened strictness for face movement detection
                 staticIntervals++;
                 currentLiveness = Math.max(12, currentLiveness - 40); 
             } else {
@@ -557,7 +548,6 @@ export default function InterviewPage() {
       setTelemetry({ faces, liveness: currentLiveness, lipSync: true, mask: false });
       if (!isVisible) handleSecurityViolation("Candidate switched tabs or minimized browser.");
       
-      // Strict 1000ms delay instead of requestAnimationFrame ensures 0 frame drops on video
       if (!isTerminatingRef.current) securityLoopRef.current = window.setTimeout(checkTelemetry, 1000) as unknown as number;
     };
     checkTelemetry();
@@ -666,6 +656,7 @@ export default function InterviewPage() {
     
     startTurnRecording(); 
 
+    // 🚀 UPGRADE: Extended Watchdog Timers to prevent premature termination
     if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     watchdogIntervalRef.current = setInterval(() => {
       if (isTerminatingRef.current || !isRecordingRef.current || isHandlingSubmitRef.current) return;
@@ -674,15 +665,15 @@ export default function InterviewPage() {
       const timeSinceLastSpeech = now - lastSpeechRef.current;
       const hasSpoken = liveTranscriptRef.current.trim().length > 0 || accumulatedTranscript.trim().length > 0;
 
-      if (timeSinceStart > 120000) { 
+      if (timeSinceStart > 300000) {  // 5 Minutes max per answer
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "OVER_TIME_LIMIT"; btn.click(); }
       } 
-      else if (hasSpoken && timeSinceLastSpeech > 4500) { 
+      else if (hasSpoken && timeSinceLastSpeech > 8000) { // 8 seconds of silence after speaking
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
-      else if (!hasSpoken && timeSinceLastSpeech > 15000) { 
+      else if (!hasSpoken && timeSinceLastSpeech > 45000) { // 45 seconds of initial silence (Let them think!)
         const btn = document.getElementById("auto-submit-btn");
         if (btn) { btn.dataset.reason = "SILENCE"; btn.click(); }
       }
@@ -691,8 +682,6 @@ export default function InterviewPage() {
     const handleSpeechIntent = (text: string) => {
         if (isTerminatingRef.current) return;
         const skipRegex = /\b(skip|don'?t know|no idea|move on|next question|not sure|pass|don'?t have any idea|no clue|haven'?t heard)\b/i;
-        
-        // 🚀 THE FIX: Repeat Intent Trigger
         const repeatRegex = /\b(repeat|say that again|pardon|come again|what did you say|didn'?t hear|didn'?t catch|one more time)\b/i;
 
         if (repeatRegex.test(text.toLowerCase()) && !isHandlingSubmitRef.current) {
@@ -827,7 +816,6 @@ export default function InterviewPage() {
 
     let finalChunk = newTranscriptChunk.trim();
 
-    // 🚀 THE FIX: Intercept "Repeat" reason and just re-ask the question without penalizing or advancing.
     if (reason === "REPEAT") {
         setAccumulatedTranscript("");
         const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
@@ -845,25 +833,34 @@ export default function InterviewPage() {
     setAccumulatedTranscript(totalAnswerSoFar);
     const currentQText = introPhase ? `Could you please introduce yourself?` : currentQuestion?.question || "";
 
-    const isSkipOrEmpty = reason === "INTENT" || totalAnswerSoFar.length < 20;
+    // 🚀 UPGRADE: Skip Detection & Backend Bypass
+    const isExplicitSkip = /don'?t know|skip|next|no idea|pass|no clue/i.test(totalAnswerSoFar);
+    const isSkipOrEmpty = reason === "INTENT" || totalAnswerSoFar.length < 15 || isExplicitSkip || finalChunk === "<SILENCE>";
+    
     let nextDiff = currentDifficulty;
     let isSufficient = true;
     let dynamicResponse = "";
 
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000); 
-        const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: "Determine transition..." }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        const ackData = await ackRes.json();
-        dynamicResponse = ackData.response_text || "";
-        isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
-    } catch (err) { 
-        dynamicResponse = isSkipOrEmpty ? "No problem, let's move to something else." : "Understood."; 
+    if (isSkipOrEmpty) {
+        // 🔥 Bypass the Backend completely so it doesn't twist the question!
+        dynamicResponse = "Not a problem at all, let's move on to a completely different topic.";
+        isSufficient = false;
+    } else {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000); 
+            const ackRes = await fetch(`${API_URL}/acknowledge-answer`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: currentQText, answer: totalAnswerSoFar, next_question: "Determine transition..." }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            const ackData = await ackRes.json();
+            dynamicResponse = ackData.response_text || "Understood.";
+            isSufficient = ackData.is_sufficient !== undefined ? ackData.is_sufficient : true;
+        } catch (err) { 
+            dynamicResponse = "Understood."; 
+        }
     }
 
     if (isTerminatingRef.current) return;
@@ -879,11 +876,14 @@ export default function InterviewPage() {
 
     let nextQData = null;
     let availablePool = activeQuestions.filter((q: any) => !usedQIds.has(q.id));
-    let catPool = availablePool.filter((q: any) => !usedCategories.has(q.category));
+    
+    // 🚀 UPGRADE: Force strict category variation (no repeating topics)
+    let catPool = availablePool.filter((q: any) => !usedCategories.has(q.category) && q.category !== currentQuestion?.category);
 
     if (catPool.length === 0 && availablePool.length > 0) {
         setUsedCategories(new Set());
-        catPool = availablePool;
+        catPool = availablePool.filter((q: any) => q.category !== currentQuestion?.category);
+        if (catPool.length === 0) catPool = availablePool;
     }
 
     if (availablePool.length > 0) {
