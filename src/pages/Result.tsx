@@ -21,7 +21,7 @@ import { toast } from "sonner";
 const API_BASE = import.meta.env.VITE_API_URL || 
   (typeof window !== 'undefined' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") 
     ? "http://localhost:8000" 
-    : "https://bats-ai-backend.onrender.com");
+    : "https://vinaykumar26-inoptra.hf.space");
 const API_URL = `${API_BASE}/api`;
 
 const fadeUp = {
@@ -197,6 +197,7 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
   return (
     <div ref={containerRef} className="relative group w-full bg-black rounded-lg overflow-hidden flex flex-col items-center justify-center shadow-inner border border-border/50">
       
+      {/* 🚀 FIXED: Removed crossOrigin="anonymous" to allow Meet/Teams screen sharing to capture audio perfectly! */}
       <video 
         ref={videoRef} 
         src={src} 
@@ -205,7 +206,6 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
         onTimeUpdate={handleTimeUpdate} 
         onError={() => setHasError(true)} 
         preload="auto"
-        crossOrigin="anonymous"
       />
       
       {!isPlaying && (
@@ -279,7 +279,6 @@ const ForgeProVideoPlayer = ({ src, fallbackDuration }: { src: string, fallbackD
               </select>
             </div>
             
-            {/* 🚀 INJECTED: Asynchronous Blob Fetcher to force local download instead of new tab */}
             <button 
               onClick={async (e) => {
                 e.preventDefault();
@@ -399,22 +398,17 @@ export default function ResultPage() {
     return `
       <div style="text-align: center; width: 100%; display: flex; justify-content: center; align-items: center;">
         <svg width="250" height="250" viewBox="0 0 240 240" style="display: block;">
-          <!-- Radar Web -->
           <polygon points="120,40 200,120 120,200 40,120" fill="none" stroke="#cbd5e1" stroke-width="1"/>
           <polygon points="120,60 180,120 120,180 60,120" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/>
           <polygon points="120,80 160,120 120,160 80,120" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/>
           <polygon points="120,100 140,120 120,140 100,120" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="2 2"/>
-          <!-- Axes -->
           <line x1="120" y1="40" x2="120" y2="200" stroke="#cbd5e1" stroke-width="1"/>
           <line x1="40" y1="120" x2="200" y2="120" stroke="#cbd5e1" stroke-width="1"/>
-          <!-- Data Polygon -->
           <polygon points="${ptT} ${ptR} ${ptC} ${ptCf}" fill="rgba(0, 180, 216, 0.25)" stroke="#00b4d8" stroke-width="2.5"/>
-          <!-- Dots -->
           <circle cx="120" cy="${120 - t * 0.8}" r="4.5" fill="#00b4d8" />
           <circle cx="${120 + r * 0.8}" cy="120" r="4.5" fill="#00b4d8" />
           <circle cx="120" cy="${120 + c * 0.8}" r="4.5" fill="#00b4d8" />
           <circle cx="${120 - cf * 0.8}" cy="120" r="4.5" fill="#00b4d8" />
-          <!-- Labels -->
           <text x="120" y="30" font-family="sans-serif" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">Technical</text>
           <text x="205" y="124" font-family="sans-serif" font-size="11" font-weight="bold" fill="#334155" text-anchor="start">Relevance</text>
           <text x="120" y="218" font-family="sans-serif" font-size="11" font-weight="bold" fill="#334155" text-anchor="middle">Communication</text>
@@ -477,12 +471,10 @@ export default function ResultPage() {
         <div class="section-block">
           <h2>Performance Dashboard</h2>
           <div class="dashboard-container">
-            <!-- Radar Chart -->
             <div style="width: 260px;">
               ${getRadarSVG(result.scores)}
             </div>
             
-            <!-- Exact 2x2 Grid for Score Rings -->
             <div class="rings-container">
               ${getRingSVG(result.scores.technical_proficiency, "Technical", "#14b8a6")}
               ${getRingSVG(result.scores.relevance_to_jd, "Relevance", "#8b5cf6")}
@@ -495,7 +487,6 @@ export default function ResultPage() {
           </div>
         </div>
 
-        <!-- 🛡️ INJECTED: Analysis Details (Vocal Sentiment & Readiness Level) -->
         <div class="section-block">
           <h2>Analysis Details</h2>
           <div style="display: flex; gap: 20px;">
@@ -526,7 +517,6 @@ export default function ResultPage() {
           </ul>
         </div>
 
-        <!-- 🛡️ INJECTED: Suggested Follow-Up Questions -->
         <div class="section-block">
           <h2>Suggested Follow-Up Questions</h2>
           <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 15px;">
